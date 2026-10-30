@@ -1,9 +1,17 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
+import {mkdtempSync,writeFileSync,rmSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import path from 'node:path';
+import {chromium} from 'playwright-core';
 import { createBrowserApi } from './node-repl/browser-cdp.mjs';
 import { WorkerJavaScriptSession } from './node-repl/open-computer-use-repl.mjs';
 if (!process.env.OPEN_COMPUTER_USE_CDP_URL) throw new Error('Set OPEN_COMPUTER_USE_CDP_URL to a disposable browser debugging origin');
 const server = createServer((req, res) => {res.setHeader('Content-Type', 'text/html');
+if (req.url === '/files') {
+  res.end(`<html><body><label>Single upload<input type="file" onchange="document.getElementById('file-result').textContent=Array.from(this.files).map(f=>f.name).join(',')||'empty'"></label><label>Multiple upload<input type="file" multiple onchange="document.getElementById('file-result').textContent=Array.from(this.files).map(f=>f.name).join(',')||'empty'"></label><p id="file-result">empty</p></body></html>`);
+  return;
+}
 if (req.url === '/redirect') {res.writeHead(302,{Location:'/arrived'});res.end();return;}
 if (req.url === '/slow-navigation') {
   res.write('<html><body><h1>Slow navigation</h1>');
@@ -37,6 +45,9 @@ async function visibility(tabId) {
     ws.addEventListener('message',event=>{const message=JSON.parse(event.data);if(message.id===1){clearTimeout(timer);ws.close();message.error?reject(new Error(message.error.message)):resolve(message.result.result.value);}});
   });
 }
+const fileDirectory = mkdtempSync(path.join(tmpdir(),'ocu-filechooser-'));
+const fileA = path.join(fileDirectory,'a.txt'), fileB = path.join(fileDirectory,'b.txt');
+writeFileSync(fileA,'first fixture');writeFileSync(fileB,'second fixture');
 let tab;
 try {
   assert.equal((await api.listBrowsers({emit:false}))[0].type, 'cdp');
@@ -246,6 +257,64 @@ try {
     assert.match(result.content.at(-1).text,/timed out/);
     assert.equal((await navigationWorker.run('nodeRepl.write(42)')).content.at(-1).text,'42');
   } finally {await navigationWorker.close();}
+  await tab.goto(url.replace('/first','/files'));
+  await tab.playwright.waitForLoadState({state:'load'});
+  let pendingChooser = tab.playwright.waitForEvent('filechooser',{timeoutMs:5000});
+  await tab.playwright.getByLabel('Single upload').click();
+  let chooser = await pendingChooser;
+  assert.equal(chooser.isMultiple(),false);
+  await assert.rejects(chooser.setFiles('relative.txt'),/absolute/);
+  await assert.rejects(chooser.setFiles([fileA,fileB]),/only one/);
+  await chooser.setFiles(fileA);
+  assert.equal(await tab.playwright.getByText('a.txt',{exact:true}).count(),1);
+  await assert.rejects(chooser.setFiles(fileB),/already consumed/);
+  const fileState = await tab.getAXState({emit:false});
+  pendingChooser = tab.playwright.waitForEvent('filechooser',{timeoutMs:5000});
+  await tab.click(find(fileState,'button','Multiple upload'));
+  chooser = await pendingChooser;
+  assert.equal(chooser.isMultiple(),true);
+  await chooser.setFiles([fileA,fileB]);
+  assert.equal(await tab.playwright.getByText('a.txt,b.txt',{exact:true}).count(),1);
+  pendingChooser = tab.playwright.waitForEvent('filechooser',{timeoutMs:5000});
+  await tab.playwright.getByLabel('Multiple upload').click();
+  await (await pendingChooser).setFiles([]);
+  assert.equal(await tab.playwright.getByText('empty',{exact:true}).count(),1);
+  await assert.rejects(tab.playwright.waitForEvent('filechooser',{timeoutMs:100}),/Timeout/);
+  const fileWorker = new WorkerJavaScriptSession({native:{async request(){throw new Error('Native not used');}}});
+  try {
+    let result = await fileWorker.run(`var ft = await cua.getTab(${JSON.stringify(tab.id)}); var pendingFile = ft.playwright.waitForEvent("filechooser",{timeoutMs:5000}); await ft.playwright.getByLabel("Single upload").click(); var fileHandle=await pendingFile; nodeRepl.write(fileHandle.isMultiple());`);
+    assert.equal(result.isError,false,JSON.stringify(result.content));
+    assert.equal(result.content.at(-1).text,'false');
+    result = await fileWorker.run(`await fileHandle.setFiles(${JSON.stringify(fileB)}); nodeRepl.write(await ft.playwright.getByText("b.txt",{exact:true}).count());`);
+    assert.equal(result.isError,false,JSON.stringify(result.content));
+    assert.equal(result.content.at(-1).text,'1');
+    result = await fileWorker.run('await ft.playwright.waitForEvent("filechooser",{timeoutMs:0});',500);
+    assert.equal(result.isError,true);
+    assert.match(result.content.at(-1).text,/timed out/);
+    result = await fileWorker.run(`var ft = await cua.getTab(${JSON.stringify(tab.id)}); var pendingFile=ft.playwright.waitForEvent("filechooser",{timeoutMs:5000}); await ft.playwright.getByLabel("Single upload").click(); var fileHandle=await pendingFile;`);
+    assert.equal(result.isError,false,JSON.stringify(result.content));
+    await fileWorker.reset();
+    result = await fileWorker.run(`var ft = await cua.getTab(${JSON.stringify(tab.id)}); var pendingFile=ft.playwright.waitForEvent("filechooser",{timeoutMs:5000}); await ft.playwright.getByLabel("Single upload").click(); await (await pendingFile).setFiles(${JSON.stringify(fileA)}); nodeRepl.write(await ft.playwright.getByText("a.txt",{exact:true}).count());`);
+    assert.equal(result.isError,false,JSON.stringify(result.content));
+    assert.equal(result.content.at(-1).text,'1');
+  } finally {await fileWorker.close();}
+  pendingChooser = tab.playwright.waitForEvent('filechooser',{timeoutMs:5000});
+  await tab.playwright.getByLabel('Single upload').click();
+  await assert.rejects((await pendingChooser).setFiles(path.join(fileDirectory,'missing.txt')),/ENOENT|no such file/i);
+  assert.equal(await tab.playwright.getByText('a.txt',{exact:true}).count(),1);
+  const observerBrowser = await chromium.connectOverCDP(process.env.OPEN_COMPUTER_USE_CDP_URL,{noDefaults:true});
+  try {
+    const observedPage = observerBrowser.contexts().flatMap(context=>context.pages()).find(page=>page.url()===url.replace('/first','/files'));
+    const observer = await observedPage.context().newCDPSession(observedPage);
+    let intercepted = 0;
+    observer.on('Page.fileChooserOpened',()=>intercepted++);
+    try {
+      await observer.send('Page.enable');
+      await tab.playwright.getByLabel('Single upload').click();
+      await observer.send('Page.disable');
+      assert.equal(intercepted,0,'file chooser interception leaked after error/reset');
+    } finally {await observer.detach();}
+  } finally {await observerBrowser.close();}
   await tab.goto(url.replace('/first','/pointer'));
   await assert.rejects(tab.click([50,40]), /fresh screenshot/);
   const pointerImage = await tab.getScreenshot({emit:false});
@@ -275,9 +344,10 @@ try {
   await assert.rejects(tab.click(pixel(50,40)), /geometry changed/);
   await tab.close();
   await assert.rejects(tab.getAXState(), /no longer available/);
-  console.log('PASS browser inventory, create/bind, AX, PNG, click/type/key/paste/scroll/setValue/selectText/coordinate-click/drag/scroll/playwright/cancellation/navigation-waits, stale-index rejection, navigation/history/reload, close, worker inventory failure isolation');
+  console.log('PASS browser inventory, create/bind, AX, PNG, click/type/key/paste/scroll/setValue/selectText/coordinate-click/drag/scroll/playwright/cancellation/navigation-waits/filechooser, stale-index rejection, navigation/history/reload, close, worker inventory failure isolation');
 } finally {
   if (tab && (await api.listTabs({emit:false})).some(item=>item.id===tab.id)) await tab.close();
+  rmSync(fileDirectory,{recursive:true,force:true});
   server.closeAllConnections();
   await new Promise(resolve => server.close(resolve));
 }

@@ -1,4 +1,10 @@
+import { isAbsolute } from "node:path";
+
 export const PLAYWRIGHT_VERSION = "1.64.1";
+const eventBarriers = new Map();
+export async function waitForBrowserEventReady(endpoint, targetId) {
+  await eventBarriers.get(`${endpoint}|${targetId}`)?.ready;
+}
 
 export function createPlaywrightApi(endpoint, targetId, invalidate, focusLease) {
   const recipes = new WeakMap();
@@ -9,7 +15,20 @@ export function createPlaywrightApi(endpoint, targetId, invalidate, focusLease) 
   async function invoke(path, method, args) {
     const {chromium} = await import("playwright-core");
     const browser = await chromium.connectOverCDP(endpoint(), {timeout:10_000, noDefaults:true});
-    let focusSession, emulatedFocus = false, lease;
+    let focusSession, emulatedFocus = false, lease, retained = false, intercepting = false, closing;
+    const cleanup = () => closing ??= (async () => {
+      try {
+        if (intercepting) await focusSession.send("Page.setInterceptFileChooserDialog", {enabled:false});
+      } finally {
+        try {
+          if (lease !== undefined) await focusLease({action:"release", lease});
+          else if (emulatedFocus) await focusSession.send("Emulation.setFocusEmulationEnabled", {enabled:false});
+        } finally {
+          try { if (focusSession) await focusSession.detach(); }
+          finally { await browser.close(); }
+        }
+      }
+    })();
     try {
       let page;
       for (const context of browser.contexts()) {
@@ -38,6 +57,7 @@ export function createPlaywrightApi(endpoint, targetId, invalidate, focusLease) 
       };
       const locator = resolve(path);
       if (actions.includes(method)) {
+        await waitForBrowserEventReady(endpoint(), targetId);
         // Background CDP tabs need virtual focus for Playwright's frame-based stability check.
         if (focusLease) lease = await focusLease({action:"acquire", targetId});
         else {
@@ -47,6 +67,32 @@ export function createPlaywrightApi(endpoint, targetId, invalidate, focusLease) 
         invalidate();
       }
       try {
+        if (method === "filechooser") {
+          const [options, ready, done] = args;
+          const waiting = page.waitForEvent("filechooser", {timeout:options.timeoutMs ?? 10_000});
+          waiting.catch(() => {});
+          intercepting = true;
+          await focusSession.send("Page.setInterceptFileChooserDialog", {enabled:true});
+          ready();
+          const chooser = await waiting;
+          const multiple = chooser.isMultiple();
+          let consumed = false;
+          retained = true;
+          return Object.freeze({
+            isMultiple() { return multiple; },
+            async setFiles(files, fileOptions = {}) {
+              if (consumed) throw new Error("File chooser already consumed");
+              const paths = typeof files === "string" ? [files] : files;
+              if (!Array.isArray(paths) || paths.some(file => typeof file !== "string" || !isAbsolute(file))) throw new Error("setFiles requires absolute file paths");
+              if (!multiple && paths.length > 1) throw new Error("File chooser accepts only one file");
+              validateWaitOptions(fileOptions, ["timeoutMs"]);
+              consumed = true;
+              invalidate();
+              try { await chooser.setFiles(paths, {timeout:fileOptions.timeoutMs ?? 10_000}); }
+              finally { try { await cleanup(); } finally { done(); } }
+            },
+          });
+        }
         if (method === "expectNavigation") {
           const [action, options] = args;
           const timeout = options.timeoutMs ?? 10_000;
@@ -76,17 +122,11 @@ export function createPlaywrightApi(endpoint, targetId, invalidate, focusLease) 
       }
       finally { if (actions.includes(method)) invalidate(); }
     } finally {
-      // Closing a CDP-attached Playwright Browser disconnects; existing tabs survive.
-      try {
-        if (lease !== undefined) await focusLease({action:"release", lease});
-        else if (emulatedFocus) await focusSession.send("Emulation.setFocusEmulationEnabled", {enabled:false});
-      }
-      finally {
-        try { if (focusSession) await focusSession.detach(); }
-        finally { await browser.close(); }
-      }
+      // Event handles keep the attached connection until their one-shot operation finishes.
+      if (!retained) await cleanup();
     }
   }
+
   function binding(path = []) {
     const api = {};
     for (const method of path.length ? chains : selectors) {
@@ -94,6 +134,21 @@ export function createPlaywrightApi(endpoint, targetId, invalidate, focusLease) 
     }
     if (!path.length) {
       api.domSnapshot = () => invoke([], "domSnapshot", []);
+      api.waitForEvent = (event, options = {}) => {
+        if (event !== "filechooser") throw new Error(`Unsupported browser event: ${event}`);
+        validateWaitOptions(options, ["timeoutMs"]);
+        const key = `${endpoint()}|${targetId}`;
+        if (eventBarriers.has(key)) throw new Error("A file chooser is already pending for this tab");
+        let resolve, reject;
+        const ready = new Promise((yes,no) => {resolve=yes;reject=no;});
+        ready.catch(() => {});
+        const entry = {ready};
+        eventBarriers.set(key,entry);
+        const done = () => {if(eventBarriers.get(key) === entry) eventBarriers.delete(key);};
+        const pending = invoke([], "filechooser", [{...options}, resolve, done]).catch(error => {reject(error);done();throw error;});
+        pending.catch(() => {});
+        return pending;
+      };
       api.expectNavigation = (action, options = {}) => {
         if (typeof action !== "function") throw new Error("expectNavigation requires an action callback");
         validateWaitOptions(options, ["timeoutMs", "url", "waitUntil"]);

@@ -1,4 +1,4 @@
-import { createPlaywrightApi } from "./browser-playwright.mjs";
+import { createPlaywrightApi, waitForBrowserEventReady } from "./browser-playwright.mjs";
 
 export function screenshotPoint(point, image) {
   if (!Array.isArray(point) || point.length !== 2 || !point.every(Number.isFinite)) throw new Error("Coordinates must be two finite screenshot pixels");
@@ -163,7 +163,7 @@ Chain locator/filter({hasText})/nth/first/last; read count/innerText/textContent
 act with click/dblclick/fill/press/check/uncheck/setChecked/selectOption/hover/scrollIntoViewIfNeeded.
 Playwright resolves fresh elements and waits for actionability; ambiguous matches fail. Default action timeout is 10 seconds.
 Navigation waits: tab.playwright.expectNavigation(async action, {url?,waitUntil?,timeoutMs?}), waitForURL(url, {waitUntil?,timeoutMs?}), waitForLoadState({state?,timeoutMs?}). expectNavigation installs a main-frame watcher before running the action and returns its result after navigation.
-Playwright actions invalidate prior AX and screenshot indices. Read current state afterwards. Formatted paste remains unsupported.`;
+Playwright actions invalidate prior AX and screenshot indices. Read current state afterwards. File chooser events: start tab.playwright.waitForEvent("filechooser", {timeoutMs?}) before clicking, then await the handle and use isMultiple() / setFiles(absolutePaths, {timeoutMs?}). The handle is one-shot; downloads and formatted paste remain unsupported.`;
 
 export function createBrowserApi(activeOutput, environment = process.env, focusLease) {
   function endpoint() {
@@ -205,6 +205,7 @@ export function createBrowserApi(activeOutput, environment = process.env, focusL
     };
     const command = (method, params) => operate(send => send(method, params));
     const input = operation => operate(async send => {
+      await waitForBrowserEventReady(endpoint().href, target.id);
       try { return await operation(send); }
       finally { capture = undefined; }
     });

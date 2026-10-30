@@ -91,7 +91,7 @@ extension transports and in-app browser integration remain open work. Native app
 Each inventory can fail independently. `cua.listApps()` only queries native apps.
 Unconfigured browser discovery returns an empty list. Unsupported browser IDs,
 creation options and navigation protocols fail explicitly. Commands and discovery
-have 10-second timeouts; each operation closes its CDP connection. Tabs survive
+have 10-second timeouts; ordinary commands close their CDP connection after use; file chooser handles retain an attached connection until consumed. Tabs survive
 REPL resets. Navigation commands dispatch navigation; read state afterwards and
 verify that the requested content is present before continuing.
 
@@ -142,8 +142,9 @@ with nodeRepl.write; it does not emit automatically.
 
 Locators resolve again for each operation, including after navigation, and retain
 Playwright's actionability checks and strict matching. The default operation timeout
-is 10 seconds; `timeoutMs` maps to Playwright's timeout. Each operation connects to
-the exact CDP target and disconnects afterwards, preserving browser tabs. Action
+is 10 seconds; `timeoutMs` maps to Playwright's timeout. Each ordinary operation connects to
+the exact CDP target and disconnects afterwards, preserving browser tabs. File
+chooser handles retain their event connection until consumed. Action
 operations temporarily emulate focus for the target's frame-based stability
 checks and explicitly disable that emulation during cleanup. The page's internal
 focus can change as a result of input. Success and failure cleanup were checked
@@ -151,7 +152,7 @@ against background-page visibility. Concurrent focus emulation by other CDP clie
 is not coordinated; use one harness for a configured browser.
 
 Playwright actions discard prior native AX and screenshot indices. Read fresh
-state after an action. Read-only evaluation isolation, download/file-chooser event wrappers,
+state after an action. Read-only evaluation isolation, download event wrappers,
 downloads, file choosers and other browser lifecycle integrations remain open.
 
 Worker locator actions acquire an exclusive focus lease owned by the host before
@@ -197,3 +198,38 @@ Worker execution budget still applies. Invalid options fail before an action
 callback runs. Prefer a concrete URL or visible page state over network-idle on
 pages with persistent connections. Forced Worker termination closes its watcher
 connections through the existing cancellation path.
+
+
+## File chooser events
+
+```js
+var pending = tab.playwright.waitForEvent("filechooser", {timeoutMs:5000});
+await tab.playwright.getByLabel("Upload").click();
+var chooser = await pending;
+nodeRepl.write(chooser.isMultiple());
+await chooser.setFiles(["/absolute/path/to/report.txt"], {timeoutMs:5000});
+```
+
+Start the event wait before triggering the chooser. A per-tab readiness barrier
+holds subsequent Playwright and native AX/coordinate input until interception is
+acknowledged. One chooser can be pending in a JavaScript kernel for each tab.
+Starting another before consuming the first is rejected. The default event wait
+timeout is 10 seconds; zero disables the local timeout while the Worker budget
+still applies. Unsupported events, including download, fail explicitly.
+
+`isMultiple()` returns the captured control's multiple-file flag. `setFiles`
+accepts an absolute path or array of absolute paths; an empty array clears the
+selection. Single-file controls reject multiple paths. Relative paths and invalid
+options are rejected before consuming the handle, so callers can correct them.
+The first dispatch attempt consumes the handle, including native file errors;
+obtain a fresh chooser before another attempt. The attached event connection is
+closed and file interception is disabled after dispatch success or failure.
+AX and screenshot history are invalidated after setting files.
+
+Handles can be retained across REPL calls. Consume them promptly; an unused
+captured handle retains its connection until Worker reset/close. Worker timeout
+or reset terminates the owning event connection. Real headless Chrome verified
+subsequent chooser use and independently checked that interception was absent
+after error/reset. Desktop picker presentation and remote CDP filesystem access
+remain unverified. Paths must refer to files available to the Playwright/browser
+host; remote browsers may require shared paths or an additional transfer layer.

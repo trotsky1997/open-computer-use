@@ -228,7 +228,7 @@ binding geometry invalidation; HTML drag-and-drop payloads remain open.
 
 The browser locator layer delegates to pinned Playwright Core over the configured
 CDP endpoint. Recipes retain selectors, not stale element handles. Each operation
-binds the exact target, resolves the locator, applies bounded waits and disconnects.
+binds the exact target, resolves the locator, applies bounded waits and disconnects. One-shot file chooser handles retain their event connection until consumed.
 Action operations use scoped virtual focus with explicit cleanup and discard old
 AX/screenshot observations. npm metadata and the plugin installer carry the same
 dependency. See [harness parity](harness-parity.md) for the broader unfinished scope.
@@ -246,3 +246,11 @@ callbacks, then waits for the requested URL/load state and returns the callback
 result. URL and load waits also work independently. Watchers disconnect on failure,
 consume late rejection and are closed when a Worker is terminated; no callback is
 replayed. Subframe-only transitions do not satisfy a main-frame expectation.
+
+
+File chooser event waits register a target readiness barrier before connecting.
+Playwright and native input await that barrier before dispatch. The captured
+handle retains the attached browser connection, validates absolute paths and
+single/multiple selection, then disables interception and disconnects after its
+one-shot setFiles operation. Worker termination closes retained event connections;
+real smoke includes post-reset use and an independent interception-leak probe.

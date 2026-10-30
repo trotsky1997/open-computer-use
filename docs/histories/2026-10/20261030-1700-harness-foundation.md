@@ -130,3 +130,17 @@ passed. Same-URL reload and option rejection were added to the final smoke pass.
 
 The final real-browser smoke passed same-URL reload and pre-action validation in
 addition to the navigation and cancellation scenarios above.
+
+The Playwright surface now supports waitForEvent("filechooser") with one-shot
+isMultiple/setFiles handles. A readiness barrier covers locator and native input
+so event preparation precedes the click. Captured handles retain their connection
+across REPL calls. Absolute paths, single/multiple selection and options are
+validated before dispatch; interception and connections are cleared after success
+or native error. Empty selections are supported.
+
+All 59 Node checks passed. Real Chrome smoke covers single/multiple files,
+clearing, relative/missing path rejection, consumed handles, native AX clicks,
+event timeouts, Worker handle persistence, timeout/reset recovery and subsequent
+file selection. An independent CDP observer confirmed interception was absent on
+a later ordinary click after errors/reset. Headful picker presentation and remote
+CDP filesystems remain unverified. Download events remain open work.
