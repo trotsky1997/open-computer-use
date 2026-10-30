@@ -31,6 +31,15 @@ export class BrowserTabs {
     for(const id of entry.tabs.keys()) if(!live.has(id)) entry.tabs.delete(id);
     return live;
   }
+  async closeTarget(entry,targetId) {
+    try {
+      const result=await entry.connection.send('Target.closeTarget',{targetId});
+      if(!result.success && (await this.snapshot(entry)).has(targetId))throw Error('Browser refused to close tab');
+    } catch(error) {
+      // A target can disappear after discovery or a prior close acknowledgement.
+      if(!error.cdpError || (await this.snapshot(entry)).has(targetId))throw error;
+    }
+  }
   async browser(endpoint) {
     let entry=this.browsers.get(endpoint);
     if(entry?.ready && !entry.error) {await entry.ready;return entry;}
@@ -80,8 +89,7 @@ export class BrowserTabs {
       const record=entry.tabs.get(args.targetId);
       if(record && record.owner!==owner) throw new Error('Tab retention belongs to another session');
       if(args.action==='close') {
-        const result=await entry.connection.send('Target.closeTarget',{targetId:args.targetId});
-        if(!result.success) throw new Error('Browser refused to close tab');
+        await this.closeTarget(entry,args.targetId);
       } else if(record) record.mark=args.mark;
     })();
     state.pending.add(work);work.finally(()=>{
@@ -105,8 +113,7 @@ export class BrowserTabs {
           if(!close.length) break;
           if(pass===15) throw new Error('Owned popups kept opening during tab cleanup');
           for(const [targetId] of close) {
-            const result=await entry.connection.send('Target.closeTarget',{targetId});
-            if(!result.success && (await this.snapshot(entry)).has(targetId)) throw new Error('Browser refused to close owned tab');
+            await this.closeTarget(entry,targetId);
           }
         }
         if([...entry.creating.values()].includes(owner)) throw new Error('The outcome of tab creation is unknown; retry cleanup after browser recovery');

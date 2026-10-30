@@ -121,7 +121,8 @@ and headful browser focus behavior remain unverified.
 ## Playwright locators
 
 Run `npm ci` in a source checkout. Published npm packages declare the pinned
-`playwright-core` dependency; the Codex plugin installer copies it into the
+`playwright-core` dependency; the Codex plugin installer copies production runtime
+dependencies, including the pinned QuickJS engine, into the
 installed plugin. The npm/REPL runtime requires Node.js 22 or newer. No browser
 binary is downloaded or launched by this dependency.
 
@@ -132,6 +133,10 @@ await tab.playwright.getByRole("checkbox", {name: "Accept"}).check();
 await tab.playwright.getByTestId("save").click();
 nodeRepl.write(await tab.playwright.domSnapshot());
 ```
+
+Read-only `evaluate`, `locator.evaluate` and `locator.evaluateAll` use a separate
+QuickJS Worker with host-owned native DOM reads. See [read-only browser evaluation](browser-evaluate.md)
+for arguments, frame scopes, supported reads and cleanup.
 
 The locator adapter delegates selectors and actions to Playwright Core. It supports
 role, text, label, placeholder, test-id, title, alt-text and CSS locators, nested

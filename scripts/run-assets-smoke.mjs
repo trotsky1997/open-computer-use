@@ -75,7 +75,7 @@ try {
    await session.close();for(const directory of directories)await rm(directory,{recursive:true,force:true});
    if(id && (await(await fetch(new URL('/json/list',endpoint))).json()).some(tab=>tab.id===id)) {
     const version=await(await fetch(new URL('/json/version',endpoint))).json();
-    await withConnection(version.webSocketDebuggerUrl,send=>send('Target.closeTarget',{targetId:id}));
+    await withConnection(version.webSocketDebuggerUrl,send=>send('Target.closeTarget',{targetId:id})).catch(async error=>{if(!error.cdpError || (await(await fetch(new URL('/json/list',endpoint))).json()).some(tab=>tab.id===id))throw error;});
    }
   }
  }

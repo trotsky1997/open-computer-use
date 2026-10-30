@@ -3,7 +3,8 @@
 The goal is to follow the currently exposed ChatGPT/Codex computer-use harness.
 This table records implementation and evidence separately. API names alone do
 not establish behavioral parity. The reference surface was inspected through the
-current native/browser documentation on 2026-10-30.
+current native/browser documentation on 2026-10-30, with read-only execution
+probes on 2026-10-31.
 
 | Area | Current implementation / evidence | Remaining work |
 | --- | --- | --- |
@@ -16,7 +17,7 @@ current native/browser documentation on 2026-10-30.
 | Browser viewport | Discovered viewport capability, host-owned set/reset across tabs/windows and cleanup recovery; real Chrome | Headful/mixed-DPI/zoom, external emulation and host-crash coverage |
 | Browser text / pointer input | Host-owned held clicks and press-key duration/chords, element/coordinate input, pointer drag, Unicode/value/ranges and trusted text/HTML paste and native MIME/file drops with native same-URL DOM/shadow owners and nested process routing; real Chrome smoke | Full keyboard/layout coverage, frame transforms/zoom, headful paste and more keyboard/platform cases |
 | Browser locators | Playwright Core selectors, actions, frames, composition, snapshots and fresh resolution | Broader dynamic/shadow/cross-origin coverage and per-operation connection overhead |
-| Browser scripting | Locator APIs and rendered snapshots | Read-only page/locator evaluation with enforced isolation |
+| Browser scripting | Host-owned QuickJS Worker for page/element/list evaluation, native isolated-world read schema, exact node/frame binding and cancellation; source/Worker Chrome probes | Broader DOM/provider/syntax compatibility and crash/platform coverage |
 | Navigation / event waits | Basic navigation, locator waitFor, expectNavigation, URL/load waits and file chooser/download events, cancellation and failure recovery with real Chrome/Worker checks | Native picker presentation, popup-owned downloads and broader page event coverage |
 | Dialogs / clipboard / developer tools | Host-owned dialog handles, logs and native text/HTML/PNG browser clipboard; real Chrome flows, resumed-action failure reporting and cleanup checks | Pre-binding/popup dialogs and broader frame flows, headful/remote clipboard, broader capability discovery and log sources |
 | Optional browser capabilities | Viewport discovery and tab CDP commands/event cursors and page asset inventories/bundles with frame routing and host cleanup; real Chrome in both session types | Broader CDP command-policy/provider matrix, management, asset fidelity/provider coverage, history and remaining provider-specific capabilities |

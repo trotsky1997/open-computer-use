@@ -694,3 +694,50 @@ Media/font fixtures check exported bytes without codec/font rendering claims.
 Streaming/DRM media, recursive CSS/unloaded srcset discovery, full provider and
 platform coverage, crash recovery, content export and the remaining native/host
 capabilities stay open. The full harness goal remains active.
+
+
+## Read-only page and locator evaluation
+
+Added page `evaluate`, locator `evaluate` and locator `evaluateAll` through a
+shared host-owned QuickJS WASM Worker. User source stays in the separate engine;
+Chrome runs fixed read-only bridge code in a dedicated isolated world. An
+explicit native getter/method schema exposes DOM, styles, geometry and current
+form values without page function invocation. Cross-realm reads use trusted
+platform descriptors. Playwright's pinned native handle bridge preserves exact
+element identity; same-process descendants route through their nearest
+process-owning frame ancestor. Empty collection scopes retain the selected frame.
+Arguments/results have a tagged data encoding, and local URL helpers and timers
+support extraction. Sources, messages, heap and stack have explicit limits.
+
+Deadlines and turn/reset/close terminate the engine and disconnect readers.
+Navigation, selected-frame detachment, main renderer crash and tab closure cancel
+work. An observed hang had a terminated Worker and acknowledged browser
+disconnect while a cleanup protocol wait remained pending; all browser waits now
+share the cancellation barrier, including final object-group release. Failed
+disconnect retains ownership for retry. Runtime packaging and source plugin
+installation now copy the pinned engine, WASM file and transitive production
+dependencies. Runtime docs, architecture, active plan and parity tracking were
+updated with the API and limits.
+
+Cross-feature smoke also exposed a target closing between discovery and the
+close command. Shared tab closure now reconciles protocol errors against a fresh
+target snapshot, accepting absent targets and preserving live targets/errors for
+retry. Fixture cleanup follows the same outcome check.
+
+All 112 Node checks passed, including typed values, scope validation, missing
+protocol-reply cancellation, disconnect retry, real staged WASM loading and both
+close-race outcomes. Disposable macOS headless Chrome passed both session modes:
+DOM/style/current value/shadow reads under page getter poisoning; exact, strict,
+regex and composed locators; cross-origin and nested in-process frames, empty
+collections and poisoned same-origin parent reads; local timer cancellation and
+URL parsing; live writes/network and function-constructor/module escape attempts;
+CPU deadline after a completed native DOM read; navigation, frame detach, renderer
+crash and turn cancellation after confirmed interpreter execution; reset/reuse.
+Native-free CLI/MCP now exercises read-only evaluation. Asset, CDP and both
+turn-lifecycle smokes also passed. Installer/build-script syntax and whitespace
+checks passed. No CI was added. Engine modules are pinned at 0.32.0.
+
+The complete native release package/installer was not executed. Broader DOM and
+ECMAScript/provider compatibility, automatic crash recovery, content exports,
+remaining native/host features and Linux/Windows validation remain open. The
+full harness goal stays active.

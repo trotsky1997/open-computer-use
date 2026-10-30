@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import {EVALUATE_DEPENDENCIES} from "../node-repl/runtime-dependencies.mjs";
 import { PLAYWRIGHT_VERSION } from "../node-repl/browser-playwright.mjs";
 
 import { spawnSync } from "node:child_process";
@@ -376,7 +377,7 @@ function renderMetaPackageJson(packageName, version) {
     engines: {
       node: ">=22",
     },
-    dependencies: {"playwright-core":PLAYWRIGHT_VERSION},
+    dependencies: {"playwright-core":PLAYWRIGHT_VERSION,...EVALUATE_DEPENDENCIES},
     preferGlobal: true,
     publishConfig: {
       access: "public",
@@ -433,7 +434,7 @@ function copyInstallerScripts(packageRoot) {
     "browser-cdp.mjs",
     "browser-downloads.mjs",
     "browser-clipboard.mjs",
-    "browser-viewport.mjs", "browser-input.mjs", "browser-tabs.mjs", "browser-debugger.mjs","browser-assets.mjs","browser-drop.mjs",
+    "browser-viewport.mjs", "browser-input.mjs", "browser-tabs.mjs", "browser-debugger.mjs","browser-assets.mjs","browser-evaluate.mjs","browser-evaluate-dom.mjs","browser-evaluate-worker.mjs","runtime-dependencies.mjs","browser-drop.mjs",
     "browser-playwright.mjs",
     "open-computer-use-repl.mjs",
     "open-computer-use-kernel.mjs",
@@ -443,6 +444,9 @@ function copyInstallerScripts(packageRoot) {
       path.join(packageRoot, "scripts", "node-repl", scriptName),
     );
   }
+  for(const module of ["browser-evaluate.mjs","browser-evaluate-dom.mjs","browser-evaluate-worker.mjs","runtime-dependencies.mjs"]) cpSync(
+    path.join(repoRoot,"scripts","node-repl",module),path.join(packageRoot,"plugins","open-computer-use","scripts",module)
+  );
   cpSync(
     path.join(repoRoot, "scripts", "node-repl", "browser-assets.mjs"),
     path.join(packageRoot, "plugins", "open-computer-use", "scripts", "browser-assets.mjs")

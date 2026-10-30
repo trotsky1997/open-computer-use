@@ -10,7 +10,7 @@ const root=fileURLToPath(new URL("../",import.meta.url));
 const server=createServer((request,response)=>{response.setHeader("Content-Type","text/html");response.end('<html><body><label>Name<input></label></body></html>');});
 await new Promise(resolve=>server.listen(0,"127.0.0.1",resolve));
 const url=`http://127.0.0.1:${server.address().port}/`;
-const source=`var inventory=await cua.getState({emit:false}); if(!inventory.errors?.some(error=>error.startsWith("apps:"))) throw new Error("Missing native error was not reported"); if(inventory.browsers.length!==1) throw new Error("Browser inventory unavailable"); var tab=await cua.createBrowserTab("cdp",${JSON.stringify(url)},{visible:false}); try {await tab.playwright.getByLabel("Name").fill("Browser only verified"); nodeRepl.write(await tab.playwright.getByLabel("Name").inputValue());} finally {await tab.close();}`;
+const source=`var inventory=await cua.getState({emit:false}); if(!inventory.errors?.some(error=>error.startsWith("apps:"))) throw new Error("Missing native error was not reported"); if(inventory.browsers.length!==1) throw new Error("Browser inventory unavailable"); var tab=await cua.createBrowserTab("cdp",${JSON.stringify(url)},{visible:false}); try {await tab.playwright.getByLabel("Name").fill("Browser only verified"); if(await tab.playwright.getByLabel("Name").evaluate(node=>node.value)!=="Browser only verified") throw new Error("Read-only evaluation failed"); nodeRepl.write(await tab.playwright.getByLabel("Name").inputValue());} finally {await tab.close();}`;
 try {
   const report=inspectCapabilities({packageRoot:root,platformPackages:{}});
   assert.equal(report.capabilities.nativeMcp.available,false);
@@ -31,7 +31,7 @@ try {
     assert.equal(result.isError,false,JSON.stringify(result.content));
     assert.ok(result.content.some(item=>item.text==="Browser only verified"));
   } finally {peer.close();}
-  console.log("PASS native-free CLI and MCP browser discovery, inventory error isolation and real field input");
+  console.log("PASS native-free CLI and MCP browser discovery, inventory error isolation and real field input/read-only evaluation");
 } finally {
   server.closeAllConnections();
   await new Promise(resolve=>server.close(resolve));

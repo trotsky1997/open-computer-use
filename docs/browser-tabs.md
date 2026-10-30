@@ -75,3 +75,9 @@ latest marks, resuming/re-marking, stale callback denial, held-key and viewport
 cleanup, retained close failures and retry, direct source reset/close/turns and timeout release barriers, and the real MCP
 notification path. Other feature fixtures explicitly retain pages that
 they inspect after session close, and close those disposable pages afterward.
+
+
+Close requests admitted against a live target can race target destruction. The
+host reconciles a protocol close error with a fresh target snapshot. An absent
+target satisfies the close; a still-live target or unverified snapshot failure
+retains ownership and reports the error for retry.

@@ -371,7 +371,7 @@ Worker and in-process sessions now share host request dispatch and ordered
 resource release. Source evaluations carry a resource owner through the existing
 AsyncLocalStorage context. Their run queue fences earlier evaluations at reset
 and turn boundaries; idle contexts retain bindings and interrupted async
-contexts are discarded. Source CPU loops still require Worker isolation.
+contexts are discarded. CPU loops in ordinary source REPL code still require Worker REPL isolation.
 
 BrowserDebugger owns per-turn raw CDP connections, child-session graphs and bounded
 event cursors. It attaches related targets privately, routes explicit child
@@ -391,3 +391,18 @@ Chrome network streams; data/blob URLs have explicit paths. Navigation and turn
 cleanup fence exports; partial directories are removed while completed artifacts
 survive. Module distribution follows the shared CLI/plugin support-module lists.
 See [rendered page assets](browser-assets.md) for selection, lifecycle and limits.
+
+
+## Read-only browser evaluation
+
+BrowserEvaluator owns one isolated QuickJS Worker and read-only DOM bridge per
+invocation. Only fixed reader code executes in Chrome; user source stays in the
+separate engine. Native getters from a dedicated isolated world serve an explicit
+read schema. Playwright resolves selectors, and its pinned native handle identity
+seeds the reader in the exact frame. Typed data uses a tagged wire encoding.
+Every asynchronous browser wait shares a cancellation barrier, including final
+reference cleanup, while confirmed disconnect ends canceled protocol waits.
+Turn/reset/close, navigation and deadlines terminate workers and close readers;
+failed disconnect retains ownership for retry. Production package dependencies
+and installer copies include the pinned WASM runtime and transitive modules.
+See [read-only browser evaluation](browser-evaluate.md) for API, limits and evidence.

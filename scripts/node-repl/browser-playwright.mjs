@@ -1,3 +1,4 @@
+import {validateEvaluation} from "./browser-evaluate-dom.mjs";
 import {validateDrop, dropFrames} from "./browser-drop.mjs";
 import { isAbsolute } from "node:path";
 
@@ -7,7 +8,7 @@ export async function waitForBrowserEventReady(endpoint, targetId) {
   for (const event of ["filechooser","download"]) await eventBarriers.get(`${endpoint}|${targetId}|${event}`)?.ready;
 }
 
-export function createPlaywrightApi(endpoint, targetId, invalidate, focusLease, downloadRequest, withAction, checkDialog, dropRequest) {
+export function createPlaywrightApi(endpoint, targetId, invalidate, focusLease, downloadRequest, withAction, checkDialog, dropRequest, evaluateRequest) {
   const recipes = new WeakMap();
   const selectors = ["locator", "getByRole", "getByText", "getByLabel", "getByPlaceholder", "getByTestId", "getByTitle", "getByAltText", "frameLocator"];
   const chains = [...selectors, "filter", "nth", "first", "last", "and", "or"];
@@ -154,6 +155,19 @@ export function createPlaywrightApi(endpoint, targetId, invalidate, focusLease, 
     for (const method of path.length ? chains : selectors) {
       api[method] = (...args) => binding([...path, {method, args}]);
     }
+    const serialize=value=>{
+      if(value && recipes.has(value))return {__ocuLocator:recipes.get(value).map(step=>({method:step.method,args:step.args.map(serialize)}))};
+      if(Object.prototype.toString.call(value)==='[object RegExp]')return {__ocuRegExp:{source:value.source,flags:value.flags}};
+      if(Array.isArray(value))return value.map(serialize);
+      if(value && Object.prototype.toString.call(value)==='[object Object]')return Object.fromEntries(Object.entries(value).map(([key,item])=>[key,serialize(item)]));
+      return value;
+    };
+    for(const method of path.length?['evaluate','evaluateAll']:['evaluate'])api[method]=async (fn,arg,options={})=>{
+      const request={targetId,mode:path.length?(method==='evaluateAll'?'all':'element'):'page',path:path.map(step=>({method:step.method,args:step.args.map(serialize)})),source:typeof fn==='function'?Function.prototype.toString.call(fn):fn,arg,options};
+      validateEvaluation(request);if(checkDialog)await checkDialog(false);
+      if(!evaluateRequest)throw Error('Host-owned read-only evaluation is unavailable');
+      return evaluateRequest(request);
+    };
     if (!path.length) {
       api.domSnapshot = () => invoke([], "domSnapshot", []);
       api.waitForEvent = (event, options = {}) => {

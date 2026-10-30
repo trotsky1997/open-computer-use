@@ -102,3 +102,21 @@ test('source cleanup failure blocks reuse and endTurn retries into a fresh conte
    assert.equal(result.isError,false,JSON.stringify(result.content));assert.equal(result.content.at(-1).text,'undefined');
  } finally {failed=false;await session.close();}
 });
+
+
+test('admitted closes reconcile a target disappearing before the protocol reply',async()=>{
+ for(const cleanup of [false,true]){
+  const {tabs,entry,live}=fixture(),owner={};
+  const {targetId}=await tabs.request(owner,{action:'create'}),send=entry.connection.send;
+  entry.connection.send=async(method,args)=>{if(method==='Target.closeTarget'){live.delete(args.targetId);throw Object.assign(Error('No target with given id found'),{cdpError:true});}return send(method,args);};
+  if(cleanup)await tabs.end(owner);else await tabs.request(owner,{action:'close',targetId});
+  assert.deepEqual([...live.keys()],['user']);await tabs.end(owner);
+ }
+});
+test('protocol close errors retain live targets until an acknowledged retry',async()=>{
+ const {tabs,entry,live}=fixture(),owner={},send=entry.connection.send;
+ await tabs.request(owner,{action:'create'});
+ entry.connection.send=async(method,args)=>{if(method==='Target.closeTarget')throw Object.assign(Error('Denied close'),{cdpError:true});return send(method,args);};
+ await assert.rejects(tabs.end(owner),/Denied close/u);assert.equal(live.size,2);
+ entry.connection.send=send;await tabs.end(owner);assert.deepEqual([...live.keys()],['user']);
+});

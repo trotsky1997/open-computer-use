@@ -87,7 +87,7 @@ attached child selectors and host-owned per-turn capture cleanup. Source/Worker
 Chrome probes cover command deadlines, explicit script termination, pause release
 and origin-history rotation. JS execution budgets now have a distinct timeout
 state so inner command timeouts preserve bindings. Continue the broader command
-policy/provider matrix, read-only evaluation, other capabilities and crash/native
+policy/provider matrix, read-only DOM schema coverage, other capabilities and crash/native
 verification. See [tab CDP capability](../../browser-debugger.md). The full goal
 remains active.
 
@@ -98,6 +98,18 @@ Rendered asset inventory and local directory bundles are implemented through a
 shared source/Worker host service. Inventory membership, frame navigation and
 turn cleanup fence exports; authenticated network streams, data/blob resources
 and per-file failure reporting have real Chrome fixtures. Continue asset fidelity,
-provider/transport coverage, read-only evaluation, content export, crash handling
+provider/transport coverage, read-only DOM schema coverage, content export, crash handling
 and native desktop validation. See [page assets](../../browser-assets.md). The
 full goal remains active.
+
+## Read-only evaluation phase
+
+Page, locator and locator-list evaluation now run in a dedicated QuickJS WASM
+Worker. User source stays outside Chrome; a host-owned isolated-world reader
+exposes explicit native DOM read properties/methods. Navigation/turn cleanup
+terminate the interpreter and close readers, including CPU loops and pending
+DOM calls. Locator seeds use the exact resolved native node identity. Runtime dependency/
+package installation paths and native DOM reads, write/network/global escape
+rejection, frame scopes and lifecycle have source/Worker evidence. Broader DOM/
+provider/syntax compatibility, content exports, crash recovery and native desktop
+work remain open. See [read-only evaluation](../../browser-evaluate.md). Keep the full parity goal active.
