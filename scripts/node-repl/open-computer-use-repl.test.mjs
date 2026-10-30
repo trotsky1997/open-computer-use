@@ -79,6 +79,28 @@ test("top-level await and lexical bindings persist until reset", async () => {
   assert.equal(result.content.at(-1).text, "undefined");
 });
 
+test("in-process reset waits for resource cleanup and retries a failed cleanup before reuse", async () => {
+  const session = new PersistentJavaScriptSession({native:mockNative()});
+  await session.run("var kept=41");
+  let release, fail = true;
+  const waiting = new Promise(resolve => {release=resolve;});
+  session.disposers.push(async () => {await waiting;if(fail) throw new Error("cleanup outage");});
+  const resetting = session.reset();
+  const rejected = assert.rejects(resetting,/cleanup outage/);
+  let finished = false;
+  const queued = session.run("nodeRepl.write(42)").then(result => {finished=true;return result;});
+  await new Promise(resolve => setTimeout(resolve,10));
+  assert.equal(finished,false);
+  release();
+  await rejected;
+  assert.match((await queued).content.at(-1).text,/cleanup outage/);
+  fail = false;
+  await session.reset();
+  assert.equal((await session.run("nodeRepl.write(typeof kept)")).content.at(-1).text,"undefined");
+  await session.close();
+  assert.equal((await session.run("nodeRepl.write(42)")).isError,true);
+});
+
 test("return values are not implicitly serialized into MCP output", async () => {
   const session = new PersistentJavaScriptSession({ native: mockNative() });
   const result = await session.run("({ huge: 'intermediate-only' })");

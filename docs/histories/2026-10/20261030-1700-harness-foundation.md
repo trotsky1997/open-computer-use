@@ -197,3 +197,30 @@ close/pending-startup cleanup. Existing browser, download and native-free CLI/MC
 smokes passed. Worker/OOPIF console sources, network logs, uncaught exception events,
 host crashes and cross-platform/headful validation remain open. Objects are shallow
 protocol previews and messages are bounded to 16,384 UTF-16 code units.
+
+JavaScript dialogs now expose getJsDialog() with type-specific accept/dismiss
+handles and observed-identity guards. One host Page observer is shared per
+endpoint/tab; input watch/wait/end routes attribute dialogs to the initiating
+session and let triggering actions yield while retaining their connection.
+Native inputs, locator actions, navigation and file-chooser setFiles share the
+boundary. A passive session cannot consume another session's dialog. New tabs
+install observers at about:blank before navigation, covering immediate alerts.
+
+Playwright's default dialog dismissal is suppressed. Responses wait for the
+triggering connection's cleanup or yield for a sequential dialog, preventing
+late disconnects from consuming a later beforeunload prompt. Cleanup dismisses
+owned dialogs before releasing focus, using a renderer barrier raced against
+new dialog events to drain synchronous continuations. Cleanup failure retains
+ownership and stops reuse until reset succeeds. In-process REPL reset/close now
+await disposal, with a run barrier and retry of failed cleanup; no cleanup errors
+are discarded. Known dialogs prevent blocked page reads or new Playwright setup.
+
+All 64 Node checks passed, including cleanup wait/failure/retry. Real macOS
+headless Chrome verified alert/confirm/prompt/beforeunload, immediate and sequential
+dialogs, sequential cancellation, Unicode and invalid arguments, stale handles,
+raw/locator/file input, session ownership, active tab close, Worker/direct reset,
+timeout, close and injected cleanup failure/recovery. Existing browser, console,
+download and native-free CLI/MCP smoke checks passed. Pre-binding dialog discovery,
+popup/OOPIF dialogs, system prompts, independent processes/external client races,
+headful and Linux/Windows validation remain open. Future asynchronous page scripts
+remain page-owned; cleanup covers observed active/synchronous dialog continuations.

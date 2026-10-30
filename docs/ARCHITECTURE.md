@@ -279,4 +279,14 @@ Browser console observers are host-owned per Worker/tab and use a persistent CDP
 Runtime connection. Internal browser/logs requests start/read/stop capture. They
 exclude the initial Runtime.enable history replay, retain bounded shallow messages
 across calls/navigation, and close with Worker teardown or tab close. Direct
-in-process REPL sessions register observation cleanup on their REPL close event.
+in-process REPL sessions await resource disposal during reset/close; run() waits
+for the pending cleanup barrier. Failed cleanup prevents evaluation and can be
+retried by reset.
+
+JavaScript dialogs use one shared host CDP Page observer per endpoint/tab, with
+session ownership and observed-dialog identities. Action watch/wait/end requests
+let a triggering input return while its dialog is pending; the original action
+connection stays attached until response and cleanup. Response waits for that
+cleanup or yields for the next sequential dialog. Host teardown dismisses owned
+dialogs before releasing focus and other observers, retaining ownership on failure.
+New tabs install observers at about:blank before navigating to their requested URL.

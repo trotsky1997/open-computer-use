@@ -333,3 +333,60 @@ and headful/Linux/Windows coverage remain open.
 checks real console levels/formatting/source URLs, filtering, retention, cross-call
 and navigation capture, session isolation and reset/timeout/close/startup cleanup
 using a disposable Chrome and local page.
+
+## JavaScript dialogs
+
+```js
+await tab.playwright.getByRole("button", {name:"Continue"}).click();
+var dialog = await tab.getJsDialog();
+if (dialog?.type === "confirm") await dialog.accept();
+if (dialog?.type === "prompt") await dialog.accept("requested value");
+if (dialog?.type === "alert" || dialog?.type === "beforeunload") await dialog.dismiss();
+```
+
+`getJsDialog()` returns `undefined` when no dialog is observed. The handle exposes
+`type` and `dismiss()`. Confirm handles also expose `accept()`; prompt handles
+expose `accept(text)`, requiring a string and preserving Unicode. Alert and
+beforeunload handles expose dismissal only. Dismissing beforeunload cancels the
+navigation. Invalid response arguments fail before consuming the handle. A
+response dispatch consumes the captured identity, including command failure;
+reset the session to clean up an uncertain failed response. Old handles fail
+when a dialog closes or the next dialog opens.
+
+CDP observers attach during binding and remain host-owned across JS calls. An
+input/navigation action that opens a dialog returns at that point, so the next
+call can inspect and respond. Native CDP input, locator actions and file-chooser
+setFiles use the same boundary. After a response, the harness waits for the
+triggering action's connection cleanup, or yields when another sequential dialog
+opens. Inspect page state after the final response. Page reads and new input fail
+explicitly while a known dialog is active. Playwright connection setup also fails
+explicitly if another observed tab has an active dialog, since CDP connection
+initialization can stall on such pages.
+
+One observer per endpoint/tab is shared inside the host process. An action's
+dialog belongs to its initiating session; an unclaimed asynchronous dialog belongs
+to the first session that obtains a handle. Other sessions cannot respond to that
+handle, and closing a passive observer preserves the owner's dialog. Reset,
+timeout and close dismiss owned active dialogs before releasing the observer and
+focus resources. Immediate sequential dialogs are drained during cleanup; dialogs
+that keep opening beyond the bounded cleanup interval stop reuse. A live target with a broken observer gets a fresh control
+connection for dismissal; failed cleanup retains ownership and stops session
+reuse until reset successfully retries. Source-level
+PersistentJavaScriptSession reset()/close() are asynchronous; run() also waits for
+the pending cleanup barrier and reports cleanup failure.
+
+New tabs start at about:blank, install observers, then navigate to the requested
+URL, covering scripts that open a dialog during initial loading. Rebinding a
+known active dialog emits its type instead of requesting blocked AX data. Console
+startup for that new observer is deferred until a successful dev.logs call after
+dialog resolution. A dialog that predates the first harness binding can block
+Page.enable; resolve it through existing browser/native controls before binding.
+Dialogs in popups/out-of-process frames, system permission prompts, headful and
+cross-platform behavior remain open validation. Independent host processes and
+external browser clients are not coordinated by the in-process identity guard.
+
+`OPEN_COMPUTER_USE_CDP_URL=http://127.0.0.1:9222 node scripts/run-dialog-smoke.mjs`
+checks real alert/confirm/prompt/beforeunload flows, initial-load and sequential
+dialogs, Unicode and argument validation, stale handles, native/locator/file input,
+shared-observer ownership, active tab close, Worker/direct-session reset, timeout,
+close and cleanup failure/retry against a disposable Chrome and local fixture.

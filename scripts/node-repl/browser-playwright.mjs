@@ -6,15 +6,21 @@ export async function waitForBrowserEventReady(endpoint, targetId) {
   for (const event of ["filechooser","download"]) await eventBarriers.get(`${endpoint}|${targetId}|${event}`)?.ready;
 }
 
-export function createPlaywrightApi(endpoint, targetId, invalidate, focusLease, downloadRequest) {
+export function createPlaywrightApi(endpoint, targetId, invalidate, focusLease, downloadRequest, withAction, checkDialog) {
   const recipes = new WeakMap();
   const selectors = ["locator", "getByRole", "getByText", "getByLabel", "getByPlaceholder", "getByTestId", "getByTitle", "getByAltText", "frameLocator"];
   const chains = [...selectors, "filter", "nth", "first", "last", "and", "or"];
   const reads = ["count", "innerText", "textContent", "allTextContents", "getAttribute", "inputValue", "isVisible", "isEnabled", "isChecked", "waitFor", "ariaSnapshot"];
   const actions = ["click", "dblclick", "fill", "press", "check", "uncheck", "setChecked", "selectOption", "hover", "scrollIntoViewIfNeeded", "pressSequentially", "type"];
   async function invoke(path, method, args) {
+    if (checkDialog) await checkDialog();
+    if (withAction && actions.includes(method)) return withAction(() => perform(path,method,args));
+    return perform(path,method,args);
+  }
+  async function perform(path, method, args) {
     const {chromium} = await import("playwright-core");
     const browser = await chromium.connectOverCDP(endpoint(), {timeout:10_000, noDefaults:true});
+    for (const context of browser.contexts()) context.on("dialog", () => {});
     let focusSession, emulatedFocus = false, lease, retained = false, intercepting = false, closing;
     const cleanup = () => closing ??= (async () => {
       try {
@@ -76,11 +82,14 @@ export function createPlaywrightApi(endpoint, targetId, invalidate, focusLease, 
               if (!Array.isArray(paths) || paths.some(file => typeof file !== "string" || !isAbsolute(file))) throw new Error("setFiles requires absolute file paths");
               if (!multiple && paths.length > 1) throw new Error("File chooser accepts only one file");
               validateWaitOptions(fileOptions, ["timeoutMs"]);
-              await waitForBrowserEventReady(endpoint(),targetId);
-              consumed = true;
-              invalidate();
-              try { await chooser.setFiles(paths, {timeout:fileOptions.timeoutMs ?? 10_000}); }
-              finally { try { await cleanup(); } finally { done(); } }
+              const select = async () => {
+                await waitForBrowserEventReady(endpoint(),targetId);
+                consumed = true;
+                invalidate();
+                try { await chooser.setFiles(paths, {timeout:fileOptions.timeoutMs ?? 10_000}); }
+                finally { try { await cleanup(); } finally { done(); } }
+              };
+              return withAction ? withAction(select) : select();
             },
           });
         }

@@ -106,7 +106,10 @@ async function openConnection(url, onEvent = () => {}, onClose = () => {}) {
   };
   socket.addEventListener("message", event => {
     let message;
-    try { message = JSON.parse(event.data); } catch { fail(new Error("Invalid CDP response")); socket.close(); return; }
+    try {
+      message = JSON.parse(event.data);
+      if (!message || typeof message !== "object" || Array.isArray(message)) throw new Error("Invalid CDP message");
+    } catch { fail(new Error("Invalid CDP response")); socket.close(); return; }
     if (message.method) {
       try { onEvent(message); }
       catch (error) { fail(error); socket.close(); onClose(); }
@@ -232,6 +235,176 @@ export class BrowserConsoleLogs {
   }
 }
 
+export class BrowserDialogs {
+  constructor(endpoint = () => browserEndpoint(process.env)?.href) {
+    this.endpoint = endpoint;
+    this.targets = new Map();
+    this.owners = new Map();
+    this.closedOwners = new WeakSet();
+    this.waiters = new Map();
+    this.nextId = 0;
+  }
+  async start(owner, targetId) {
+    if (this.closedOwners.has(owner)) throw new Error("Browser dialog session closed");
+    const endpoint = this.endpoint();
+    if (!endpoint) throw new Error("No CDP browser configured");
+    const key = `${endpoint}|${targetId}`;
+    let entry = this.targets.get(key);
+    if (!entry || entry.error) {
+      entry = {key,endpoint,targetId,owners:new Set(),watches:new Set(),dialogWaiters:new Set(),closed:false};
+      this.targets.set(key,entry);
+      entry.ready = (async () => {
+        const response = await fetch(new URL("/json/list",endpoint),{signal:AbortSignal.timeout(TIMEOUT),redirect:"error"});
+        if (!response.ok) throw new Error(`Browser discovery failed: HTTP ${response.status}`);
+        const target = (await response.json()).find(item => item.type === "page" && item.id === targetId);
+        if (!target) throw new Error("Tab closed or no longer available");
+        const connection = await openConnection(target.webSocketDebuggerUrl,event => {
+          if (entry.closed) return;
+          if (event.method === "Page.javascriptDialogOpening") {
+            const watch = [...entry.watches].at(-1);
+            entry.dialog = {id:++this.nextId,type:event.params.type,owner:watch?.owner,consumed:false};
+            for (const notify of entry.dialogWaiters) notify();
+            for (const waiting of entry.watches) {
+              waiting.opened = true;
+              waiting.resolve({opened:true});
+            }
+          } else if (event.method === "Page.javascriptDialogClosed") entry.dialog = undefined;
+        }, () => { if (!entry.closed) entry.error = new Error("Browser dialog connection closed; bind the tab again"); });
+        entry.connection = connection;
+        if (entry.closed) { connection.close(); throw new Error("Browser dialog session closed"); }
+        await connection.send("Page.enable");
+      })().catch(error => {entry.error=error;entry.connection?.close();throw error;});
+      entry.ready.catch(() => {});
+    }
+    entry.owners.add(owner);
+    if (!this.owners.has(owner)) this.owners.set(owner,new Set());
+    this.owners.get(owner).add(entry);
+    await entry.ready;
+  }
+  entry(owner, targetId) {
+    const entry = this.targets.get(`${this.endpoint()}|${targetId}`);
+    if (!entry || !entry.owners.has(owner) || entry.closed) throw new Error("Browser dialog capture unavailable; bind the tab again");
+    if (entry.error) throw entry.error;
+    return entry;
+  }
+  async request(owner, args) {
+    if (args?.action === "start") return this.start(owner,args.targetId);
+    if (args?.action === "stop") return this.stop(owner,args.targetId);
+    if (args?.action === "wait" || args?.action === "end") {
+      const watch = this.waiters.get(args.id);
+      if (!watch || watch.owner !== owner) throw new Error("Unknown browser action watcher");
+      if (args.action === "wait") return watch.waiting;
+      watch.resolve({opened:false});
+      watch.finish();
+      watch.entry.watches.delete(watch);
+      this.waiters.delete(args.id);
+      return;
+    }
+    const entry = this.entry(owner,args?.targetId);
+    if (args.action === "state") return entry.dialog ? {type:entry.dialog.type} : undefined;
+    if (args.action === "check") {
+      if (entry.dialog) throw new Error("Resolve the active JavaScript dialog with getJsDialog() first");
+      return;
+    }
+    if (args.action === "checkPlaywright") {
+      const active = [...this.targets.values()].find(target => target.endpoint === entry.endpoint && target.dialog);
+      if (active) throw new Error(`Resolve the active JavaScript dialog in tab ${active.targetId} with getJsDialog() first`);
+      return;
+    }
+    if (args.action === "watch") {
+      if (entry.dialog) throw new Error("Resolve the active JavaScript dialog with getJsDialog() first");
+      if ([...entry.watches].some(watch => !watch.opened || watch.owner !== owner)) throw new Error("A browser input action is already active for this tab");
+      const watch = {id:++this.nextId,owner,entry,opened:false};
+      watch.waiting = new Promise(resolve => {watch.resolve=resolve;});
+      watch.finished = new Promise(resolve => {watch.finish=resolve;});
+      entry.watches.add(watch);
+      this.waiters.set(watch.id,watch);
+      return watch.id;
+    }
+    const dialog = entry.dialog;
+    if (args.action === "get") {
+      if (!dialog) return undefined;
+      if (dialog.owner && dialog.owner !== owner) throw new Error("JavaScript dialog belongs to another browser session");
+      dialog.owner = owner;
+      return {id:dialog.id,type:dialog.type};
+    }
+    if (args.action !== "respond") throw new Error("Unknown browser dialog action");
+    if (!dialog || dialog.id !== args.id || dialog.owner !== owner || dialog.consumed) throw new Error("JavaScript dialog handle is stale or already consumed");
+    if (!["accept","dismiss"].includes(args.response)) throw new Error("Invalid JavaScript dialog response");
+    if (args.response === "accept" && !["confirm","prompt"].includes(dialog.type)) throw new Error("This JavaScript dialog only supports dismiss()");
+    if (dialog.type === "prompt" && args.response === "accept" && typeof args.text !== "string") throw new Error("Prompt accept requires text");
+    if (args.text !== undefined && !(dialog.type === "prompt" && args.response === "accept")) throw new Error("Only prompt accept supports text");
+    dialog.consumed = true;
+    dialog.response = entry.connection.send("Page.handleJavaScriptDialog",{accept:args.response === "accept",...(args.text !== undefined ? {promptText:args.text} : {})});
+    await dialog.response;
+    // A transient Playwright connection can close dialogs when it disconnects.
+    // Finish its action cleanup before permitting the next input, or yield for a sequential dialog.
+    const watches = [...entry.watches].filter(watch => watch.owner === owner);
+    if (watches.length && (!entry.dialog || entry.dialog === dialog)) {
+      let notify;
+      const nextDialog = new Promise(resolve => {notify=resolve;entry.dialogWaiters.add(resolve);});
+      try { await Promise.race([Promise.all(watches.map(watch => watch.finished)),nextDialog]); }
+      finally { entry.dialogWaiters.delete(notify); }
+    }
+  }
+  async stop(owner, targetId) {
+    const entries = [...(this.owners.get(owner) ?? [])].filter(entry => entry.targetId === targetId);
+    for (const entry of entries) {
+      await entry.ready.catch(() => {});
+      const deadline = Date.now() + TIMEOUT;
+      while (entry.dialog && (entry.dialog.owner === owner || entry.owners.size === 1)) {
+        if (Date.now() > deadline) throw Object.assign(new Error("JavaScript dialogs kept opening during cleanup"),{browserCleanupFailed:true});
+        await entry.dialog.response?.catch(() => {});
+        if (entry.dialog) {
+          const dismissed = entry.dialog;
+          let notify, gone = false;
+          const nextDialog = new Promise(resolve => {notify=resolve;entry.dialogWaiters.add(resolve);});
+          try {
+            try { await entry.connection.send("Page.handleJavaScriptDialog",{accept:false}); }
+            catch (error) {
+              // A closed tab needs no dismissal; a live tab gets one fresh control connection.
+              const response = await fetch(new URL("/json/list",entry.endpoint),{signal:AbortSignal.timeout(TIMEOUT),redirect:"error"});
+              if (!response.ok) throw new Error(`Browser discovery failed: HTTP ${response.status}`);
+              const target = (await response.json()).find(item => item.id === targetId);
+              gone = !target;
+              if (target) await withConnection(target.webSocketDebuggerUrl,send => send("Page.handleJavaScriptDialog",{accept:false})).catch(error => {if (!/No dialog is showing/i.test(error.message)) throw error;});
+            }
+            if (entry.dialog === dismissed) entry.dialog = undefined;
+            if (gone) break;
+            if (!entry.dialog) {
+              // The renderer barrier completes after synchronous continuations, or the next dialog wins.
+              await Promise.race([entry.connection.send("Page.getFrameTree"),nextDialog]);
+            }
+          } catch (cleanupError) {cleanupError.browserCleanupFailed=true;throw cleanupError;}
+          finally {entry.dialogWaiters.delete(notify);}
+        }
+      }
+      if (!this.closedOwners.has(owner)) await Promise.all([...entry.watches].filter(watch => watch.owner === owner).map(watch => watch.finished));
+      for (const watch of entry.watches) if (watch.owner === owner) {
+        watch.resolve({opened:false});
+        watch.finish();
+        this.waiters.delete(watch.id);
+        entry.watches.delete(watch);
+      }
+      entry.owners.delete(owner);
+      this.owners.get(owner)?.delete(entry);
+      if (entry.owners.size === 0) {
+        entry.closed = true;
+        entry.connection?.close();
+        if (this.targets.get(entry.key) === entry) this.targets.delete(entry.key);
+      }
+    }
+    if (this.owners.get(owner)?.size === 0) this.owners.delete(owner);
+  }
+  async cleanup(owner) {
+    this.closedOwners.add(owner);
+    const targetIds = new Set([...(this.owners.get(owner) ?? [])].map(entry => entry.targetId));
+    const results = await Promise.allSettled([...targetIds].map(targetId => this.stop(owner,targetId)));
+    const failed = results.find(result => result.status === "rejected");
+    if (failed) throw failed.reason;
+  }
+}
+
 
 async function withConnection(url, operation) {
   const connection = await openConnection(url);
@@ -256,9 +429,22 @@ act with click/dblclick/fill/press/check/uncheck/setChecked/selectOption/hover/s
 Playwright resolves fresh elements and waits for actionability; ambiguous matches fail. Default action timeout is 10 seconds.
 Navigation waits: tab.playwright.expectNavigation(async action, {url?,waitUntil?,timeoutMs?}), waitForURL(url, {waitUntil?,timeoutMs?}), waitForLoadState({state?,timeoutMs?}). expectNavigation installs a main-frame watcher before running the action and returns its result after navigation.
 Playwright actions invalidate prior AX and screenshot indices. Read current state afterwards. File chooser events: start tab.playwright.waitForEvent("filechooser", {timeoutMs?}) before clicking, then await the handle and use isMultiple() / setFiles(absolutePaths, {timeoutMs?}). The file handle is one-shot. Downloads: start waitForEvent("download") before clicking, then await download.path({timeoutMs?}) for the completed local artifact. Formatted paste remains unsupported.
-Developer logs: await tab.dev.logs({filter?,levels?,limit?}) returns chronological console entries with level/message/timestamp/url. Capture begins at tab binding, continues across calls/navigation, and ends on close/reset/timeout. Levels: debug/info/log/warn/error (warning aliases warn). Default limit 100; retained cap 1000 entries, each at most 16,384 UTF-16 code units. Objects use shallow CDP descriptions; no page getters are executed. Prior console history and out-of-process frame/worker logs are excluded.`;
+Developer logs: await tab.dev.logs({filter?,levels?,limit?}) returns chronological console entries with level/message/timestamp/url. Capture begins at tab binding, continues across calls/navigation, and ends on close/reset/timeout. Levels: debug/info/log/warn/error (warning aliases warn). Default limit 100; retained cap 1000 entries, each at most 16,384 UTF-16 code units. Objects use shallow CDP descriptions; no page getters are executed. Prior console history and out-of-process frame/worker logs are excluded.
+JavaScript dialogs: await tab.getJsDialog() returns undefined or a handle with type. alert/beforeunload support dismiss(); confirm supports accept()/dismiss(); prompt supports accept(text)/dismiss(). Actions return when they open a dialog; answer it before further page reads/input. Handles are scoped to the observed dialog and owning session. Reset/timeout/close dismiss owned active dialogs. Beforeunload dismiss cancels navigation. Created tabs attach observers before loading their URL. A dialog predating first binding may prevent CDP initialization.`;
 
-export function createBrowserApi(activeOutput, environment = process.env, {focusLease, downloadRequest, logRequest, onDispose = () => {}} = {}) {
+export function createBrowserApi(activeOutput, environment = process.env, {focusLease, downloadRequest, logRequest, dialogRequest, onDispose = () => {}} = {}) {
+  const dialogs = dialogRequest ? undefined : new BrowserDialogs(() => endpoint()?.href);
+  const dialogOwner = {};
+  if (dialogs) onDispose(() => dialogs.cleanup(dialogOwner));
+  const requestDialog = dialogRequest ?? (args => dialogs.request(dialogOwner,args));
+  const checkDialog = targetId => requestDialog({action:"check",targetId});
+  async function withDialogAction(targetId, operation) {
+    const id = await requestDialog({action:"watch",targetId});
+    const opened = requestDialog({action:"wait",id});
+    const work = Promise.resolve().then(operation).finally(() => requestDialog({action:"end",id}));
+    work.catch(() => {});
+    return Promise.race([work,opened.then(result => result.opened ? undefined : work)]);
+  }
   const logs = logRequest ? undefined : new BrowserConsoleLogs(() => endpoint()?.href);
   const logOwner = {};
   if (logs) onDispose(() => logs.cleanup(logOwner));
@@ -305,15 +491,16 @@ export function createBrowserApi(activeOutput, environment = process.env, {focus
     const operate = async operation => {
       const current = (await targets()).find(item => item.id === target.id);
       if (!current) throw new Error("Tab closed or no longer available");
+      await checkDialog(target.id);
       try { return await withConnection(current.webSocketDebuggerUrl, operation); }
       catch (error) { invalidate(); throw error; }
     };
     const command = (method, params) => operate(send => send(method, params));
-    const input = operation => operate(async send => {
+    const input = operation => withDialogAction(target.id, () => operate(async send => {
       await waitForBrowserEventReady(endpoint().href, target.id);
       try { return await operation(send); }
       finally { capture = undefined; }
-    });
+    }));
     async function geometry(send) {
       const frame = (await send("Page.getFrameTree")).frameTree.frame;
       const metrics = await send("Page.getLayoutMetrics");
@@ -398,8 +585,18 @@ export function createBrowserApi(activeOutput, environment = process.env, {focus
     }
     return Object.freeze({
       ...info(target),
-      dev: Object.freeze({logs: (options = {}) => requestLogs({action:"read",targetId:target.id,options})}),
-      playwright: createPlaywrightApi(() => { const value = endpoint(); if (!value) throw new Error("No CDP browser configured"); return value.href; }, target.id, invalidate, focusLease, requestDownload),
+      dev: Object.freeze({async logs(options = {}) {
+        await checkDialog(target.id);
+        await requestLogs({action:"start",targetId:target.id});
+        return requestLogs({action:"read",targetId:target.id,options});
+      }}),
+      playwright: createPlaywrightApi(() => { const value = endpoint(); if (!value) throw new Error("No CDP browser configured"); return value.href; }, target.id, invalidate, focusLease, requestDownload, operation => withDialogAction(target.id,operation), () => requestDialog({action:"checkPlaywright",targetId:target.id})),
+      async getJsDialog() {
+        const dialog = await requestDialog({action:"get",targetId:target.id});
+        if (!dialog) return undefined;
+        const respond = (response,text) => requestDialog({action:"respond",targetId:target.id,id:dialog.id,response,text});
+        return Object.freeze({type:dialog.type,dismiss:() => respond("dismiss"),...(["confirm","prompt"].includes(dialog.type) ? {accept: text => respond("accept",text)} : {})});
+      },
       getAXState: ax,
       getScreenshot: screenshot,
       async getAXStateAndScreenshot(options = {}) {
@@ -498,15 +695,16 @@ export function createBrowserApi(activeOutput, environment = process.env, {focus
         invalidate();
         const parsed = new URL(url);
         if (!["http:", "https:", "about:"].includes(parsed.protocol)) throw new Error("Unsupported navigation URL protocol");
-        const result = await command("Page.navigate", { url: parsed.href });
-        if (result.errorText) throw new Error(result.errorText);
+        const result = await withDialogAction(target.id, () => command("Page.navigate", { url: parsed.href }));
+        if (result?.errorText) throw new Error(result.errorText);
       },
       async back() { await traverse(-1); },
       async forward() { await traverse(1); },
-      async reload() { invalidate(); await command("Page.reload"); },
+      async reload() { invalidate(); await withDialogAction(target.id, () => command("Page.reload")); },
       async close() {
         const result = await browserCommand("Target.closeTarget", { targetId: target.id });
         if (!result.success) throw new Error("Browser refused to close tab");
+        await requestDialog({action:"stop",targetId:target.id});
         await requestLogs({action:"stop",targetId:target.id});
       },
     });
@@ -515,8 +713,25 @@ export function createBrowserApi(activeOutput, environment = process.env, {focus
       const history = await command("Page.getNavigationHistory");
       const entry = history.entries[history.currentIndex + offset];
       if (!entry) throw new Error("No navigation history entry in that direction");
-      await command("Page.navigateToHistoryEntry", { entryId: entry.id });
+      await withDialogAction(target.id, () => command("Page.navigateToHistoryEntry", { entryId: entry.id }));
     }
+  }
+  async function prepare(target) {
+    await requestDialog({action:"start",targetId:target.id});
+    if (!await requestDialog({action:"state",targetId:target.id})) await requestLogs({action:"start",targetId:target.id});
+    return bind(target);
+  }
+  async function observe(tab) {
+    activeOutput().write(DOCUMENTATION,"cua.browser");
+    const dialog = await requestDialog({action:"state",targetId:tab.id});
+    if (dialog) activeOutput().write(`Active JavaScript ${dialog.type} dialog; use tab.getJsDialog().`,"cua.state");
+    else {
+      try { await withDialogAction(tab.id, () => tab.getAXState()); }
+      catch (error) { if (!await requestDialog({action:"state",targetId:tab.id})) throw error; }
+      const opened = await requestDialog({action:"state",targetId:tab.id});
+      if (opened) activeOutput().write(`Active JavaScript ${opened.type} dialog; use tab.getJsDialog().`,"cua.state");
+    }
+    return tab;
   }
   const api = {
     async listBrowsers(options = {}) {
@@ -547,11 +762,7 @@ export function createBrowserApi(activeOutput, environment = process.env, {focus
       if (typeof reference !== "string" && (typeof reference?.url !== "string")) throw new Error("getTab requires a tab ID or {url}");
       const matches = (await targets()).filter(item => typeof reference === "string" ? item.id === reference : item.url === reference.url);
       if (matches.length !== 1) throw new Error(`Expected one matching tab; found ${matches.length}`);
-      const tab = bind(matches[0]);
-      await requestLogs({action:"start",targetId:matches[0].id});
-      activeOutput().write(DOCUMENTATION, "cua.browser");
-      await tab.getAXState();
-      return tab;
+      return observe(await prepare(matches[0]));
     },
     async createBrowserTab(browserId, url = "about:blank", options = {}) {
       if (browserId !== "cdp") throw new Error(`Unknown browser: ${browserId}`);
@@ -561,8 +772,19 @@ export function createBrowserApi(activeOutput, environment = process.env, {focus
       if (options.visible !== undefined && typeof options.visible !== "boolean") throw new Error("visible must be a boolean");
       const parsed = new URL(url);
       if (!["http:", "https:", "about:"].includes(parsed.protocol)) throw new Error("Unsupported navigation URL protocol");
-      const result = await browserCommand("Target.createTarget", { url: parsed.href, background: options.visible === false });
-      return api.getTab(result.targetId);
+      const result = await browserCommand("Target.createTarget", { url: "about:blank", background: options.visible === false });
+      try {
+        const target = (await targets()).find(target => target.id === result.targetId);
+        if (!target) throw new Error("Created tab is unavailable");
+        const tab = await prepare(target);
+        if (parsed.href !== "about:blank") await tab.goto(parsed.href);
+        return observe(bind((await targets()).find(target => target.id === result.targetId) ?? target));
+      } catch (error) {
+        await browserCommand("Target.closeTarget",{targetId:result.targetId}).catch(() => {});
+        await requestDialog({action:"stop",targetId:result.targetId});
+        await requestLogs({action:"stop",targetId:result.targetId});
+        throw error;
+      }
     },
   };
   return Object.freeze(api);

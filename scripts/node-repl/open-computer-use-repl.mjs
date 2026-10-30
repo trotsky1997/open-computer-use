@@ -11,7 +11,7 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { Worker } from "node:worker_threads";
 import { BrowserFocusLeases } from "./browser-playwright.mjs";
-import { BrowserConsoleLogs, createBrowserApi, updateBrowserFocus } from "./browser-cdp.mjs";
+import { BrowserConsoleLogs, BrowserDialogs, createBrowserApi, updateBrowserFocus } from "./browser-cdp.mjs";
 import { inspectConfig } from "./ocu-config.mjs";
 
 const require = createRequire(import.meta.url);
@@ -29,6 +29,7 @@ const BROWSER_FAILURE_HANDLERS = new WeakMap();
 const HOST_BROWSER_DOWNLOADS = new BrowserDownloads(undefined,(owner,error)=>BROWSER_FAILURE_HANDLERS.get(owner)?.(error));
 const HOST_BROWSER_FOCUS = new BrowserFocusLeases(updateBrowserFocus);
 const HOST_BROWSER_LOGS = new BrowserConsoleLogs();
+const HOST_BROWSER_DIALOGS = new BrowserDialogs();
 
 const SERVER_INSTRUCTIONS = `UI automation through a persistent JavaScript REPL using the initialized cua API.
 
@@ -487,6 +488,7 @@ export function createCuaApi(native, activeOutput, onDispose) {
     focusLease: native.browserHost ? args => native.request("browser/focus", args) : undefined,
     downloadRequest: native.browserHost ? args => native.request("browser/download",args) : undefined,
     logRequest: native.browserHost ? args => native.request("browser/logs",args) : undefined,
+    dialogRequest: native.browserHost ? args => native.request("browser/dialog",args) : undefined,
     onDispose,
   });
   const api = {
@@ -543,6 +545,8 @@ export class PersistentJavaScriptSession {
   constructor({ native }) {
     this.native = native;
     this.active = null;
+    this.disposers = [];
+    this.ready = Promise.resolve();
     this.reset();
   }
 
@@ -574,8 +578,32 @@ export class PersistentJavaScriptSession {
     };
   }
 
-  reset() {
+  async #dispose() {
     this.repl?.close();
+    const results = await Promise.allSettled(this.disposers.map(dispose => Promise.resolve().then(dispose)));
+    const failed = results.find(result => result.status === "rejected");
+    if (failed) throw failed.reason;
+    this.disposers = [];
+  }
+
+  reset() {
+    this.ready = this.ready.catch(() => {}).then(async () => {
+      await this.#dispose();
+      this.#initialize();
+      this.closed = false;
+    });
+    this.ready.catch(() => {});
+    return this.ready;
+  }
+
+  close() {
+    this.closed = true;
+    this.ready = this.ready.catch(() => {}).then(async () => {await this.#dispose();this.closed=true;});
+    this.ready.catch(() => {});
+    return this.ready;
+  }
+
+  #initialize() {
     const input = new PassThrough();
     const output = new PassThrough();
     output.resume();
@@ -610,13 +638,15 @@ export class PersistentJavaScriptSession {
     Object.freeze(nodeRepl);
     this.nodeRepl = nodeRepl;
     Object.defineProperty(this.repl.context, "nodeRepl", { value: nodeRepl, configurable: false, writable: false });
-    const disposers = [];
-    this.repl.once("close", () => { for (const dispose of disposers) dispose(); });
-    Object.defineProperty(this.repl.context, "cua", { value: createCuaApi(this.native, () => this.#currentOutput(), dispose => disposers.push(dispose)), configurable: false, writable: false });
+    Object.defineProperty(this.repl.context, "cua", { value: createCuaApi(this.native, () => this.#currentOutput(), dispose => this.disposers.push(dispose)), configurable: false, writable: false });
   }
 
   async run(code, timeoutMs = DEFAULT_TIMEOUT_MS, requestMeta = {}) {
     if (typeof code !== "string" || !code.trim()) throw new Error("js expects non-empty JavaScript source");
+    try {
+      await this.ready;
+      if (this.closed) throw new Error("JavaScript session closed");
+    } catch (error) { return {content:[{type:"text",text:`Error: ${asError(error).message}`}],isError:true}; }
     const content = [];
     const active = {
       write(value, itemId) { content.push({ type: "text", text: formatValue(value), ...(itemId ? { _meta: { id: itemId } } : {}) }); },
@@ -661,6 +691,7 @@ export class WorkerJavaScriptSession {
     this.browserFocusLeases = HOST_BROWSER_FOCUS;
     this.browserDownloads = HOST_BROWSER_DOWNLOADS;
     this.browserLogs = HOST_BROWSER_LOGS;
+    this.browserDialogs = HOST_BROWSER_DIALOGS;
     this.stoppingWorkers = new WeakMap();
     this.#start();
   }
@@ -683,6 +714,7 @@ export class WorkerJavaScriptSession {
       this.native.endSession?.();
       this.stoppingWorkers.set(worker, (async () => {
         await worker.terminate();
+        await this.browserDialogs.cleanup(worker);
         const cleaned = await Promise.allSettled([this.browserFocusLeases.cleanup(worker),this.browserDownloads.cleanup(worker),this.browserLogs.cleanup(worker)]);
         const failed = cleaned.find(result=>result.status === "rejected");
         if(failed) throw failed.reason;
@@ -730,10 +762,11 @@ export class WorkerJavaScriptSession {
           else if(args?.action === "read") result = await this.browserLogs.read(worker,args.targetId,args.options);
           else if(args?.action === "stop") result = this.browserLogs.stop(worker,args.targetId);
           else throw new Error("Unknown browser logs action");
-        } else result = await this.native.request(message.method, message.params, message.timeoutMs);
+        } else if(message.method === "browser/dialog") result = await this.browserDialogs.request(worker,message.params);
+        else result = await this.native.request(message.method, message.params, message.timeoutMs);
         if (this.worker === worker && !this.invalidatedWorkers.has(worker)) worker.postMessage({ type: "native_response", id: message.id, result });
       } catch (error) {
-        if (error?.browserCleanupFailed && ["browser/focus","browser/download"].includes(message.method)) {
+        if (error?.browserCleanupFailed && ["browser/focus","browser/download","browser/dialog"].includes(message.method)) {
           await this.#workerFailed(worker,error);
           return;
         }
