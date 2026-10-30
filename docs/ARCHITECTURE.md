@@ -410,12 +410,27 @@ See [read-only browser evaluation](browser-evaluate.md) for API, limits and evid
 
 ## Native browser selection and session labels
 
-BrowserSelection owns per-turn private extension pages through BrowserTabs. The
-bundled MV3 bridge reads native active-tab state and maps TabID to debugger target
-ID; host identity/protocol checks precede selection. Normal inventories and
-viewport targeting exclude private IDs and pending creation URLs. Cancellation
-joins pending queries and closes the control target; failed close retains
-ownership. BrowserTabs stores logical session labels separately, preserving them
-across JS resets and idle turns and clearing them at final close. Browser
-namespaces and fresh title/URL getters share existing discovery/observation.
-See [browser session metadata](browser-session.md) for setup, evidence and limits.
+BrowserChrome owns per-turn CDP sessions attached to the bundled MV3 service
+worker. A private bootstrap tab wakes the extension and closes before requests;
+there is no permanent control tab. Native active-tab state maps Chrome TabID to
+an exact debugger target with identity/protocol and observation rechecks.
+Temporary bootstrap IDs/URLs remain excluded from inventory and viewport sizing.
+Pending reads cancel at the turn barrier; accepted management writes drain before
+disconnect. Failed target cleanup retains ownership for retry, while lost write
+acknowledgements report an uncertain outcome for audit/state inspection.
+BrowserTabs stores logical session labels separately across JS resets/idle turns,
+clearing them at final close. Fresh title/URL getters share normal discovery.
+See [browser sessions](browser-session.md) for extension setup and lifecycle.
+
+## Native browser management
+
+The management capability exposes an explicit safe Chrome method/property subset
+for windows, tabs, tabGroups and bookmarks. The same policy validates host inputs
+and worker dispatch. The extension serializes calls browser-wide, checks normal
+non-incognito windows, protects shared/unverified groups and rejects cross-window
+grouping until tabs are moved explicitly. Navigation/history/privileged APIs stay
+outside management. Destructive user actions require fresh human confirmation.
+Before-state and outcomes are kept in a bounded browser-session journal through
+`chrome.storage.session`, surviving worker restart and JS reset. Before-state
+storage failure stops dispatch; failed native calls are also journaled. There is
+no automatic rollback. See [browser management](browser-management.md).

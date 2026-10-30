@@ -1,4 +1,5 @@
-import {BrowserSelection} from "./browser-selection.mjs";
+import {MANAGEMENT_METHODS,MANAGEMENT_DOCUMENTATION,validateManagement} from "./chrome-browser-extension/policy.mjs";
+import {BrowserChrome} from "./browser-chrome.mjs";
 import {BrowserEvaluator} from "./browser-evaluate.mjs";
 import {BrowserAssets,ASSETS_DOCUMENTATION} from "./browser-assets.mjs";
 import {BrowserDebugger,CDP_DOCUMENTATION,cdpCommand,cdpOptions} from "./browser-debugger.mjs";
@@ -462,7 +463,7 @@ export async function withConnection(url, operation) {
 }
 
 const DOCUMENTATION = `## CDP browser
-Use cua.listTabs(), cua.getTab(id or {url}), and cua.createBrowserTab("cdp", url, {visible?,sessionName?}). browser.tabs exposes list/get/new/selected; new() creates a background blank tab. browser.nameSession(name) labels this logical host session across turns and JS resets. It appears in browser inventory metadata and context output. Native selected-tab identity requires the bundled Chrome selection extension, loaded by the user in that CDP browser. Its private background control tab is hidden from normal inventory and cleaned at turn/reset/close. Selected lookup leaves native tab activation unchanged and remains accurate under focus emulation. This is the CDP provider with an extension selection bridge; full extension transport remains open.
+Use cua.listTabs(), cua.getTab(id or {url}), and cua.createBrowserTab("cdp", url, {visible?,sessionName?}). browser.tabs exposes list/get/new/selected; new() creates a background blank tab. browser.nameSession(name) labels this logical host session across turns and JS resets. It appears in browser inventory metadata and context output. Native selected-tab identity and management require the bundled Chrome browser extension, loaded by the user in that CDP browser. A transient hidden bootstrap tab wakes its service worker and closes before requests; turn/reset/close disconnects the worker after accepted writes drain. Selected lookup leaves native tab activation unchanged and remains accurate under focus emulation. This is the CDP provider with an extension browser bridge; full extension transport remains open.
 Tab bindings expose getAXState(), getScreenshot(), getAXStateAndScreenshot(), screenshot(),
 title(), url(), goto(url), back(), forward(), reload(), close(), markDeliverable() and markHandoff().
 Created tabs/popups are ephemeral at turn end unless marked. Latest mark wins; both marks clear when the next turn begins, so mark again as needed. User tabs stay open. js_reset retains tab ownership. Session close keeps marked survivors. Observations emit by default;
@@ -486,10 +487,10 @@ JavaScript dialogs: await tab.getJsDialog() returns undefined or a handle with t
 Clipboard: tab.clipboard.read()/readText()/write(items)/writeText(text) uses the browser native process clipboard. Items contain entries [{mimeType,text? ,base64?}] and optional presentationStyle. Exactly one payload per entry; native Chrome validates supported formats. Requires verified --headless / --headless=new plus --enable-automation and a browser that can reach the host loopback bridge. Browser clipboard state is shared across tabs/JS sessions and survives js_reset. Internal control tabs are hidden and cleaned up on reset/timeout/close. paste(index,text,{format:"text"|"html"}) writes the isolated clipboard and dispatches trusted native paste atomically; typeText remains clipboard-independent. Headful clipboard APIs fail explicitly.
 Read-only scripting: playwright.evaluate(fnOrExpression,arg?,{timeoutMs?}), locator.evaluate(...) and locator.evaluateAll(...) run in a host-owned QuickJS Worker. Native DOM read facades support text/attributes/traversal/styles/geometry and frame scopes. Live setters, mutation methods, page functions, network/storage and Node APIs are unavailable. Functions cannot capture REPL variables. Local data, URL helpers and timers are supported. Navigation, deadline and turn/reset/close cancel execution; inner deadlines preserve JS bindings. Default 10 seconds, timeoutMs:0 disables the operation deadline. Unsupported DOM members are unavailable; this is an explicit read schema.
 Tab capabilities: get("pageAssets").documentation() describes rendered resource inventory and local asset bundles. await tab.capabilities.list(); get("cdp").documentation() describes permitted developer commands and cursor-based event reads. HTTP(S) pages only. Raw commands can mutate page state and invalidate this binding's observations; normal interaction uses higher-level APIs.
-Browser capabilities: await browser.capabilities.list(), then get("viewport") and documentation(). viewport.set({width,height}) applies explicit CSS dimensions for responsive tasks; viewport.reset() returns to normal sizing. The host cleans temporary overrides on reset/timeout/close. Competing sessions fail explicitly. Use existing sizing during normal tasks.
+Browser capabilities: get("management").documentation() describes native window/tab/group/bookmark organization and before-state audit (bundled extension required). await browser.capabilities.list(), then get("viewport") and documentation(). viewport.set({width,height}) applies explicit CSS dimensions for responsive tasks; viewport.reset() returns to normal sizing. The host cleans temporary overrides on reset/timeout/close. Competing sessions fail explicitly. Use existing sizing during normal tasks.
 Screenshots: tab.screenshot({fullPage?,clip?}) returns JPEG bytes with no implicit output; use nodeRepl.emitImage(bytes). getScreenshot returns/emits PNG. clip uses CSS pixels relative to the viewport or full-page area. Pixel input maps cropped viewport images back to CSS; full-page images require a new viewport capture before input. Geometry and viewport-revision changes invalidate capture coordinates.`;
 
-export function createBrowserApi(activeOutput, environment = process.env, {focusLease, downloadRequest, logRequest, dialogRequest, clipboardRequest, viewportRequest, dropRequest, inputRequest, tabRequest, cdpRequest, assetsRequest, evaluateRequest, selectionRequest, onDispose = () => {}} = {}) {
+export function createBrowserApi(activeOutput, environment = process.env, {focusLease, downloadRequest, logRequest, dialogRequest, clipboardRequest, viewportRequest, dropRequest, inputRequest, tabRequest, cdpRequest, assetsRequest, evaluateRequest, chromeRequest, onDispose = () => {}} = {}) {
   const cleanups=[];
   const debuggerApi=cdpRequest ? undefined : new BrowserDebugger(()=>endpoint()?.href,openConnection);
   const assetsApi=assetsRequest ? undefined : new BrowserAssets(()=>endpoint()?.href);
@@ -502,9 +503,9 @@ export function createBrowserApi(activeOutput, environment = process.env, {focus
   const debuggerOwner={};
   if(debuggerApi)cleanups.push(()=>debuggerApi.cleanup(debuggerOwner));
   const requestCdp=cdpRequest ?? (args=>debuggerApi.request(debuggerOwner,args));
-  const selection=selectionRequest ? undefined : new BrowserSelection(()=>endpoint()?.href,openConnection),selectionOwner={};
-  if(selection)cleanups.push(()=>selection.cleanup(selectionOwner));
-  const requestSelection=selectionRequest ?? (args=>selection.request(selectionOwner,args));
+  const chromeBridge=chromeRequest ? undefined : new BrowserChrome(()=>endpoint()?.href,openConnection),chromeOwner={};
+  if(chromeBridge)cleanups.push(()=>chromeBridge.cleanup(chromeOwner));
+  const requestChrome=chromeRequest ?? (args=>chromeBridge.request(chromeOwner,args));
   const tabs=tabRequest ? undefined : new BrowserTabs(()=>endpoint()?.href,openConnection);
   const tabOwner={};
   const requestTab=tabRequest ?? (args=>tabs.request(tabOwner,args));
@@ -512,7 +513,7 @@ export function createBrowserApi(activeOutput, environment = process.env, {focus
   const clipboardOwner = {};
   if (clipboard) cleanups.push(() => clipboard.cleanup(clipboardOwner));
   const requestClipboard = clipboardRequest ?? (args => clipboard.request(clipboardOwner,args));
-  const viewport = viewportRequest ? undefined : new BrowserViewport(() => endpoint()?.href,openConnection,withConnection,async()=>{const hidden=await requestSelection({action:"targets"});return [...await requestClipboard({method:"targets"}),...hidden.ids,...hidden.urls];});
+  const viewport = viewportRequest ? undefined : new BrowserViewport(() => endpoint()?.href,openConnection,withConnection,async()=>{const hidden=await requestChrome({action:"targets"});return [...await requestClipboard({method:"targets"}),...hidden.ids,...hidden.urls];});
   const viewportOwner = {};
   if (viewport) cleanups.push(() => viewport.cleanup(viewportOwner));
   const requestViewport = viewportRequest ?? (args => viewport.request(viewportOwner,args));
@@ -570,8 +571,8 @@ export function createBrowserApi(activeOutput, environment = process.env, {focus
   async function targets() {
     const result = await json("/json/list");
     if (!Array.isArray(result)) throw new Error("Invalid browser target list");
-    const hidden = await requestClipboard({method:"targets"}),selection=await requestSelection({action:"targets"});
-    return result.filter(target => target.type === "page" && !hidden.includes(target.id) && !selection.ids.includes(target.id) && !selection.urls.includes(target.url));
+    const hidden = await requestClipboard({method:"targets"}),chromeHidden=await requestChrome({action:"targets"});
+    return result.filter(target => target.type === "page" && !hidden.includes(target.id) && !chromeHidden.ids.includes(target.id) && !chromeHidden.urls.includes(target.url));
   }
   const info = target => ({ id: target.id, providerTabId: target.id, browserId: "cdp", title: target.title, url: target.url });
   function checkBrowser(options = {}) {
@@ -887,10 +888,18 @@ export function createBrowserApi(activeOutput, environment = process.env, {focus
         list:()=>api.listTabs({browser:"cdp",emit:false}),
         get:id=>{if(typeof id!=="string"||!id)throw Error('tabs.get requires a tab ID');return api.getTab(id,{browser:"cdp"});},
         new:()=>api.createBrowserTab('cdp','about:blank',{visible:false}),
-        async selected(){const id=await requestSelection({action:'selected'});if(!id)return undefined;const target=(await targets()).find(item=>item.id===id);return target?observe(await prepare(target)):undefined;},
+        async selected(){const id=await requestChrome({action:'selected'});if(!id)return undefined;const target=(await targets()).find(item=>item.id===id);return target?observe(await prepare(target)):undefined;},
       }),async documentation() { return DOCUMENTATION; },capabilities:Object.freeze({
-        list:()=>requestViewport({action:"capabilities"}),
+        list:async()=>[...await requestViewport({action:"capabilities"}),{id:"management",description:"Native windows, tabs, tab groups, bookmarks and before-state audit; bundled Chrome extension required"}],
         async get(id) {
+          if(id==='management')return Object.freeze({
+            documentation:async()=>MANAGEMENT_DOCUMENTATION,
+            getAuditTrail:()=>requestChrome({action:'audit'}),
+            ...Object.fromEntries(Object.entries(MANAGEMENT_METHODS).map(([namespace,methods])=>[namespace,Object.freeze(Object.fromEntries(methods.map(method=>[method,async(...args)=>{
+              if(validateManagement(namespace,method,args))await requestDialog({action:'checkBrowser'});
+              return requestChrome({action:'management',namespace,method,args});
+            }])))])),
+          });
           const capabilities = await requestViewport({action:"capabilities"});
           if (!capabilities.some(capability=>capability.id===id)) throw new Error(`Unsupported browser capability: ${id}`);
           return Object.freeze({documentation:async()=>VIEWPORT_DOCUMENTATION,

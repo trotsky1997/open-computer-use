@@ -85,8 +85,9 @@ retains ownership and reports the error for retry.
 
 Browser namespaces, native selected-tab identity, fresh title/URL getters and
 logical session labels are described in [browser session metadata](browser-session.md).
-A private extension selection control page has independent per-turn ownership;
-its creation, cancellation and close barrier use the same tab controller.
+The extension bridge uses a transient private bootstrap tab through the same
+controller. It closes before the worker serves selection/management requests;
+turn cleanup disconnects the worker and joins accepted changes.
 
 
 A close acknowledgement is followed by bounded confirmation that the exact target

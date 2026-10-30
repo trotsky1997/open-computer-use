@@ -1,7 +1,7 @@
 import {randomUUID} from "node:crypto";
 
 export class BrowserTabs {
-  constructor(endpoint,open) {this.endpoint=endpoint;this.open=open;this.browsers=new Map();this.owners=new WeakMap();this.active=new Map();}
+  constructor(endpoint,open,markerPrefix='ocu') {this.markerPrefix=markerPrefix;this.endpoint=endpoint;this.open=open;this.browsers=new Map();this.owners=new WeakMap();this.active=new Map();}
   state(owner) {
     if(!this.owners.has(owner)) this.owners.set(owner,{pending:new Set(),ended:false});
     return this.owners.get(owner);
@@ -85,7 +85,7 @@ export class BrowserTabs {
     const work=(async()=>{
       const entry=await this.browser(endpoint);
       if(args.action==='create') {
-        const marker=`about:blank#ocu-${randomUUID()}`;entry.creating.set(marker,owner);
+        const marker=`about:blank#${this.markerPrefix}-${randomUUID()}`;entry.creating.set(marker,owner);
         let result;
         try {result=await entry.connection.send('Target.createTarget',{url:marker,background:args.visible===false});}
         catch(error) {if(error.cdpError)entry.creating.delete(marker);throw error;}

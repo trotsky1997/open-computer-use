@@ -782,3 +782,42 @@ multi-window/incognito cases, complete native release packaging and Linux/Window
 remain unverified. Full extension/in-app transport, user claims/takeover, content
 exports and the remaining native/provider work stay open. The full harness goal
 remains active.
+
+## Native browser management and worker bridge
+
+Added the inspected management capability for native windows, tabs, tab groups
+and bookmarks, with browser-wide newest-first before-state audit. A shared strict
+policy validates host/extension boundaries, rejects navigation and privileged
+methods, protects shared/unverified groups and normal non-incognito windows, and
+requires explicit moves before grouping across windows. Browser guidance keeps
+fresh human confirmation for destructive user actions. Bookmark writes accept
+HTTP(S) URLs; the audit stores up to 100 entries/6 MiB in browser-session storage.
+A failed before-state write prevents native dispatch; native errors are journaled.
+
+Replaced the permanent selection control page with an MV3 service worker. Host
+initialization is serialized, a live worker is reused, and cold-start bootstrap
+tabs close before requests run. Private bootstrap URLs include pending native
+URLs. This preserves native last-tab/window closure. Pending reads cancel at
+turn cleanup; accepted changes drain before disconnect. A lost acknowledgement
+releases transport and reports uncertainty for fresh audit/state review. No write
+replay or automatic rollback was added. Existing session naming, metadata and
+selection use the same browser bridge. Installer, npm copy paths and CLI readiness
+checks include every extension asset; the extension now needs Chrome 137+ and
+`tabs`, `debugger`, `tabGroups`, `bookmarks`, `storage` permissions.
+
+All 121 Node checks passed. Disposable macOS headless Chromium 141 source/Worker
+management smokes cover real window/last-tab closure, pin protection, cross-window
+grouping rejection, group moves/metadata, window bounds, bookmark lifecycle,
+before-state/result IDs, cross-session audit visibility, JS reset and worker
+restart. Worker mode also verifies 32-second idle survival under an attached
+debugger. Selection/missing-extension, viewport, dialog, source/Worker turn and
+native-free CLI/MCP browser regressions passed. Installer/build-script syntax and
+whitespace checks passed. No dependency or CI was added.
+
+The user's browser/profile was untouched. Source development uses fresh owned
+profiles because Chrome can retain an older worker script across restarts;
+user-profile extension updates remain explicit. Signed-in shared groups,
+headful/incognito, browser/host crashes, full native release packaging and
+Linux/Windows remain unverified. Complete extension/in-app transports, claims,
+history, content exports and remaining native/provider work stay open. The full
+harness goal remains active.

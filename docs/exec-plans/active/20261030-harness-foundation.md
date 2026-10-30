@@ -121,6 +121,25 @@ implemented.
 Selected-tab identity comes from native Chrome tab/window state, including
 while focus emulation is active. The bundled MV3 bridge maps native
 TabID to debugger targets and has isolated Chromium evidence in both session modes.
-Control tabs remain hidden from normal inventory/viewport targeting and close
-through the host turn/reset barrier. See [browser sessions](../../browser-session.md). Keep user-profile extension installation explicit, and retain
+Private bootstrap tabs stay hidden from normal inventory/viewport targeting and
+close before the service worker serves requests. See [browser sessions](../../browser-session.md). Keep user-profile extension installation explicit, and retain
 all remaining native, transport, content-export and provider work in scope.
+
+## Browser management phase
+
+The inspected windows/tabs/tabGroups/bookmarks management contract and
+browser-wide before-state audit are implemented. The bridge now uses a service
+worker, reuses live workers and closes cold-start bootstrap tabs before serving
+requests. Host initialization is serialized. Chrome dispatch validates allowed
+methods/properties, normal non-incognito mutations, shared/unverified groups and
+explicit cross-window grouping. Destructive user actions retain the explicit
+human-confirmation policy. Accepted writes drain at cleanup; lost acknowledgements
+release transport and require audit/state inspection before retry.
+
+Owned Chromium checks cover native window/last-tab behavior, tab/group changes,
+bookmark lifecycle, browser-wide audit/results and reset/worker restart in both
+session modes, plus a 32-second idle worker in Worker mode. Targeted checks cover
+shared groups, audit persistence failure/retention, native failure journaling and
+accepted-write cancellation/uncertainty. See [browser management](../../browser-management.md).
+Shared-account/headful and crash recovery, transport/provider coverage, native
+desktop, history and content export remain open. Keep the full harness goal active.
