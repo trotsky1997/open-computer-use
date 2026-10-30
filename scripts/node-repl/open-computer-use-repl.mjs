@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import {BrowserDebugger} from "./browser-debugger.mjs";
 import {BrowserTabs} from "./browser-tabs.mjs";
 import { BrowserDownloads } from "./browser-downloads.mjs";
 import { BrowserClipboard } from "./browser-clipboard.mjs";
@@ -41,7 +42,8 @@ const HOST_BROWSER_DROPS = new BrowserDrops(() => browserEndpoint(process.env)?.
 const HOST_BROWSER_TABS = new BrowserTabs(()=>browserEndpoint(process.env)?.href,openConnection);
 const HOST_BROWSER_INPUTS = new BrowserInputs(()=>browserEndpoint(process.env)?.href,openConnection,()=>HOST_BROWSER_VIEWPORT.request(null,{action:"state"}),HOST_BROWSER_FOCUS,(owner,targetId)=>HOST_BROWSER_DIALOGS.request(owner,{action:"state",targetId}));
 
-const HOST_BROWSER_SERVICES={browserTabs:HOST_BROWSER_TABS,browserFocusLeases:HOST_BROWSER_FOCUS,browserDownloads:HOST_BROWSER_DOWNLOADS,browserLogs:HOST_BROWSER_LOGS,browserDialogs:HOST_BROWSER_DIALOGS,browserClipboard:HOST_BROWSER_CLIPBOARD,browserViewport:HOST_BROWSER_VIEWPORT,browserDrops:HOST_BROWSER_DROPS,browserInputs:HOST_BROWSER_INPUTS};
+const HOST_BROWSER_CDP=new BrowserDebugger(()=>browserEndpoint(process.env)?.href,openConnection);
+const HOST_BROWSER_SERVICES={browserCdp:HOST_BROWSER_CDP,browserTabs:HOST_BROWSER_TABS,browserFocusLeases:HOST_BROWSER_FOCUS,browserDownloads:HOST_BROWSER_DOWNLOADS,browserLogs:HOST_BROWSER_LOGS,browserDialogs:HOST_BROWSER_DIALOGS,browserClipboard:HOST_BROWSER_CLIPBOARD,browserViewport:HOST_BROWSER_VIEWPORT,browserDrops:HOST_BROWSER_DROPS,browserInputs:HOST_BROWSER_INPUTS};
 
 async function hostRequest(services,owner,tabOwner,method,params,timeoutMs) {
   let result;
@@ -69,6 +71,7 @@ async function hostRequest(services,owner,tabOwner,method,params,timeoutMs) {
     }
     result=await services.browserDialogs.request(owner,args);
   }
+  else if(method === "browser/cdp") result=await services.browserCdp.request(owner,params);
   else if(method === "browser/clipboard") result = await services.browserClipboard.request(owner,params);
   else if(method === "browser/tabs") result=await services.browserTabs.request(tabOwner,params);
   else if(method === "browser/input") result = await services.browserInputs.request(owner,params);
@@ -79,13 +82,14 @@ async function hostRequest(services,owner,tabOwner,method,params,timeoutMs) {
 }
 
 async function releaseResources(services,owner,stopped=Promise.resolve()) {
+  services.browserCdp.cancel(owner);
   services.browserClipboard.cancel(owner);services.browserViewport.cancel(owner);
   services.browserDrops.cancel(owner);services.browserInputs.cancel(owner);
   const nativeStopped=Promise.resolve(services.native.endSession?.());nativeStopped.catch(()=>{});
   await stopped;await nativeStopped;
   await services.browserDialogs.cleanup(owner);
   await services.browserDrops.cleanup(owner);await services.browserInputs.cleanup(owner);
-  const cleaned=await Promise.allSettled([services.browserFocusLeases.cleanup(owner),services.browserDownloads.cleanup(owner),services.browserLogs.cleanup(owner),services.browserClipboard.cleanup(owner),services.browserViewport.cleanup(owner)]);
+  const cleaned=await Promise.allSettled([services.browserCdp.cleanup(owner),services.browserFocusLeases.cleanup(owner),services.browserDownloads.cleanup(owner),services.browserLogs.cleanup(owner),services.browserClipboard.cleanup(owner),services.browserViewport.cleanup(owner)]);
   const failed=cleaned.find(result=>result.status==='rejected');if(failed) throw failed.reason;
   BROWSER_FAILURE_HANDLERS.delete(owner);
 }
@@ -609,6 +613,7 @@ export function createCuaApi(native, activeOutput, onDispose, {tabRequest}={}) {
     logRequest: native.browserHost ? args => native.request("browser/logs",args) : undefined,
     dialogRequest: native.browserHost ? args => native.request("browser/dialog",args) : undefined,
     clipboardRequest: native.browserHost ? args => native.request("browser/clipboard",args) : undefined,
+    cdpRequest: native.browserHost ? args=>native.request("browser/cdp",args,0) : undefined,
     tabRequest: native.browserHost ? args=>native.request("browser/tabs",args,0) : tabRequest,
     inputRequest: native.browserHost ? args=>native.request("browser/input",args,0) : undefined,
     dropRequest: native.browserHost ? args => native.request("browser/drop",args) : undefined,
@@ -832,7 +837,7 @@ export class PersistentJavaScriptSession {
     };
     this.active = active;
     this.requestMeta = requestMeta;
-    let timer;
+    let timer,executionTimedOut=false;
     const enforceTimeout = Number.isFinite(timeoutMs) && timeoutMs > 0;
     try {
       const evaluation = new Promise((resolve, reject) => {
@@ -840,13 +845,13 @@ export class PersistentJavaScriptSession {
         evaluationOwner.run(active, () => this.repl.eval(code, this.repl.context, "open-computer-use-repl", (error, result) => error ? reject(error) : resolve(result)));
       });
       const value = enforceTimeout
-        ? await Promise.race([evaluation, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`js execution timed out after ${timeoutMs} ms; session reset`)), timeoutMs); })])
+        ? await Promise.race([evaluation, new Promise((_, reject) => { timer = setTimeout(() => {executionTimedOut=true;reject(new Error(`js execution timed out after ${timeoutMs} ms; session reset`));}, timeoutMs); })])
         : await evaluation;
       if (content.length === 0) content.push({ type: "text", text: "(no output)" });
       return { content, isError: false };
     } catch (error) {
       let message = asError(error).message;
-      if (message.includes("timed out")) {
+      if (executionTimedOut) {
         try {await this.reset();}
         catch(cleanupError) {message+=`; browser cleanup failed: ${asError(cleanupError).message}; session stopped`;}
       } else if(error?.browserCleanupFailed) {
@@ -881,6 +886,7 @@ export class WorkerJavaScriptSession {
     this.browserClipboard = HOST_BROWSER_CLIPBOARD;
     this.browserDrops = HOST_BROWSER_DROPS;
     this.browserInputs = HOST_BROWSER_INPUTS;
+    this.browserCdp=HOST_BROWSER_CDP;
     this.browserViewport = HOST_BROWSER_VIEWPORT;
     this.stoppingWorkers = new WeakMap();
     this.#start();

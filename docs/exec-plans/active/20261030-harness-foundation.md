@@ -78,3 +78,15 @@ execution is interrupted, and old API callbacks carry a fenced turn ID. Failure
 keeps ownership until retry succeeds. Source sessions now share dispatch, release barriers, idle context retention and
 callback ownership checks. Continue user takeover/claims, crash recovery and the broader feature audit.
 See [tabs and turn boundaries](../../browser-tabs.md). The full goal stays active.
+
+
+## Tab CDP developer phase
+
+Tab capabilities expose permitted raw CDP commands, event cursor paging/waiting,
+attached child selectors and host-owned per-turn capture cleanup. Source/Worker
+Chrome probes cover command deadlines, explicit script termination, pause release
+and origin-history rotation. JS execution budgets now have a distinct timeout
+state so inner command timeouts preserve bindings. Continue the broader command
+policy/provider matrix, read-only evaluation, other capabilities and crash/native
+verification. See [tab CDP capability](../../browser-debugger.md). The full goal
+remains active.

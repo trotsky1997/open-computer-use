@@ -613,3 +613,50 @@ Real native key/click delivery, background focus/keyboard isolation, persistent
 app-agent cancellation acknowledgement, more native key layouts, Linux/Windows
 held input and broader parity work remain open. Full harness alignment remains
 active.
+
+
+### Tab CDP developer capability
+
+Inspected the live cdp capability contract: send with optional child selector and
+command deadline, plus cursor-based readEvents with filters/paging/waits. Reference
+probes on an independently created local page confirmed cross-origin child
+selectors, denied Browser/Target commands and origin-history rotation. The
+reference tab and local server were closed after inspection.
+
+Added BrowserDebugger and tab capability discovery/documentation. The host owns
+root connections and related child sessions, routes explicit sessionId/targetId
+selectors, and retains bounded per-turn event histories with sequence/cursor,
+source, hasMore and truncated. Main-page origin changes evict earlier history and
+child bindings. Detached child history remains filterable. HTTP(S) readiness is
+checked before dispatch; discovery is abortable and rechecked after await so a
+canceled request cannot dispatch later. Invalid preflight can retry after normal
+navigation. Reset/turn-end/close cancel readers and close debugger agents. The
+installer, CLI staging and npm/plugin runtime copies include the new controller.
+
+The provider has an explicit permitted-domain policy and rejects browser/target/
+input controls, global cookie/cache commands, Network cookie-write methods/scope overrides,
+certificate overrides and non-HTTP navigation. This policy still requires a
+broader reference matrix; the implemented API shape does not establish complete
+raw-command parity. Raw commands are trusted developer access, can mutate state
+and do not provide read-only evaluation or general rollback.
+
+A command-timeout probe exposed REPL resets triggered merely by an error message
+containing timed-out text. Only the actual JS execution-budget timer now requests
+reset. An individual CDP deadline preserves variables and the capability handle,
+allowing explicit Runtime.terminateExecution recovery of a running page script.
+
+All 103 Node checks passed, including validation, filtered cursor paging, bounded
+eviction, child/detach history, origin rotation, pending-read cancellation, late
+discovery fencing and command-timeout context retention in both session classes.
+Real disposable macOS headless Chrome passed in source and Worker modes: HTTP
+guard/retry, Network/Runtime commands, ordinary UI actions while capturing,
+event paging/waits/eviction, cross-origin iframe and worker routing, detached
+history, origin rotation, explicit termination after command timeout, debugger
+pause release and turn/reset cleanup. Both turn smokes and the native-free
+CLI/MCP smoke passed. Build-script/installer syntax and whitespace checks passed.
+No CI or dependency was added.
+
+Full command-policy/provider coverage, shared/service-worker edge cases, ordinary
+read-only page/locator evaluation, other browser capabilities/transports, renderer
+and host-crash recovery, native desktop and wider platform validation remain open.
+Full harness alignment remains active.

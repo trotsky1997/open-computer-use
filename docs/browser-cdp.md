@@ -485,3 +485,10 @@ only keys use real down/up events; the whole chord stays down for the duration.
 No repeat is synthesized. Element focus happens under the input lease, and
 reset/timeout/close releases held keys with retained ownership on cleanup failure.
 See [held input](browser-held-input.md) for navigation, dialogs and limits.
+
+
+Tab capabilities now advertise cdp. Use
+`await (await tab.capabilities.get("cdp")).documentation()` for the permitted raw
+command/event API. It provides event cursors, filtering, paging and attached child
+selectors with host-owned per-turn connections. See
+[tab CDP capability](browser-debugger.md) for exact policy, validation and limits.

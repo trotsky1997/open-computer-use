@@ -372,3 +372,11 @@ resource release. Source evaluations carry a resource owner through the existing
 AsyncLocalStorage context. Their run queue fences earlier evaluations at reset
 and turn boundaries; idle contexts retain bindings and interrupted async
 contexts are discarded. Source CPU loops still require Worker isolation.
+
+BrowserDebugger owns per-turn raw CDP connections, child-session graphs and bounded
+event cursors. It attaches related targets privately, routes explicit child
+selectors and rotates capture history at main-page origin changes. Discovery is
+abortable and checked again before dispatch. Cancellation closes pending readers
+and debugger agents. Source and Worker hosts share this controller. Inner command
+deadlines preserve REPL bindings; only the actual JS execution-budget timer
+requests a reset. See [tab CDP capability](browser-debugger.md) for policy/limits.

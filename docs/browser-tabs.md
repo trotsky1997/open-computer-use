@@ -10,7 +10,9 @@ Marks belong to the current execution turn. Both kinds keep an owned tab open
 at turn end. The first JS call of the next turn clears previous marks; mark again
 when that tab must survive the next boundary. Existing user tabs remain open
 without a mark. Marking one does not transfer its lifecycle ownership. A different
-session may observe an owned tab, but cannot change its retention or close it.
+session may observe an owned tab, but cannot change its retention or close it through managed lifecycle APIs. Raw
+developer CDP and arbitrary Node.js remain privileged, as described in
+[tab CDP capability](browser-debugger.md).
 
 The host records created target IDs before returning control to the Worker. It
 observes popup opener IDs, including nested popups, and reconciles live browser
