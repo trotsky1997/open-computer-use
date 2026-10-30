@@ -213,3 +213,10 @@ On macOS, these short-lived CLI layers proxy automation to the hidden
 `Open Computer Use.app` permission agent. That app agent may remain resident so
 future calls reuse the same permission identity; it is separate from the Node
 Worker and native MCP child owned by `js` / `repl`.
+
+## Browser bindings
+
+The REPL also exposes `listBrowsers`, `listTabs`, `getBrowser`, `getTab` and
+`createBrowserTab` through the opt-in CDP provider. `getState` combines app and
+browser inventories with independent error reporting. See [CDP browser](../browser-cdp.md)
+for configuration, supported tab operations and real-browser verification.

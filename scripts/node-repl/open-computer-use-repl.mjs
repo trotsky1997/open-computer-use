@@ -9,6 +9,7 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { Worker } from "node:worker_threads";
+import { createBrowserApi } from "./browser-cdp.mjs";
 import { inspectConfig } from "./ocu-config.mjs";
 
 const require = createRequire(import.meta.url);
@@ -35,8 +36,9 @@ const COMPUTER_USE_GUIDANCE = `## Open Computer Use JavaScript API
 
 The runtime exposes an asynchronous app-bound API:
 
-- \`await cua.getState({ emit? })\`: list current apps.
+- \`await cua.getState({ emit? })\`: list apps and configured browsers with tabs; inventory failures are reported in errors.
 - \`await cua.listApps({ emit? })\`: list current apps.
+- CDP browser: configure OPEN_COMPUTER_USE_CDP_URL, then use cua.listBrowsers(), cua.listTabs(), cua.getBrowser({id:"cdp"}), cua.getTab(id or {url}), and cua.createBrowserTab("cdp", url). Binding a tab emits provider documentation and initial AX state.
 - \`await cua.getApp(nameOrBundleID, { initialState? })\`: bind an app; initialState defaults to true. Use false for a lightweight binding before query.
 - \`await app.query({ text?, role?, exact?, limit?, maxNodes?, windowId? })\`: macOS-only AX lookup; returns matches and truncation metadata, with indexes usable in this native session.
 - \`await app.getAXState({ emit?, disableDiffing?, textLimit?, maxTreeNodes?, maxTreeDepth?, windowPlacement? })\`
@@ -438,8 +440,29 @@ export function createCuaApi(native, activeOutput) {
       async performSecondaryAction(elementIndex, action) { await call("perform_secondary_action", { app, element_index: elementIndex, action }); },
     });
   }
+  const browserApi = createBrowserApi(activeOutput);
   const api = {
+    ...browserApi,
     async getState(options = {}) {
+      await emitDocs();
+      const [appsResult, browsersResult] = await Promise.allSettled([
+        api.listApps({ emit: false }),
+        (async () => {
+          const browsers = await browserApi.listBrowsers({ emit: false });
+          const tabs = await browserApi.listTabs({ emit: false });
+          return browsers.map(browser => ({ ...browser, tabs }));
+        })(),
+      ]);
+      const state = {
+        apps: appsResult.status === "fulfilled" ? appsResult.value : [],
+        browsers: browsersResult.status === "fulfilled" ? browsersResult.value : [],
+      };
+      const errors = [appsResult, browsersResult].flatMap((result, index) => result.status === "rejected" ? [`${index === 0 ? "apps" : "browsers"}: ${asError(result.reason).message}`] : []);
+      if (errors.length) state.errors = errors;
+      if (options.emit !== false) activeOutput().write(state, "cua.state");
+      return state;
+    },
+    async listApps(options = {}) {
       await emitDocs();
       const result = await call("list_apps", {});
       const text = toolResultText(result);
@@ -451,13 +474,7 @@ export function createCuaApi(native, activeOutput) {
         apps = parseListApps(text);
       }
       if (options.emit !== false) activeOutput().write(apps, "cua.state");
-      return { apps };
-    },
-    async listApps(options = {}) {
-      await emitDocs();
-      const state = await api.getState({ emit: false });
-      if (options.emit !== false) activeOutput().write(state.apps, "cua.state");
-      return state.apps;
+      return apps;
     },
     async getApp(app, options = {}) {
       if (typeof app !== "string" || !app.trim()) throw new Error("getApp requires an app name or bundle ID");

@@ -18,3 +18,15 @@ check previously passed its imported file as the entry-point argument, causing
 it to launch the server; it now uses the Node executable as the distinct entry
 argument. This lets the check validate module import without launching native
 GUI tooling. Real desktop and browser validation remain pending.
+
+The REPL now supports an explicitly configured CDP browser: browser/tab inventory,
+existing tab bindings, create/close, navigation/history/reload, AX text and PNG
+observations. `getState` preserves either inventory when the other fails. The
+new module is included in npm and Codex plugin installation paths. Browser input
+and extension/in-app browser transports remain open.
+
+Validation: all 55 Node checks passed, shell syntax and diff checks passed, and a
+real disposable macOS headless Chrome completed the local-fixture smoke for the
+browser surface, including Worker inventory error isolation. The repeatable
+runner is `scripts/run-browser-smoke.mjs`; usage and boundaries are recorded in
+`docs/browser-cdp.md`.

@@ -428,6 +428,7 @@ function copyInstallerScripts(packageRoot) {
   for (const scriptName of [
     "open-computer-use-cli.mjs",
     "ocu-config.mjs",
+    "browser-cdp.mjs",
     "open-computer-use-repl.mjs",
     "open-computer-use-kernel.mjs",
   ]) {
@@ -436,6 +437,10 @@ function copyInstallerScripts(packageRoot) {
       path.join(packageRoot, "scripts", "node-repl", scriptName),
     );
   }
+  cpSync(
+    path.join(repoRoot, "scripts", "node-repl", "browser-cdp.mjs"),
+    path.join(packageRoot, "plugins", "open-computer-use", "scripts", "browser-cdp.mjs")
+  );
   cpSync(
     path.join(repoRoot, "scripts", "node-repl", "ocu-config.mjs"),
     path.join(packageRoot, "plugins", "open-computer-use", "scripts", "ocu-config.mjs")
