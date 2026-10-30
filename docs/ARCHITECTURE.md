@@ -447,3 +447,19 @@ successful artifacts and remove failed/canceled outputs. Cancellation disconnect
 reads immediately; native Chrome cookie handling stays inside the browser.
 The source/Worker host service, installer and npm module lists use the same path.
 See [browser content](browser-content.md) for API, provider evidence and gaps.
+
+
+## Locator media downloads
+
+Playwright locator bindings serialize media requests to BrowserContent. Shared
+recipe validation/resolution and exact native frame/node helpers also serve the
+read-only evaluator. Media resolution uses fixed isolated-world getters; native
+frame routing covers OOP frames and in-process descendants. The asset stream
+reader returns response metadata for safe private filenames. Owner cancellation
+and operation deadlines share cleanup while remaining separate signals, so one
+download timeout leaves its siblings running. See [media downloads](browser-media.md).
+
+
+The REPL kernel worker starts with an explicit empty Node CLI-flag list, matching
+the evaluation worker. Programmatic hosts using `node --input-type=module` can
+start the file-backed kernel without passing that stdin-only flag to it.

@@ -1,4 +1,4 @@
-import {validateEvaluation} from "./browser-evaluate-dom.mjs";
+import {validateEvaluation,validateLocatorPath,validateTimeoutOptions} from "./browser-evaluate-dom.mjs";
 import {validateDrop, dropFrames} from "./browser-drop.mjs";
 import { isAbsolute } from "node:path";
 
@@ -8,7 +8,7 @@ export async function waitForBrowserEventReady(endpoint, targetId) {
   for (const event of ["filechooser","download"]) await eventBarriers.get(`${endpoint}|${targetId}|${event}`)?.ready;
 }
 
-export function createPlaywrightApi(endpoint, targetId, invalidate, focusLease, downloadRequest, withAction, checkDialog, dropRequest, evaluateRequest) {
+export function createPlaywrightApi(endpoint, targetId, invalidate, focusLease, downloadRequest, withAction, checkDialog, dropRequest, evaluateRequest, mediaRequest) {
   const recipes = new WeakMap();
   const selectors = ["locator", "getByRole", "getByText", "getByLabel", "getByPlaceholder", "getByTestId", "getByTitle", "getByAltText", "frameLocator"];
   const chains = [...selectors, "filter", "nth", "first", "last", "and", "or"];
@@ -167,6 +167,12 @@ export function createPlaywrightApi(endpoint, targetId, invalidate, focusLease, 
       validateEvaluation(request);if(checkDialog)await checkDialog(false);
       if(!evaluateRequest)throw Error('Host-owned read-only evaluation is unavailable');
       return evaluateRequest(request);
+    };
+    if(path.length && path.at(-1).method!=='frameLocator')api.downloadMedia=async(options={})=>{
+      validateTimeoutOptions(options);const serialized=path.map(step=>({method:step.method,args:step.args.map(serialize)}));validateLocatorPath(serialized);
+      if(checkDialog)await checkDialog(false);
+      if(!mediaRequest)throw Error('Host-owned media downloads are unavailable');
+      return mediaRequest({action:'downloadMedia',targetId,path:serialized,options});
     };
     if (!path.length) {
       api.domSnapshot = () => invoke([], "domSnapshot", []);
@@ -404,4 +410,32 @@ export async function findBrowserPage(browser,targetId) {
     } finally {if(!selected) await session.detach();}
   }
   throw new Error("Tab closed or no longer available");
+}
+
+export function resolveBrowserLocator(page,steps){
+ const resolve=path=>{
+  let locator=page,frameOwner;
+  const convert=value=>value?.__ocuLocator?resolve(value.__ocuLocator).locator:value?.__ocuRegExp?new RegExp(value.__ocuRegExp.source,value.__ocuRegExp.flags):Array.isArray(value)?value.map(convert):value&&typeof value==='object'?Object.fromEntries(Object.entries(value).map(([key,item])=>[key,convert(item)])):value;
+  for(const step of path){locator=locator[step.method](...step.args.map(convert));if(typeof locator.owner==='function')frameOwner=locator.owner();}
+  return {locator,frameOwner};
+ };
+ return resolve(steps);
+}
+export async function nativeBrowserFrame(page,root,frame,wait){
+ let session=root;
+ if(frame!==page.mainFrame()){
+  let ancestor=frame;
+  while(ancestor && ancestor!==page.mainFrame()){
+   try{session=await wait(page.context().newCDPSession(ancestor));break;}
+   catch(error){if(!/does not have a separate CDP session/iu.test(error.message))throw error;ancestor=ancestor.parentFrame();}
+  }
+  if(!ancestor)throw Error('Browser frame detached');
+ }
+ // shortcut: pinned Playwright exposes exact native identities via toImpl; review on upgrades.
+ return {session,frameId:frame._connection.toImpl(frame)._id};
+}
+export async function nativeBrowserNode(handle,wait){
+ const native=handle._connection.toImpl(handle);
+ const {node}=await wait(native._context.delegate._client.send('DOM.describeNode',{objectId:native._objectId}));
+ return node.backendNodeId;
 }

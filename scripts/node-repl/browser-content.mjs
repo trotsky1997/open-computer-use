@@ -1,8 +1,9 @@
-import {mkdtemp,open,readFile,writeFile,rm} from 'node:fs/promises';
+import {mkdtemp,open,readFile,writeFile,rm,rename} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {BrowserAssets,bounded} from './browser-assets.mjs';
-import {findBrowserPage} from './browser-playwright.mjs';
+import {findBrowserPage,resolveBrowserLocator,nativeBrowserFrame,nativeBrowserNode} from './browser-playwright.mjs';
+import {validateLocatorPath,validateTimeoutOptions} from './browser-evaluate-dom.mjs';
 
 const formats={document:['pdf','md','docx'],spreadsheets:['pdf','xlsx','csv'],presentation:['pdf','pptx']};
 export function gsuiteExport(raw,type){
@@ -83,7 +84,8 @@ export class BrowserContent extends BrowserAssets {
   return state;
  }
  request(owner,args){
-  if(!args||!['exportGsuite','exportYouTubeTranscript'].includes(args.action)||typeof args.targetId!=='string'||!args.targetId||Object.keys(args).some(key=>!['action','targetId','type'].includes(key))||args.action==='exportGsuite'&&!Object.values(formats).flat().includes(args.type)||args.action==='exportYouTubeTranscript'&&args.type!==undefined)return Promise.reject(Error('Invalid content export request'));
+  if(args?.action==='downloadMedia')validateMediaRequest(args);
+  else if(!args||!['exportGsuite','exportYouTubeTranscript'].includes(args.action)||typeof args.targetId!=='string'||!args.targetId||Object.keys(args).some(key=>!['action','targetId','type'].includes(key))||args.action==='exportGsuite'&&!Object.values(formats).flat().includes(args.type)||args.action==='exportYouTubeTranscript'&&args.type!==undefined)return Promise.reject(Error('Invalid content export request'));
   const state=this.state(owner),job=this.perform(state,args);state.pending.add(job);job.finally(()=>state.pending.delete(job)).catch(()=>{});return job;
  }
  async connect(state,targetId){
@@ -105,7 +107,47 @@ export class BrowserContent extends BrowserAssets {
   state?.stop(Error('Content export session ended'));
   for(const browser of state?.connections??[])void browser.close().catch(()=>{});
  }
+ async media(state,args){
+  let connection,directory,completed=false,closing=false,error,rejectStop,timer;
+  const stopped=new Promise((_,reject)=>{rejectStop=reject;});stopped.catch(()=>{});
+  const abort=reason=>{error??=Error(reason);rejectStop(error);if(connection)void connection.browser.close().catch(()=>{});};
+  const operation={connections:state.connections,get closed(){return state.closed||!!error;},wait:promise=>state.wait(Promise.race([promise,stopped]))};
+  const timeout=args.options?.timeoutMs??120000,deadline=timeout?Date.now()+timeout:null,remaining=()=>deadline===null?0:Math.max(1,deadline-Date.now());
+  if(timeout)timer=setTimeout(()=>abort(`Media download timed out after ${timeout} ms`),timeout);
+  try{
+   connection=await this.connect(operation,args.targetId);const {page}=connection,root=connection.records[0].session;
+   const {locator}=resolveBrowserLocator(page,args.path);
+   if(typeof locator.elementHandle!=='function')throw Error('Media download requires an element locator');
+   const handle=await operation.wait(locator.elementHandle({timeout:remaining()}));
+   if(!handle||await operation.wait(locator.count())!==1)throw Error('Media locator must resolve to exactly one element');
+   const frame=await operation.wait(handle.ownerFrame());if(!frame)throw Error('Media frame detached');
+   const {session,frameId}=await nativeBrowserFrame(page,root,frame,operation.wait);
+   const send=(method,params)=>{if(method!=='IO.close')guard();return operation.wait(session.send(method,params));};
+   const guard=(disconnected=false)=>{if(error)throw error;connection.guard(disconnected);if(frame.isDetached())throw Error('Media frame detached');};
+   await send('Page.enable');
+   page.on('framenavigated',changed=>{if(changed===frame||changed===page.mainFrame())abort('Media frame navigated during download');});
+   page.on('framedetached',detached=>{if(!closing&&detached===frame)abort('Media frame detached');});
+   const {executionContextId}=await send('Page.createIsolatedWorld',{frameId,worldName:'ocu-media-reader'});
+   const backendNodeId=await nativeBrowserNode(handle,operation.wait),group='ocu-media';
+   const {object}=await send('DOM.resolveNode',{backendNodeId,executionContextId,objectGroup:group});
+   const read=async()=>{const result=await send('Runtime.callFunctionOn',{objectId:object.objectId,functionDeclaration:readMediaSource.toString(),returnByValue:true});if(result.exceptionDetails)throw Error(result.exceptionDetails.exception?.description??result.exceptionDetails.text);return result.result.value;};
+   const media=await read();guard();
+   directory=await mkdtemp(path.join(tmpdir(),'ocu-media-'));const temporary=path.join(directory,'download.partial');
+   const {frameTree}=await send('Page.getResourceTree');
+   const metadata=await this.download(operation,{url:media.url},[{session:{send},frameTree}],temporary,frameId,guard);
+   guard();if(JSON.stringify(await read())!==JSON.stringify(media))throw Error('Media element/source changed during download');
+   const filePath=path.join(directory,mediaFilename(media,metadata));await rename(temporary,filePath);guard();
+   await send('Runtime.releaseObjectGroup',{objectGroup:group});guard();completed=true;return filePath;
+  }catch(cause){if(error)throw error;if(/Target page, context or browser has been closed|Session (?:has been )?closed|Browser connection closed/iu.test(cause.message))throw Error('Media frame or browser connection closed during download',{cause});throw cause;}
+  finally{
+   clearTimeout(timer);
+   try{if(connection){closing=true;await connection.browser.close();state.connections.delete(connection.browser);if(completed){if(error)throw error;connection.guard(true);}}}
+   catch(cause){completed=false;throw cause;}
+   finally{if(directory&&!completed)await rm(directory,{recursive:true,force:true});}
+  }
+ }
  async perform(state,args){
+  if(args.action==='downloadMedia')return this.media(state,args);
   const connection=await this.connect(state,args.targetId),source=connection.page.url();let directory,completed=false,filePath;
   const guard=connection.guard;
   try{
@@ -114,7 +156,7 @@ export class BrowserContent extends BrowserAssets {
    const records=connection.records.map(record=>({...record,session:{send:(method,params)=>{if(method!=='IO.close')guard();return bounded(state.wait(record.session.send(method,params)),method);}}}));
    const download=(url,file)=>this.download(state,{url},records,file,records[0].frameTree.frame.id,guard);
    if(args.action==='exportGsuite'){
-    const contentType=await download(info.url,filePath);
+    const {contentType}=await download(info.url,filePath);
     guard();await verifyExport(filePath,args.type,contentType);
    }else{
     const segments=connection.page.locator(`ytd-watch-flexy[video-id="${info.id}"] ytd-transcript-renderer`).filter({visible:true}).locator('ytd-transcript-segment-renderer');
@@ -139,4 +181,50 @@ export class BrowserContent extends BrowserAssets {
    finally{if(directory&&!completed)await rm(directory,{recursive:true,force:true});}
   }
  }
+}
+
+export function validateMediaRequest(args){
+ if(!args||args.action!=='downloadMedia'||typeof args.targetId!=='string'||!args.targetId||Object.keys(args).some(key=>!['action','targetId','path','options'].includes(key)))throw Error('Invalid media download request');
+ validateLocatorPath(args.path);
+ validateTimeoutOptions(args.options===undefined?{}:args.options);
+}
+function readMediaSource(){
+ const get=(node,prototype,key)=>Object.getOwnPropertyDescriptor(prototype,key).get.call(node);
+ if(!get(this,Node.prototype,'isConnected'))throw Error('Media element detached');
+ if(get(this,Node.prototype,'ownerDocument')!==document)throw Error('Media element moved across documents');
+ const attr=(node,name)=>Element.prototype.getAttribute.call(node,name),tag=get(this,Element.prototype,'localName');
+ let node=this,url;
+ if(tag==='picture'){node=Element.prototype.querySelector.call(this,'img');if(!node)throw Error('Picture has no image');}
+ const kind=get(node,Element.prototype,'localName');
+ if(kind==='img')url=get(node,HTMLImageElement.prototype,'currentSrc')||get(node,HTMLImageElement.prototype,'src');
+ else if(kind==='video'||kind==='audio'){
+  url=get(node,HTMLMediaElement.prototype,'currentSrc')||get(node,HTMLMediaElement.prototype,'src');
+  if(!url){const source=Element.prototype.querySelector.call(node,'source[src]');if(source)url=get(source,HTMLSourceElement.prototype,'src');}
+ }else if(kind==='a')url=get(node,HTMLAnchorElement.prototype,'href');
+ else if(kind==='area')url=get(node,HTMLAreaElement.prototype,'href');
+ else if(kind==='source')url=get(node,HTMLSourceElement.prototype,'src');
+ else if(kind==='track')url=get(node,HTMLTrackElement.prototype,'src');
+ else if(kind==='image')url=attr(node,'href')||attr(node,'xlink:href');
+ else if(kind==='object')url=get(node,HTMLObjectElement.prototype,'data');
+ else if(kind==='embed')url=get(node,HTMLEmbedElement.prototype,'src');
+ else if(kind==='input'&&get(node,HTMLInputElement.prototype,'type')==='image')url=get(node,HTMLInputElement.prototype,'src');
+ if(!url)throw Error('Matched element does not expose a downloadable URL');
+ url=new URL(url,get(node,Node.prototype,'baseURI'));
+ if(!['http:','https:','data:','blob:'].includes(url.protocol))throw Error('Unsupported media URL protocol');
+ if(url.href.length>16*1024*1024)throw Error('Media URL exceeds the 16 MiB inline URL budget');
+ return {url:url.href,download:attr(this,'download')??''};
+}
+const mediaExtensions={'image/png':'.png','image/jpeg':'.jpg','image/webp':'.webp','image/gif':'.gif','image/svg+xml':'.svg','video/mp4':'.mp4','video/webm':'.webm','audio/mpeg':'.mp3','audio/mp4':'.m4a','audio/wav':'.wav','audio/ogg':'.ogg','text/plain':'.txt','text/html':'.html','text/csv':'.csv','text/markdown':'.md','application/pdf':'.pdf','application/json':'.json','application/zip':'.zip','application/vnd.apple.mpegurl':'.m3u8','application/x-mpegurl':'.m3u8','application/dash+xml':'.mpd'};
+export function mediaFilename(media,{headers={},contentType=null}){
+ const disposition=String(Object.entries(headers).find(([key])=>key.toLowerCase()==='content-disposition')?.[1]??'');
+ let name;const encoded=disposition.match(/(?:^|;)\s*filename\*\s*=\s*UTF-8'[^']*'([^;]*)/iu);
+ if(encoded)try{name=decodeURIComponent(encoded[1].trim());}catch{}
+ if(!name){const plain=disposition.match(/(?:^|;)\s*filename\s*=\s*(?:"((?:\\.|[^"\\])*)"|([^;]*))/iu);name=plain?.[1]?.replace(/\\(.)/gu,'$1')??plain?.[2]?.trim();}
+ if(!name)name=media.download;
+ if(!name&&/^https?:/u.test(media.url))try{name=decodeURIComponent(new URL(media.url).pathname.split('/').at(-1));}catch{}
+ name=path.posix.basename((name||'media').replaceAll('\\','/')).replace(/[<>:"|?*\p{Cc}\p{Cf}]/gu,'_').trim().replace(/^\.+|[. ]+$/gu,'')||'media';
+ const old=path.extname(name),mime=contentType?.split(';')[0].trim().toLowerCase(),extension=mediaExtensions[mime]??(/^\.[a-z0-9]{1,12}$/iu.test(old)?old:'.bin');
+ let stem=(old?name.slice(0,-old.length):name).replace(/[. ]+$/gu,'')||'media';
+ if(/^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/iu.test(stem.normalize('NFKC')))stem=`media-${stem}`;
+ return [...stem].slice(0,50).join('')+extension;
 }

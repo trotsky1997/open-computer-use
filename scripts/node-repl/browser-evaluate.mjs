@@ -1,6 +1,6 @@
 import {randomUUID} from 'node:crypto';
 import {Worker} from 'node:worker_threads';
-import {findBrowserPage} from './browser-playwright.mjs';
+import {findBrowserPage,resolveBrowserLocator,nativeBrowserFrame,nativeBrowserNode} from './browser-playwright.mjs';
 import {createReadWorld,validateEvaluation,encodeEvaluationValue,decodeEvaluationValue} from './browser-evaluate-dom.mjs';
 
 export class BrowserEvaluator {
@@ -33,15 +33,9 @@ export class BrowserEvaluator {
   const {page,session:root}=await record.wait(findBrowserPage(record.browser,args.targetId));check();
   if(!['http:','https:','about:','data:','blob:'].includes(new URL(page.url()).protocol))throw Error('Read-only evaluation requires a web page');
   page.setDefaultTimeout(remaining());
-  const resolve=(steps,scope=false)=>{
-   let current=page,frameOwner;
-   const convert=value=>value?.__ocuLocator?resolve(value.__ocuLocator):value?.__ocuRegExp?new RegExp(value.__ocuRegExp.source,value.__ocuRegExp.flags):Array.isArray(value)?value.map(convert):value&&typeof value==='object'?Object.fromEntries(Object.entries(value).map(([key,item])=>[key,convert(item)])):value;
-   for(const step of steps){current=current[step.method](...step.args.map(convert));if(typeof current.owner==='function')frameOwner=current.owner();}
-   return scope?{locator:current,frameOwner}:current;
-  };
   let frame=page.mainFrame(),handles=[];
   if(args.mode!=='page') {
-   const {locator,frameOwner}=resolve(args.path,true);
+   const {locator,frameOwner}=resolveBrowserLocator(page,args.path);
    if(args.mode==='element') {
     await record.wait(locator.waitFor({state:'attached',timeout:remaining()}));
     if(await record.wait(locator.count())!==1)throw Error('Evaluation locator must resolve to exactly one element');
@@ -54,18 +48,7 @@ export class BrowserEvaluator {
     finally{if(!record.error)await record.wait(owner.dispose());}
    }
   }
-  let session=root;
-  if(frame!==page.mainFrame()){
-   let ancestor=frame;
-   // In-process descendants use their nearest process-owning ancestor session.
-   while(ancestor && ancestor!==page.mainFrame()){
-    try{session=await record.wait(page.context().newCDPSession(ancestor));break;}
-    catch(error){if(!/does not have a separate CDP session/iu.test(error.message))throw error;ancestor=ancestor.parentFrame();}
-   }
-   if(!ancestor)throw Error('Evaluation frame detached');
-  }
-  // shortcut: pinned Playwright exposes exact native handle identity via toImpl; review this bridge on upgrades.
-  const nativeFrame=frame._connection.toImpl(frame),frameId=nativeFrame._id;
+  const {session,frameId}=await nativeBrowserFrame(page,root,frame,record.wait);
   await record.wait(session.send('Page.enable'));session.on('Page.frameNavigated',event=>{if(event.frame.id===frameId)record.cancel('Page navigated during read-only evaluation');});session.on('Page.navigatedWithinDocument',event=>{if(event.frameId===frameId)record.cancel('Page navigated during read-only evaluation');});
   page.on('close',()=>record.cancel('Evaluation tab closed'));
   page.on('crash',()=>record.cancel('Evaluation renderer crashed'));
@@ -82,9 +65,8 @@ export class BrowserEvaluator {
    const roots=await invoke('roots'),targets=[];
    for(const handle of handles) {
     if(await record.wait(handle.ownerFrame())!==frame)throw Error('Evaluation elements span multiple frames');
-    const native=handle._connection.toImpl(handle);
-    const {node}=await record.wait(native._context.delegate._client.send('DOM.describeNode',{objectId:native._objectId}));
-    const {object}=await record.wait(session.send('DOM.resolveNode',{backendNodeId:node.backendNodeId,executionContextId,objectGroup:group}));
+    const backendNodeId=await nativeBrowserNode(handle,record.wait);
+    const {object}=await record.wait(session.send('DOM.resolveNode',{backendNodeId,executionContextId,objectGroup:group}));
     targets.push(await invoke('seed',[{objectId:object.objectId}]));
    }
    const target=args.mode==='all'?{kind:'list',values:targets}:targets[0]??null;

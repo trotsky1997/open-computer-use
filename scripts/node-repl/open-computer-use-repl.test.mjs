@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import {spawnSync} from "node:child_process";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import { JsonLinePeer, PersistentJavaScriptSession, WorkerJavaScriptSession, parseListApps, createCuaApi, toolDefinitions, computerUseGuidance, virtualDisplayEnabled } from "./open-computer-use-repl.mjs";
@@ -625,3 +626,11 @@ for(const Session of [PersistentJavaScriptSession,WorkerJavaScriptSession]) {
    } finally {await session.close();}
  });
 }
+
+test('Worker sessions start from a parent using --input-type=module',()=>{
+ const source=`import {WorkerJavaScriptSession} from ${JSON.stringify(new URL('./open-computer-use-repl.mjs',import.meta.url).href)};
+ const session=new WorkerJavaScriptSession({native:{request(){throw Error('native unused');}}});
+ try{const result=await session.run('nodeRepl.write(42)');if(result.isError)throw Error(result.content.at(-1).text);console.log(result.content.at(-1).text);}finally{await session.close();}`;
+ const result=spawnSync(process.execPath,['--input-type=module','--eval',source],{encoding:'utf8',timeout:10000});
+ assert.equal(result.status,0,result.stderr||result.error?.message);assert.equal(result.stdout.trim(),'42');
+});

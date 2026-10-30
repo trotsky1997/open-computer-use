@@ -96,5 +96,10 @@ Real macOS headless Chromium 141 exported the public spreadsheet from Google's
 as CSV, XLSX and PDF. The anonymous YouTube watch response reported
 `LOGIN_REQUIRED` without captions. Signed-in Docs/Slides and YouTube exports,
 other providers/transports, headful and Linux/Windows, host/browser crashes,
-locator media downloads and remote artifact delivery remain open. Keep the whole
+browser download UI/permission integration and remote artifact delivery remain open. Keep the whole
 harness parity goal active.
+
+
+Locator-level image/media/file-link downloads are described in
+[browser media](browser-media.md). They share content ownership and the credentialed
+asset stream reader, with a separate 120-second operation deadline.

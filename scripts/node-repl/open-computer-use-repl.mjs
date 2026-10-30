@@ -917,7 +917,7 @@ export class WorkerJavaScriptSession {
   }
 
   #start() {
-    const worker = new Worker(new URL("./open-computer-use-kernel.mjs", import.meta.url));
+    const worker = new Worker(new URL("./open-computer-use-kernel.mjs", import.meta.url),{execArgv:[]});
     this.worker = worker;
     this.#newOwner(worker);
     worker.on("message", message => void this.#onMessage(worker, message));

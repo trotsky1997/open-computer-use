@@ -123,7 +123,7 @@ export class BrowserAssets {
     guard();const name=asset.name.replace(/[^\p{L}\p{N}._-]/gu,'_').slice(0,100)||asset.kind,filePath=path.join(directoryPath,`${asset.id}-${name}`);
     let contentType=null;
     try {
-     contentType=await this.download(state,asset,records,filePath,locations.get(asset.url),guard);
+     ({contentType}=await this.download(state,asset,records,filePath,locations.get(asset.url),guard));
      guard();assets.push({...asset,path:filePath,contentType});
     }catch(error){guard();await rm(filePath,{force:true});failures.push({id:asset.id,name:asset.name,url:asset.url,contentType,reason:error.message});}
    }
@@ -133,12 +133,12 @@ export class BrowserAssets {
  }
  async download(state,asset,records,filePath,frameId,guard) {
   if(asset.url.startsWith('data:')) {
-   const response=await fetch(asset.url);guard();await writeFile(filePath,Buffer.from(await response.arrayBuffer()));return response.headers.get('content-type');
+   const response=await fetch(asset.url);guard();await writeFile(filePath,Buffer.from(await response.arrayBuffer()),{flag:'wx',mode:0o600});return {contentType:response.headers.get('content-type'),headers:{}};
   }
   const routes=records.flatMap(record=>flattenFrames(record.frameTree).map(tree=>({...record,tree})));
   const route=routes.find(({tree})=>tree.frame.id===frameId)??routes.find(({tree})=>tree.resources?.some(resource=>resource.url===asset.url))??routes[0];
   const {session,tree}=route;
-  let stream,objectId,contentType=null;
+  let stream,objectId,contentType=null,headers={};
   try {
    if(asset.url.startsWith('blob:')) {
     const {executionContextId}=await session.send('Page.createIsolatedWorld',{frameId:tree.frame.id,worldName:'ocu-page-assets'});
@@ -149,12 +149,12 @@ export class BrowserAssets {
     const {uuid}=await session.send('IO.resolveBlob',{objectId});stream=`blob:${uuid}`;
    }else {
     const {resource}=await session.send('Network.loadNetworkResource',{frameId:tree.frame.id,url:asset.url,options:{disableCache:false,includeCredentials:true}});
-    stream=resource.stream;contentType=Object.entries(resource.headers??{}).find(([name])=>name.toLowerCase()==='content-type')?.[1]??null;
+    headers=resource.headers??{};stream=resource.stream;contentType=Object.entries(resource.headers??{}).find(([name])=>name.toLowerCase()==='content-type')?.[1]??null;
     if(!resource.success||!stream)throw Error(`Resource fetch failed: ${resource.httpStatusCode??resource.netErrorName??'no body'}`);
    }
    const file=await open(filePath,'wx',0o600);
    try {for(;;){guard();const chunk=await session.send('IO.read',{handle:stream,size:64*1024});await file.writeFile(chunk.base64Encoded?Buffer.from(chunk.data,'base64'):chunk.data);if(chunk.eof)break;}}finally{await file.close();}
-   return contentType;
+   return {contentType,headers};
   } finally {
    try{if(stream)await session.send('IO.close',{handle:stream});}
    finally{if(objectId)await session.send('Runtime.releaseObject',{objectId});}

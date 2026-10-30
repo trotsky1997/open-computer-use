@@ -159,6 +159,27 @@ Owned Chromium fixture flows verify every format route, byte/Unicode fidelity,
 cookie inclusion, file privacy, transcript paths, login/signature failures,
 child-frame tolerance, navigation and turn/reset cleanup. Real public Google
 Sheets CSV/XLSX/PDF exports passed. An anonymous YouTube response required login;
-authenticated real-provider exports, Docs/Slides, provider internals, media
-locators, delivery/retention, crash/transport and native desktop coverage stay
+authenticated real-provider exports, Docs/Slides, provider internals, native download UI/approval waits,
+delivery/retention, crash/transport and native desktop coverage stay
 open. See [content exports](../../browser-content.md). Keep the full goal active.
+
+## Locator media downloads
+
+The inspected `locator.downloadMedia({timeoutMs?})` interface is implemented in
+the existing content host service with a 120-second default deadline. Fixed native
+getters resolve exact nodes and frames, including responsive resources and
+credentialed HTTP(S)/data/Blob files. Response metadata supplies safe private
+filenames. Media operations fence node/source/document changes and use independent
+timeout signals, while owner cancellation joins all cleanup. Shared locator/native
+identity helpers retain the read-only evaluator's behavior. File-backed REPL
+workers use a clean Node CLI-flag list, fixing programmatic --input-type startup.
+
+Owned Chromium source/Worker checks cover composed locators, cookie-protected
+files, Unicode metadata, responsive images, getter spoofing, data/Blob/audio/video/
+caption resources, exact OOP/nested/same-URL frames, node replacement/adoption,
+strictness/errors, deadlines/sibling isolation, unrelated frame changes, selected
+frame navigation and reset/turn cleanup. The default deadline passed an 11-second
+held response. Node and shared read-only/assets/content/lifecycle/CLI regressions
+passed. See [locator media](../../browser-media.md). Browser download UI and
+approval-aware waiting, streaming/protected/provider fidelity, native desktop,
+other transports/platforms and artifact delivery remain open. Keep the full goal active.

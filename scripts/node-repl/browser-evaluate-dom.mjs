@@ -2,8 +2,18 @@ const selectors=new Set(['locator','getByRole','getByText','getByLabel','getByPl
 export function validateEvaluation({source,mode,path=[],options={}}) {
  if(typeof source!=='string'||!source.trim()||Buffer.byteLength(source)>1024*1024)throw Error('Evaluation requires a function or expression up to 1 MiB');
  if(!['page','element','all'].includes(mode)||!Array.isArray(path)||(mode==='page'&&path.length)||(mode!=='page'&&!path.length))throw Error('Invalid evaluation scope');
- if(!options||typeof options!=='object'||Array.isArray(options)||Object.keys(options).some(key=>key!=='timeoutMs')|| (options.timeoutMs!==undefined&&(!Number.isInteger(options.timeoutMs)||options.timeoutMs<0||options.timeoutMs>2147483647)))throw Error('Invalid evaluation timeoutMs');
- const visit=steps=>{if(!Array.isArray(steps))throw Error('Invalid evaluation locator');for(const step of steps){if(!step || !selectors.has(step.method)||!Array.isArray(step.args))throw Error('Invalid evaluation locator');const values=value=>{if(value && typeof value==='object'){if(value.__ocuLocator)visit(value.__ocuLocator);else for(const item of Object.values(value))values(item);}};step.args.forEach(values);}};visit(path);
+ validateTimeoutOptions(options);
+ if(mode!=='page')validateLocatorPath(path);
+}
+
+export function validateTimeoutOptions(options){
+ if(!options||typeof options!=='object'||Array.isArray(options)||Object.keys(options).some(key=>key!=='timeoutMs')|| (options.timeoutMs!==undefined&&(!Number.isInteger(options.timeoutMs)||options.timeoutMs<0||options.timeoutMs>2147483647)))throw Error('Invalid timeoutMs');
+}
+
+export function validateLocatorPath(path){
+ if(!Array.isArray(path)||!path.length)throw Error('An element locator is required');
+ if(Buffer.byteLength(JSON.stringify(path))>1024*1024)throw Error('Locator recipe exceeds 1 MiB');
+ const visit=steps=>{if(!Array.isArray(steps))throw Error('Invalid locator recipe');for(const step of steps){if(!step || !selectors.has(step.method)||!Array.isArray(step.args))throw Error('Invalid locator recipe');const values=value=>{if(value && typeof value==='object'){if(value.__ocuLocator)visit(value.__ocuLocator);else for(const item of Object.values(value))values(item);}};step.args.forEach(values);}};visit(path);
 }
 
 // Only this fixed reader runs in Chrome; evaluator source never enters the page.

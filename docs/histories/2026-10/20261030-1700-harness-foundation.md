@@ -864,3 +864,44 @@ YouTube path still needs real-provider verification. The temporary reference tab
 and transcript were removed. The user's existing tabs and browser settings were left unchanged. Signed-in Docs/Slides/YouTube, provider-schema fidelity, media locators,
 remote delivery/retention, crashes, headful/native desktop, Linux/Windows and the
 remaining transports/capabilities stay open. The full goal remains active.
+
+## Locator media downloads
+
+Added `locator.downloadMedia({timeoutMs?})` to source/Worker locator bindings and
+the existing BrowserContent host. It resolves the exact native node/frame with
+fixed isolated-world getters, handles selected image/picture sources, audio/video,
+caption/source elements, embedded media and file links, and downloads credentialed
+HTTP(S), data and Blob resources. Replaced/adopted nodes, changed sources and
+selected/main document navigation invalidate results. Timeouts default to 120
+seconds; zero disables the operation deadline. Each download owns its abort signal
+and connection, so a timeout leaves sibling downloads running. Owner turn/reset
+cleanup cancels pending reads and removes partial outputs while retaining finished
+private artifacts.
+
+The shared asset reader now returns response MIME/header metadata for safe media
+names. UTF-8 Content-Disposition metadata precedes download attributes and URL
+basenames; paths, device names, control characters and suffixes are normalized.
+Data URL files now use exclusive mode-0600 writes, matching HTTP/Blob files.
+Extracted shared locator validation/resolution and exact native frame/node helpers
+for media and read-only evaluation. Fixed kernel worker startup from programmatic
+`node --input-type=module` hosts by using an explicit empty worker CLI-flag list,
+as the evaluation worker already does. No dependency or CI was added.
+
+All 127 Node checks passed, including filename/request validation and the real
+stdin-module parent/worker regression. Disposable macOS headless Chromium 141
+source/Worker media smokes passed credentialed bytes, Unicode names, file privacy,
+responsive selection, getter spoofing, data/Blob/audio/video/caption resources,
+composed selectors, exact OOP/same-URL/nested frames, strict matching and failures,
+node replacement and cross-document adoption, timeout/sibling isolation, frame
+navigation and retained-artifact/turn/reset cleanup. An 11-second held response
+passed the default media deadline. The fixtures validate resource bytes and do
+not assert audio/video playback. Source/Worker read-only evaluation, assets,
+content exports, turn lifecycle and native-free CLI/MCP browser regressions passed.
+
+Reference Chrome confirmed first image/file download and server filename priority;
+further calls in that tab timed out and Blob was unsupported by that provider.
+The temporary tabs and two verified fixture files were removed. Existing user tabs
+and settings were left unchanged. CDP media uses private local artifacts; browser
+download UI/approval-aware waits, streaming/protected media/provider fidelity,
+headful/native desktop, Linux/Windows, crash recovery and remote delivery remain
+open. The full harness goal stays active.
