@@ -114,3 +114,19 @@ covers timeout/reset/close/external Worker termination and subsequent session
 recovery; cleanup-outage injection additionally checks stopped-session behavior
 and successful retry. Application results after cancellation still require fresh
 observation, and cross-process coordination remains open.
+
+The browser Playwright surface now includes expectNavigation, waitForURL and
+waitForLoadState. Main-frame event listeners are registered before the callback;
+URL/load completion is checked afterwards against a shared wait deadline. Action
+results and errors propagate, watcher rejections are consumed on disconnect, and
+invalid wait options are rejected before invoking the callback. Callback options
+are copied before execution. Subframe-only transitions do not complete the wait.
+
+Local Chrome scenarios cover redirect completion, same-document navigation,
+already-matching URL, slow document completion, callback failure, URL timeout and
+subframe exclusion. Worker scenarios cover callback return values and cancellation
+of an indefinite URL wait with subsequent session recovery. All 59 Node checks
+passed. Same-URL reload and option rejection were added to the final smoke pass.
+
+The final real-browser smoke passed same-URL reload and pre-action validation in
+addition to the navigation and cancellation scenarios above.

@@ -151,7 +151,7 @@ against background-page visibility. Concurrent focus emulation by other CDP clie
 is not coordinated; use one harness for a configured browser.
 
 Playwright actions discard prior native AX and screenshot indices. Read fresh
-state after an action. Read-only evaluation isolation, navigation/event wrappers,
+state after an action. Read-only evaluation isolation, download/file-chooser event wrappers,
 downloads, file choosers and other browser lifecycle integrations remain open.
 
 Worker locator actions acquire an exclusive focus lease owned by the host before
@@ -168,3 +168,32 @@ JavaScript timeout while CDP recovery completes. No interrupted action is replay
 A timeout can leave an action's application result uncertain; inspect current
 browser state before retrying. This protects Worker cancellation while the host is
 alive; separate host processes or other CDP clients are not jointly coordinated.
+
+## Navigation waits
+
+```js
+var result = await tab.playwright.expectNavigation(async () => {
+  await tab.playwright.getByRole("link", {name:"Continue"}).click();
+  return "clicked";
+}, {url:"**/result", waitUntil:"load", timeoutMs:5000});
+await tab.playwright.waitForURL("**/result", {waitUntil:"domcontentloaded"});
+await tab.playwright.waitForLoadState({state:"load", timeoutMs:5000});
+```
+
+`expectNavigation` registers a main-frame navigation listener before calling the
+action, then waits for the optional URL pattern and requested load state. It
+returns the action's value. Same-document navigation and same-URL reloads are
+supported; child-frame navigation alone does not satisfy the wait. URL strings
+use Playwright's glob matching. Main-frame navigation and load/URL waits share
+the supplied wait deadline; the callback also remains subject to the REPL's
+execution budget. Callback errors are propagated and pending watcher rejections
+are consumed during disconnect. The callback is never retried.
+
+`waitForURL` resolves when the current or future URL matches, with the requested
+load state. It additionally accepts `waitUntil:"commit"`. `waitForLoadState`
+accepts `state:"load"`, `"domcontentloaded"` or `"networkidle"`. The default wait
+timeout is 10 seconds; `timeoutMs:0` disables that local wait timeout while the
+Worker execution budget still applies. Invalid options fail before an action
+callback runs. Prefer a concrete URL or visible page state over network-idle on
+pages with persistent connections. Forced Worker termination closes its watcher
+connections through the existing cancellation path.

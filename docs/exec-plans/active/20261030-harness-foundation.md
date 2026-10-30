@@ -15,7 +15,7 @@ Build an independent, open computer-use harness on the upstream runtime, using t
 ## Next steps
 
 1. Host-owned focus leases now cover Worker timeout/reset/close/exit and cleanup retry. Continue to establish repeatable, privacy-safe native app scenarios for observation, input, stale indices, failures and session reset; measure behavior with the existing fixture before expanding the surface.
-2. Extend the CDP element-input and Playwright locator providers with full HTML drag-and-drop, isolated read-only evaluation, event lifecycle and broader platform coverage. Screenshot-bound coordinate click/scroll and pointer-widget drag are implemented and exercised on real Chrome. Validate stale target handling, focus and native-vs-DOM interaction independently; extend to extension and in-app transports.
+2. Extend the CDP element-input and Playwright locator providers with full HTML drag-and-drop, isolated read-only evaluation, download/file-chooser event lifecycle and broader platform coverage. Screenshot-bound coordinate click/scroll and pointer-widget drag are implemented and exercised on real Chrome. Validate stale target handling, focus and native-vs-DOM interaction independently; extend to extension and in-app transports.
 3. Validate the new output diffs on real multi-window applications, especially native index changes and screenshot-only observations. Full output is available with `disableDiffing: true`.
 4. Add remaining input operations according to observed platform capabilities and test on real desktops. Document unsupported behavior clearly.
 

@@ -47,6 +47,26 @@ export function createPlaywrightApi(endpoint, targetId, invalidate, focusLease) 
         invalidate();
       }
       try {
+        if (method === "expectNavigation") {
+          const [action, options] = args;
+          const timeout = options.timeoutMs ?? 10_000;
+          const deadline = Date.now() + timeout;
+          const remaining = () => timeout === 0 ? 0 : Math.max(1, deadline - Date.now());
+          const navigation = page.waitForEvent("framenavigated", {predicate:frame => frame === page.mainFrame(), timeout});
+          // Action failure closes the watcher connection; consume its rejection too.
+          navigation.catch(() => {});
+          try {
+            const value = await action();
+            await navigation;
+            if (options.url !== undefined) await page.waitForURL(options.url, {waitUntil:options.waitUntil ?? "load", timeout:remaining()});
+            else await page.waitForLoadState(options.waitUntil ?? "load", {timeout:remaining()});
+            return value;
+          } finally { invalidate(); }
+        }
+        if (method === "waitForLoadState") {
+          const options = args[0];
+          return await page.waitForLoadState(options.state ?? "load", {timeout:options.timeoutMs ?? 10_000});
+        }
         if (method === "domSnapshot") {
           const snapshots = [];
           for (const frame of page.frames()) snapshots.push(`${frame === page.mainFrame() ? "Page" : "Frame"}: ${frame.url()}\n${await frame.locator("body").ariaSnapshot()}`);
@@ -72,7 +92,23 @@ export function createPlaywrightApi(endpoint, targetId, invalidate, focusLease) 
     for (const method of path.length ? chains : selectors) {
       api[method] = (...args) => binding([...path, {method, args}]);
     }
-    if (!path.length) api.domSnapshot = () => invoke([], "domSnapshot", []);
+    if (!path.length) {
+      api.domSnapshot = () => invoke([], "domSnapshot", []);
+      api.expectNavigation = (action, options = {}) => {
+        if (typeof action !== "function") throw new Error("expectNavigation requires an action callback");
+        validateWaitOptions(options, ["timeoutMs", "url", "waitUntil"]);
+        return invoke([], "expectNavigation", [action, {...options}]);
+      };
+      api.waitForURL = (url, options = {}) => {
+        if (typeof url !== "string") throw new Error("waitForURL requires a URL or glob string");
+        validateWaitOptions(options, ["timeoutMs", "waitUntil"]);
+        return invoke([], "waitForURL", [url, {timeoutMs:10_000, ...options}]);
+      };
+      api.waitForLoadState = (options = {}) => {
+        validateWaitOptions(options, ["timeoutMs", "state"]);
+        return invoke([], "waitForLoadState", [{...options}]);
+      };
+    }
     if (path.length) api.all = async () => Array.from({length:await invoke(path, "count", [])}, (_,index) => binding([...path, {method:"nth",args:[index]}]));
     if (path.length) for (const method of [...reads, ...actions]) {
       api[method] = (...args) => invoke(path, method, args);
@@ -115,4 +151,16 @@ export class BrowserFocusLeases {
     const failure = results.find(result => result.status === "rejected");
     if (failure) throw failure.reason;
   }
+}
+
+
+function validateWaitOptions(options, allowed) {
+  if (!options || typeof options !== "object" || Array.isArray(options)) throw new Error("Navigation wait expects an options object");
+  for (const key of Object.keys(options)) if (!allowed.includes(key)) throw new Error(`Unsupported navigation wait option: ${key}`);
+  if (options.timeoutMs !== undefined && (!Number.isFinite(options.timeoutMs) || options.timeoutMs < 0)) throw new Error("timeoutMs must be non-negative and finite");
+  const loadStates = ["load", "domcontentloaded", "networkidle"];
+  if (options.state !== undefined && !loadStates.includes(options.state)) throw new Error("Invalid navigation state");
+  const waitStates = allowed.includes("url") ? loadStates : [...loadStates, "commit"];
+  if (options.waitUntil !== undefined && !waitStates.includes(options.waitUntil)) throw new Error("Invalid navigation waitUntil");
+  if (options.url !== undefined && typeof options.url !== "string") throw new Error("Navigation URL must be a string");
 }

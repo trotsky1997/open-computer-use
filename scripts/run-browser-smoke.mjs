@@ -4,6 +4,17 @@ import { createBrowserApi } from './node-repl/browser-cdp.mjs';
 import { WorkerJavaScriptSession } from './node-repl/open-computer-use-repl.mjs';
 if (!process.env.OPEN_COMPUTER_USE_CDP_URL) throw new Error('Set OPEN_COMPUTER_USE_CDP_URL to a disposable browser debugging origin');
 const server = createServer((req, res) => {res.setHeader('Content-Type', 'text/html');
+if (req.url === '/redirect') {res.writeHead(302,{Location:'/arrived'});res.end();return;}
+if (req.url === '/slow-navigation') {
+  res.write('<html><body><h1>Slow navigation</h1>');
+  setTimeout(()=>res.end('<p>Document completed</p></body></html>'),300);
+  return;
+}
+if (req.url === '/navigation') {
+  res.end(`<html><body><a href="/redirect">Redirect link</a><a href="#section">Same document</a><a href="/slow-navigation">Slow link</a><button>No navigation</button><iframe srcdoc='<a href="/arrived">Child navigation</a>'></iframe><div id="section">Section</div></body></html>`);
+  return;
+}
+if (req.url === '/arrived') {res.end('<html><body><h1>Navigation arrived</h1></body></html>');return;}
 if (req.url === '/locators') {
   res.end(`<html><body><label>User name<input placeholder="Enter your name"></label><input type="checkbox" aria-label="Accept"><select aria-label="Plan"><option value="basic">Basic</option><option value="pro">Pro</option></select><button data-testid="save" onclick="document.getElementById('result').textContent='Saved '+document.querySelector('input').value">Save</button><p id="result">Waiting</p><button>Duplicate</button><button>Duplicate</button><button disabled>Never enabled</button><ul><li>Alpha</li><li>Beta</li></ul><div id="dynamic"></div><iframe title="child" srcdoc="<label>Child field<input></label>"></iframe><script>window.showLate=()=>{const button=document.createElement('button');button.textContent='Late button';button.onclick=()=>button.textContent='Late clicked';document.getElementById('dynamic').appendChild(button)};setTimeout(showLate,500)</script></body></html>`);
   return;
@@ -200,6 +211,41 @@ try {
       await cancellation.close();
     }
   }
+  const navigationURL = url.replace('/first','/navigation');
+  await tab.goto(navigationURL);
+  await tab.playwright.waitForLoadState({state:'load'});
+  let invalidActionRan = false;
+  assert.throws(()=>tab.playwright.expectNavigation(()=>{invalidActionRan=true;},{waitUntil:'invalid'}),/Invalid navigation/);
+  assert.equal(invalidActionRan,false);
+  assert.throws(()=>tab.playwright.waitForLoadState({timeoutMs:-1}),/non-negative/);
+  const navigated = await tab.playwright.expectNavigation(async()=>{
+    await tab.playwright.getByRole('link',{name:'Redirect link'}).click();
+    return 'action result';
+  },{url:'**/arrived',waitUntil:'load',timeoutMs:5000});
+  assert.equal(navigated,'action result');
+  assert.match(await tab.getAXState({emit:false}),/Navigation arrived/);
+  await tab.playwright.waitForURL('**/arrived',{timeoutMs:500});
+  await tab.playwright.expectNavigation(()=>tab.reload(),{url:'**/arrived',timeoutMs:5000});
+  await tab.goto(navigationURL);
+  await tab.playwright.expectNavigation(()=>tab.playwright.getByRole('link',{name:'Same document'}).click(),{url:'**/navigation#section',timeoutMs:5000});
+  await tab.playwright.waitForURL('**/navigation#section',{waitUntil:'commit'});
+  await assert.rejects(tab.playwright.expectNavigation(async()=>{throw new Error('Action failed intentionally');}),/Action failed intentionally/);
+  await assert.rejects(tab.playwright.waitForURL('**/never-navigation',{timeoutMs:100}),/Timeout/);
+  await assert.rejects(tab.playwright.expectNavigation(()=>tab.playwright.frameLocator('iframe').getByRole('link',{name:'Child navigation'}).click(),{timeoutMs:300}),/Timeout/);
+  await tab.playwright.expectNavigation(()=>tab.playwright.getByRole('link',{name:'Slow link'}).click(),{url:'**/slow-navigation',waitUntil:'domcontentloaded',timeoutMs:5000});
+  await tab.playwright.waitForLoadState({state:'load'});
+  assert.match(await tab.getAXState({emit:false}),/Document completed/);
+  const navigationWorker = new WorkerJavaScriptSession({native:{async request(){throw new Error('Native not used');}}});
+  try {
+    await tab.goto(navigationURL);
+    let result = await navigationWorker.run(`var nt = await cua.getTab(${JSON.stringify(tab.id)}); var value = await nt.playwright.expectNavigation(async()=>{await nt.playwright.getByRole("link",{name:"Redirect link"}).click();return "Worker navigation";},{url:"**/arrived",timeoutMs:5000}); await nt.playwright.waitForLoadState({state:"load"}); nodeRepl.write(value);`);
+    assert.equal(result.isError,false,JSON.stringify(result.content));
+    assert.equal(result.content.at(-1).text,'Worker navigation');
+    result = await navigationWorker.run('await nt.playwright.waitForURL("**/never-navigation",{timeoutMs:0});',500);
+    assert.equal(result.isError,true);
+    assert.match(result.content.at(-1).text,/timed out/);
+    assert.equal((await navigationWorker.run('nodeRepl.write(42)')).content.at(-1).text,'42');
+  } finally {await navigationWorker.close();}
   await tab.goto(url.replace('/first','/pointer'));
   await assert.rejects(tab.click([50,40]), /fresh screenshot/);
   const pointerImage = await tab.getScreenshot({emit:false});
@@ -229,7 +275,7 @@ try {
   await assert.rejects(tab.click(pixel(50,40)), /geometry changed/);
   await tab.close();
   await assert.rejects(tab.getAXState(), /no longer available/);
-  console.log('PASS browser inventory, create/bind, AX, PNG, click/type/key/paste/scroll/setValue/selectText/coordinate-click/drag/scroll/playwright/cancellation, stale-index rejection, navigation/history/reload, close, worker inventory failure isolation');
+  console.log('PASS browser inventory, create/bind, AX, PNG, click/type/key/paste/scroll/setValue/selectText/coordinate-click/drag/scroll/playwright/cancellation/navigation-waits, stale-index rejection, navigation/history/reload, close, worker inventory failure isolation');
 } finally {
   if (tab && (await api.listTabs({emit:false})).some(item=>item.id===tab.id)) await tab.close();
   server.closeAllConnections();

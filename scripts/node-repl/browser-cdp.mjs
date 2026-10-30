@@ -162,6 +162,7 @@ tab.playwright exposes locator/getByRole/getByText/getByLabel/getByPlaceholder/g
 Chain locator/filter({hasText})/nth/first/last; read count/innerText/textContent/allTextContents/getAttribute/inputValue/isVisible/isEnabled/isChecked/waitFor;
 act with click/dblclick/fill/press/check/uncheck/setChecked/selectOption/hover/scrollIntoViewIfNeeded.
 Playwright resolves fresh elements and waits for actionability; ambiguous matches fail. Default action timeout is 10 seconds.
+Navigation waits: tab.playwright.expectNavigation(async action, {url?,waitUntil?,timeoutMs?}), waitForURL(url, {waitUntil?,timeoutMs?}), waitForLoadState({state?,timeoutMs?}). expectNavigation installs a main-frame watcher before running the action and returns its result after navigation.
 Playwright actions invalidate prior AX and screenshot indices. Read current state afterwards. Formatted paste remains unsupported.`;
 
 export function createBrowserApi(activeOutput, environment = process.env, focusLease) {

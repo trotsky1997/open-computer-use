@@ -240,3 +240,9 @@ and then replaces the kernel. Failed cleanup retains the lease and keeps the
 session stopped until a successful reset retry. A stale Worker cannot acknowledge
 new work or replay the interrupted browser action. See the browser contract for
 remaining cross-process and host-lifecycle boundaries.
+
+The Playwright adapter registers main-frame navigation watchers before action
+callbacks, then waits for the requested URL/load state and returns the callback
+result. URL and load waits also work independently. Watchers disconnect on failure,
+consume late rejection and are closed when a Worker is terminated; no callback is
+replayed. Subframe-only transitions do not satisfy a main-frame expectation.

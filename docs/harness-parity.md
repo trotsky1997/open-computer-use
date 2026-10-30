@@ -15,7 +15,7 @@ current native/browser documentation on 2026-10-30.
 | Browser text / pointer input | Element/coordinate clicks and scroll, pointer drag, Unicode input, value and range verification; real Chrome smoke | HTML drag-and-drop payloads, formatted paste, more keyboard/platform cases |
 | Browser locators | Playwright Core selectors, actions, frames, composition, snapshots and fresh resolution | Broader dynamic/shadow/cross-origin coverage and per-operation connection overhead |
 | Browser scripting | Locator APIs and rendered snapshots | Read-only page/locator evaluation with enforced isolation |
-| Navigation / event waits | Basic navigation exists, locator waitFor exists | expectNavigation, URL/load waits, download/file chooser lifecycle |
+| Navigation / event waits | Basic navigation, locator waitFor, expectNavigation and URL/load waits | Download/file chooser lifecycle and broader page event coverage |
 | Dialogs / clipboard / developer tools | Not exposed | Explicit dialog handles, session clipboard, logs and capability discovery |
 | Content / artifacts | Screenshots returned as binary | Content export, download delivery and artifact retention |
 | Host / session integration | Plugin installer, native permission boundaries, host-owned Worker focus cleanup with real timeout/reset/close/exit checks | Turn lifecycle, user takeover, ownership, managed tab cleanup and host integration |
