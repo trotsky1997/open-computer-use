@@ -225,3 +225,10 @@ geometry, revalidates geometry before dispatch and consumes the snapshot after
 input. Pixel pairs are mapped to CSS coordinates; pointer drags release the mouse
 in a finally block. The browser smoke covers pointer widgets and independent
 binding geometry invalidation; HTML drag-and-drop payloads remain open.
+
+The browser locator layer delegates to pinned Playwright Core over the configured
+CDP endpoint. Recipes retain selectors, not stale element handles. Each operation
+binds the exact target, resolves the locator, applies bounded waits and disconnects.
+Action operations use scoped virtual focus with explicit cleanup and discard old
+AX/screenshot observations. npm metadata and the plugin installer carry the same
+dependency. See [harness parity](harness-parity.md) for the broader unfinished scope.

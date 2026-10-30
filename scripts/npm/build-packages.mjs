@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { PLAYWRIGHT_VERSION } from "../node-repl/browser-playwright.mjs";
 
 import { spawnSync } from "node:child_process";
 import {
@@ -334,7 +335,7 @@ open-computer-use install-codex-plugin
 - Version: \`${version}\`
 - Supported npm platforms: \`darwin-arm64\`, \`darwin-x64\`, \`linux-arm64\`, \`linux-x64\`, \`win32-arm64\`, \`win32-x64\`
 - \`ocu js\` creates a one-shot JavaScript/native session; \`ocu repl\` keeps one session for the current terminal and preserves bindings between evaluations.
-- Both code-first commands use the Node executable that started the npm launcher. The npm launcher itself still requires Node.js 18 or newer to be available when the command starts.
+- Both code-first commands use the Node executable that started the npm launcher. The npm launcher itself still requires Node.js 22 or newer to be available when the command starts.
 - \`ocu mcp\` intentionally continues to expose the native 9-tool compatibility surface; the Codex plugin adapter exposes \`js\` / \`js_reset\` separately.
 - macOS still requires \`Accessibility\` and \`Screen Recording\` permissions.
 - Linux requires a signed-in desktop session with AT-SPI2 / D-Bus accessibility available for real app control.
@@ -373,8 +374,9 @@ function renderMetaPackageJson(packageName, version) {
     },
     keywords: packageKeywords(),
     engines: {
-      node: ">=18",
+      node: ">=22",
     },
+    dependencies: {"playwright-core":PLAYWRIGHT_VERSION},
     preferGlobal: true,
     publishConfig: {
       access: "public",
@@ -429,6 +431,7 @@ function copyInstallerScripts(packageRoot) {
     "open-computer-use-cli.mjs",
     "ocu-config.mjs",
     "browser-cdp.mjs",
+    "browser-playwright.mjs",
     "open-computer-use-repl.mjs",
     "open-computer-use-kernel.mjs",
   ]) {
@@ -437,6 +440,10 @@ function copyInstallerScripts(packageRoot) {
       path.join(packageRoot, "scripts", "node-repl", scriptName),
     );
   }
+  cpSync(
+    path.join(repoRoot, "scripts", "node-repl", "browser-playwright.mjs"),
+    path.join(packageRoot, "plugins", "open-computer-use", "scripts", "browser-playwright.mjs")
+  );
   cpSync(
     path.join(repoRoot, "scripts", "node-repl", "browser-cdp.mjs"),
     path.join(packageRoot, "plugins", "open-computer-use", "scripts", "browser-cdp.mjs")

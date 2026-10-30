@@ -72,3 +72,31 @@ invalidation. A focused check covers device-pixel scaling and invalid pairs. All
 57 Node checks passed. The smoke cleanup closes leftover local HTTP connections.
 HTML drag-and-drop payloads, real high-DPI/zoom coverage, headful focus and other
 platforms remain unverified.
+
+Browser bindings now expose Playwright Core locators with strict matching,
+actionability waits, frames, chaining, filter/has, and/or composition, all/nth,
+text reads, common form actions and rendered snapshots including child frames.
+Recipes resolve anew for each operation and survive navigation. timeoutMs maps to
+the upstream library's timeout. Actions invalidate prior AX/screenshot history.
+Targeted virtual focus enables background frame stability checks, and is explicitly
+disabled during normal success/error cleanup. Forced Worker termination cleanup
+remains pending and is documented as a known limit.
+
+Pinned playwright-core 1.64.1 and its lockfile were added. npm metadata declares
+the dependency; the plugin installer checks/copies it before use. A separate
+plugin-directory copy resolved its dependency and performed a live locator read.
+Node minimum version is now 22 across manifests and capability reporting. Third
+party notices and source setup instructions were updated. The expanded parity
+tracking document preserves the remaining browser, native and host requirements.
+
+Real Chrome validated labels/placeholders/roles/test IDs/regex selectors,
+checkboxes/selects, ambiguous-match refusal, delayed controls, iframe input,
+composition, rendered snapshots and navigation-stable recipes. Background
+visibility was restored after successful and failed actions. Existing coordinate
+smoke now derives its scale from visualViewport.width so scrollbar width is
+accounted for. All 57 Node checks passed, including staged dependency metadata.
+
+Final extended smoke also passed locator recipes retained across Worker calls,
+including regex selectors in the Worker realm. Background visibility restoration
+was verified on both success and strict-match failure. The remaining forced-Worker
+termination gap is explicitly retained in the parity plan.

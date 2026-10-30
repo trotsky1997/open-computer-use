@@ -29,7 +29,7 @@ function makePackage() {
   const nativePath = path.join(packageRoot, "dist", "fake-native");
   mkdirSync(scripts, { recursive: true });
   mkdirSync(path.dirname(nativePath), { recursive: true });
-  for (const name of ["open-computer-use-repl.mjs", "open-computer-use-kernel.mjs", "ocu-config.mjs", "browser-cdp.mjs"]) {
+  for (const name of ["open-computer-use-repl.mjs", "open-computer-use-kernel.mjs", "ocu-config.mjs", "browser-cdp.mjs", "browser-playwright.mjs"]) {
     cpSync(path.join(HERE, name), path.join(scripts, name));
   }
   writeFileSync(nativePath, `#!${process.execPath}
@@ -67,6 +67,9 @@ test("capability report keeps js and repl discoverable when components are missi
       platformPackages: { [`${process.platform}-${process.arch}`]: { executablePath: ["missing-native"] } },
     });
     assert.equal(report.runtime.node.available, true);
+    const oldNode = inspectCapabilities({packageRoot, platformPackages:{}, nodeVersion:"v20.20.0"});
+    assert.equal(oldNode.runtime.node.available, false);
+    assert.equal(oldNode.runtime.node.minimumVersion, "22.0.0");
     assert.equal(report.capabilities.js.available, false);
     assert.equal(report.capabilities.repl.available, false);
     assert.match(report.capabilities.js.unavailableReasons.join("\n"), /adapter is missing/);

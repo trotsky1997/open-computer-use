@@ -196,12 +196,14 @@ fi
 if [[ ! -f "${repl_source_root}/open-computer-use-repl.mjs" ]]; then
   repl_source_root="${plugin_source_root}/scripts"
 fi
-for repl_file in open-computer-use-repl.mjs open-computer-use-kernel.mjs ocu-config.mjs browser-cdp.mjs; do
+for repl_file in open-computer-use-repl.mjs open-computer-use-kernel.mjs ocu-config.mjs browser-cdp.mjs browser-playwright.mjs; do
   if [[ ! -f "${repl_source_root}/${repl_file}" ]]; then
     echo "Missing JS REPL runtime at ${repl_source_root}/${repl_file}" >&2
     exit 1
   fi
 done
+
+playwright_root="$(node -e 'const {createRequire}=require("node:module");const path=require("node:path");console.log(path.dirname(createRequire(path.join(process.argv[1],"package.json")).resolve("playwright-core/package.json")))' "${repo_root}")"
 
 plugin_version="$(node "${config_helper}" codex-plugin-version "${plugin_manifest}")"
 
@@ -221,6 +223,9 @@ cp -R "${plugin_source_root}/." "${plugin_install_root}/"
 node "${config_helper}" copy-into-dir "${plugin_install_root}" "${payload_path}"
 cp "${repl_source_root}/open-computer-use-repl.mjs" "${plugin_install_root}/scripts/open-computer-use-repl.mjs"
 cp "${repl_source_root}/open-computer-use-kernel.mjs" "${plugin_install_root}/scripts/open-computer-use-kernel.mjs"
+mkdir -p "${plugin_install_root}/node_modules"
+cp -R "${playwright_root}" "${plugin_install_root}/node_modules/playwright-core"
+cp "${repl_source_root}/browser-playwright.mjs" "${plugin_install_root}/scripts/browser-playwright.mjs"
 cp "${repl_source_root}/browser-cdp.mjs" "${plugin_install_root}/scripts/browser-cdp.mjs"
 cp "${repl_source_root}/ocu-config.mjs" "${plugin_install_root}/scripts/ocu-config.mjs"
 

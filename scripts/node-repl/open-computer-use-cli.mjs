@@ -57,12 +57,12 @@ export function inspectCapabilities({
   const paths = runtimePaths({ packageRoot, platformPackages, platform, arch });
   const nodeMajor = Number.parseInt(String(nodeVersion).replace(/^v/, "").split(".")[0], 10);
   const node = {
-    available: Boolean(execPath && nodeVersion && Number.isInteger(nodeMajor) && nodeMajor >= 18),
+    available: Boolean(execPath && nodeVersion && Number.isInteger(nodeMajor) && nodeMajor >= 22),
     version: nodeVersion,
     executable: execPath,
-    minimumVersion: "18.0.0",
+    minimumVersion: "22.0.0",
     source: "launcher",
-    bootstrapNote: "The npm launcher itself requires Node.js 18 or newer; a shell with no node on PATH cannot start this command.",
+    bootstrapNote: "The npm launcher itself requires Node.js 22 or newer; a shell with no node on PATH cannot start this command.",
   };
   const adapter = { available: existsSync(paths.adapterPath), path: paths.adapterPath };
   const kernel = { available: existsSync(paths.kernelPath), path: paths.kernelPath };
@@ -150,7 +150,7 @@ Code-first status:
 Notes:
   js creates one adapter/native session and exits after the evaluation.
   repl keeps one adapter/native session alive until .exit, Ctrl-D, or termination.
-  The npm launcher requires Node.js 18 or newer to start; run 'ocu capabilities --json' for component details.
+  The npm launcher requires Node.js 22 or newer to start; run 'ocu capabilities --json' for component details.
   'ocu mcp' intentionally keeps the native 9-tool compatibility surface.
   Use 'open-computer-use help <command>' for command-specific help.`;
 }

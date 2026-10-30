@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, readFileSync, writeFileSync, statSync, cpSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { PLAYWRIGHT_VERSION } from "./browser-playwright.mjs";
 import { configCommand, configPath, inspectConfig } from "./ocu-config.mjs";
 import { main } from "./open-computer-use-cli.mjs";
 function fixture(t) {
@@ -75,6 +76,8 @@ test("staged npm launcher includes config module and persists without a native l
   }
   const build = spawnSync(process.execPath, [path.join(root, "scripts/npm/build-packages.mjs"), "--configuration", "debug", "--skip-build"], { encoding: "utf8" });
   assert.equal(build.status, 0, build.stderr);
+  const stagedManifest = JSON.parse(readFileSync(path.join(root, "dist/npm/open-computer-use/package.json"), "utf8"));
+  assert.equal(stagedManifest.dependencies["playwright-core"], PLAYWRIGHT_VERSION);
   const pluginAdapter = path.join(root, "dist/npm/open-computer-use/plugins/open-computer-use/scripts/open-computer-use-repl.mjs");
   const imported = spawnSync(process.execPath, ["--input-type=module", "-e", "await import(process.argv[2])", process.execPath, pluginAdapter], { encoding: "utf8" });
   assert.equal(imported.status, 0, imported.stderr);

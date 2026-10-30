@@ -1,3 +1,5 @@
+import { createPlaywrightApi } from "./browser-playwright.mjs";
+
 export function screenshotPoint(point, image) {
   if (!Array.isArray(point) || point.length !== 2 || !point.every(Number.isFinite)) throw new Error("Coordinates must be two finite screenshot pixels");
   if (!image) throw new Error("No fresh screenshot; capture the tab before coordinate input");
@@ -148,7 +150,11 @@ and scroll(elementIndex, direction, pages). Read fresh AX state after actions.
 Screenshot-only reads invalidate element indices. Navigation invalidates all indices.
 setValue(elementIndex, value) replaces editable text; selectText(elementIndex, text, {prefix?,suffix?,selectionType?}) selects exact text or positions the cursor.
 click and scroll also accept screenshot pixel pairs. drag(fromPixelPair, toPixelPair) performs a pointer drag. Capture a new screenshot after input; changed document or viewport geometry invalidates coordinates. Pinch zoom is unsupported.
-Playwright locators and formatted paste remain unsupported.`;
+tab.playwright exposes locator/getByRole/getByText/getByLabel/getByPlaceholder/getByTestId/getByTitle/getByAltText/frameLocator.
+Chain locator/filter({hasText})/nth/first/last; read count/innerText/textContent/allTextContents/getAttribute/inputValue/isVisible/isEnabled/isChecked/waitFor;
+act with click/dblclick/fill/press/check/uncheck/setChecked/selectOption/hover/scrollIntoViewIfNeeded.
+Playwright resolves fresh elements and waits for actionability; ambiguous matches fail. Default action timeout is 10 seconds.
+Playwright actions invalidate prior AX and screenshot indices. Read current state afterwards. Formatted paste remains unsupported.`;
 
 export function createBrowserApi(activeOutput, environment = process.env) {
   function endpoint() {
@@ -277,6 +283,7 @@ export function createBrowserApi(activeOutput, environment = process.env) {
     }
     return Object.freeze({
       ...info(target),
+      playwright: createPlaywrightApi(() => { const value = endpoint(); if (!value) throw new Error("No CDP browser configured"); return value.href; }, target.id, invalidate),
       getAXState: ax,
       getScreenshot: screenshot,
       async getAXStateAndScreenshot(options = {}) {

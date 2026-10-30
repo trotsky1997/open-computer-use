@@ -84,7 +84,7 @@ that preserve loader and viewport geometry still require the agent to verify the
 latest observed UI.
 
 Pointer-widget dragging is verified. HTML drag-and-drop with DataTransfer payloads
-remains open, along with Playwright locators, formatted paste,
+remains open, along with formatted paste,
 extension transports and in-app browser integration remain open work. Native app bindings retain their existing input methods.
 
 `cua.getState()` returns `{apps, browsers, errors?}`; browsers contain their tabs.
@@ -113,3 +113,48 @@ stale, out-of-bounds or read-only targets, and verifies browser inventory and in
 through a Worker while native app discovery fails. It leaves existing
 tabs intact. This was exercised with headless Chrome on macOS; other platforms
 and headful browser focus behavior remain unverified.
+
+## Playwright locators
+
+Run `npm ci` in a source checkout. Published npm packages declare the pinned
+`playwright-core` dependency; the Codex plugin installer copies it into the
+installed plugin. The npm/REPL runtime requires Node.js 22 or newer. No browser
+binary is downloaded or launched by this dependency.
+
+```js
+var name = tab.playwright.getByLabel("User name");
+await name.fill("Hello", {timeoutMs: 5000});
+await tab.playwright.getByRole("checkbox", {name: "Accept"}).check();
+await tab.playwright.getByTestId("save").click();
+nodeRepl.write(await tab.playwright.domSnapshot());
+```
+
+The locator adapter delegates selectors and actions to Playwright Core. It supports
+role, text, label, placeholder, test-id, title, alt-text and CSS locators, nested
+locators, frameLocator, filter, nth/first/last, all and and/or composition. Text
+matchers can be strings or regular expressions. Actions include click/dblclick,
+fill, press/type/pressSequentially, check/uncheck/setChecked, selectOption, hover
+and scrollIntoViewIfNeeded. Reads include count, textContent/innerText,
+allTextContents, inputValue, getAttribute, isVisible/isEnabled/isChecked, waitFor
+and ariaSnapshot. `domSnapshot()` returns Playwright accessibility snapshots for
+the main page and available child frames. It returns text for explicit output
+with nodeRepl.write; it does not emit automatically.
+
+Locators resolve again for each operation, including after navigation, and retain
+Playwright's actionability checks and strict matching. The default operation timeout
+is 10 seconds; `timeoutMs` maps to Playwright's timeout. Each operation connects to
+the exact CDP target and disconnects afterwards, preserving browser tabs. Action
+operations temporarily emulate focus for the target's frame-based stability
+checks and explicitly disable that emulation during cleanup. The page's internal
+focus can change as a result of input. Success and failure cleanup were checked
+against background-page visibility. Concurrent focus emulation by other CDP clients
+is not coordinated; use one harness for a configured browser.
+
+Playwright actions discard prior native AX and screenshot indices. Read fresh
+state after an action. Read-only evaluation isolation, navigation/event wrappers,
+downloads, file choosers and other browser lifecycle integrations remain open.
+
+Forced Worker termination can bypass the operation's finally cleanup and leave
+virtual focus enabled. Host-owned cancellation cleanup is pending. Avoid inferring
+remote action failure from a REPL timeout; inspect current browser state before
+retrying an action.

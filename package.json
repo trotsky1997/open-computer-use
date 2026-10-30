@@ -9,5 +9,11 @@
     "package:release-assets": "./scripts/package-github-release-assets.sh",
     "package:skill": "./scripts/package-skill.sh",
     "release:notes:validate": "node ./scripts/validate-github-release-notes.mjs"
+  },
+  "dependencies": {
+    "playwright-core": "1.64.1"
+  },
+  "engines": {
+    "node": ">=22"
   }
 }

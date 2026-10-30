@@ -4,13 +4,28 @@ import { createBrowserApi } from './node-repl/browser-cdp.mjs';
 import { WorkerJavaScriptSession } from './node-repl/open-computer-use-repl.mjs';
 if (!process.env.OPEN_COMPUTER_USE_CDP_URL) throw new Error('Set OPEN_COMPUTER_USE_CDP_URL to a disposable browser debugging origin');
 const server = createServer((req, res) => {res.setHeader('Content-Type', 'text/html');
+if (req.url === '/locators') {
+  res.end(`<html><body><label>User name<input placeholder="Enter your name"></label><input type="checkbox" aria-label="Accept"><select aria-label="Plan"><option value="basic">Basic</option><option value="pro">Pro</option></select><button data-testid="save" onclick="document.getElementById('result').textContent='Saved '+document.querySelector('input').value">Save</button><p id="result">Waiting</p><button>Duplicate</button><button>Duplicate</button><ul><li>Alpha</li><li>Beta</li></ul><div id="dynamic"></div><iframe title="child" srcdoc="<label>Child field<input></label>"></iframe><script>window.showLate=()=>{const button=document.createElement('button');button.textContent='Late button';button.onclick=()=>button.textContent='Late clicked';document.getElementById('dynamic').appendChild(button)};setTimeout(showLate,500)</script></body></html>`);
+  return;
+}
 if (req.url === '/pointer') {
-  res.end(`<html><body style="margin:0;min-height:2000px"><p id="viewport-width" style="position:absolute;left:300px;top:20px"></p><button style="position:absolute;left:20px;top:20px;width:100px;height:40px" onclick="this.textContent='Coordinate clicked'">Coordinate button</button><div role="slider" aria-label="Drag area" style="position:absolute;left:20px;top:100px;width:240px;height:60px;background:lightblue" onmousedown="window.dragging=true">Drag here</div><p id="drag-state" style="position:absolute;left:300px;top:100px">Not dragged</p><div role="region" aria-label="Coordinate scroll" style="position:absolute;left:20px;top:220px;width:240px;height:100px;overflow:auto" onscroll="document.getElementById('scroll-feedback').textContent='Coordinate scrolled'"><p style="height:1500px">Long content</p></div><p id="scroll-feedback" style="position:absolute;left:300px;top:220px">Not scrolled</p><script>document.getElementById("viewport-width").textContent="Viewport width "+innerWidth;window.onmousemove=e=>{if(window.dragging&&e.buttons===1)document.getElementById('drag-state').textContent='Dragged '+e.clientX};window.onmouseup=()=>{window.dragging=false}</script></body></html>`);
+  res.end(`<html><body style="margin:0;min-height:2000px"><p id="viewport-width" style="position:absolute;left:300px;top:20px"></p><button style="position:absolute;left:20px;top:20px;width:100px;height:40px" onclick="this.textContent='Coordinate clicked'">Coordinate button</button><div role="slider" aria-label="Drag area" style="position:absolute;left:20px;top:100px;width:240px;height:60px;background:lightblue" onmousedown="window.dragging=true">Drag here</div><p id="drag-state" style="position:absolute;left:300px;top:100px">Not dragged</p><div role="region" aria-label="Coordinate scroll" style="position:absolute;left:20px;top:220px;width:240px;height:100px;overflow:auto" onscroll="document.getElementById('scroll-feedback').textContent='Coordinate scrolled'"><p style="height:1500px">Long content</p></div><p id="scroll-feedback" style="position:absolute;left:300px;top:220px">Not scrolled</p><script>document.getElementById("viewport-width").textContent="Viewport width "+visualViewport.width;window.onmousemove=e=>{if(window.dragging&&e.buttons===1)document.getElementById('drag-state').textContent='Dragged '+e.clientX};window.onmouseup=()=>{window.dragging=false}</script></body></html>`);
   return;
 }
  res.end(`<html><title>OCU ${req.url}</title><body><h1>Browser harness ${req.url}</h1><label>Name<input aria-label="Name"></label><textarea aria-label="Notes"></textarea><div contenteditable="true" role="textbox" aria-label="Rich"><span>head tar</span><b>get tail</b></div><input aria-label="Read only" readonly value="original"><button onclick="this.textContent='Clicked'">Test button</button><div role="region" aria-label="Scroll area" tabindex="0" style="height:100px;overflow:auto" onscroll="document.getElementById('scroll-state').textContent='Scrolled'"><p style="height:1800px">Long content</p></div><p id="scroll-state">Not scrolled</p><div style="position:relative;width:100px;height:40px"><button>Covered button</button><div style="position:absolute;inset:0"></div></div></body></html>`);});
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const api = createBrowserApi(() => ({write() {}, async emitImage() {}}));
+async function visibility(tabId) {
+  const targets = await (await fetch(new URL('/json/list', process.env.OPEN_COMPUTER_USE_CDP_URL))).json();
+  const target = targets.find(item=>item.id===tabId);
+  const ws = new WebSocket(target.webSocketDebuggerUrl);
+  return new Promise((resolve,reject)=>{
+    const timer=setTimeout(()=>{ws.close();reject(new Error('focus probe timed out'));},5000);
+    ws.addEventListener('open',()=>ws.send(JSON.stringify({id:1,method:'Runtime.evaluate',params:{expression:'document.visibilityState',returnByValue:true}})));
+    ws.addEventListener('error',()=>{clearTimeout(timer);ws.close();reject(new Error('focus probe failed'));});
+    ws.addEventListener('message',event=>{const message=JSON.parse(event.data);if(message.id===1){clearTimeout(timer);ws.close();message.error?reject(new Error(message.error.message)):resolve(message.result.result.value);}});
+  });
+}
 let tab;
 try {
   assert.equal((await api.listBrowsers({emit:false}))[0].type, 'cdp');
@@ -100,11 +115,59 @@ try {
     assert.equal(typed.isError, false, JSON.stringify(typed.content));
     assert.ok(typed.content.some(item => item.text?.includes('value="Worker input verified"')));
   } finally {await session.close();}
+  await tab.goto(url.replace('/first','/locators'));
+  const originalVisibility = await visibility(tab.id);
+  const user = tab.playwright.getByLabel('User name');
+  await user.fill('Locator 中文🙂');
+  assert.equal(await user.inputValue(), 'Locator 中文🙂');
+  assert.equal(await tab.playwright.getByRole('button', {name:/^Save$/}).count(), 1);
+  assert.equal(await tab.playwright.getByPlaceholder('Enter your name').inputValue(), 'Locator 中文🙂');
+  await tab.playwright.getByRole('checkbox', {name:'Accept'}).check();
+  assert.equal(await visibility(tab.id), originalVisibility);
+  assert.equal(await tab.playwright.getByRole('checkbox', {name:'Accept'}).isChecked(), true);
+  await tab.playwright.getByLabel('Plan').selectOption('pro');
+  assert.equal(await tab.playwright.getByLabel('Plan').inputValue(), 'pro');
+  await tab.playwright.getByTestId('save').click();
+  assert.equal(await tab.playwright.getByText('Saved Locator 中文🙂', {exact:true}).innerText(), 'Saved Locator 中文🙂');
+  const duplicate = tab.playwright.getByRole('button', {name:'Duplicate',exact:true});
+  assert.equal(await duplicate.count(), 2);
+  await assert.rejects(duplicate.click({timeoutMs:1000}), /strict mode violation/);
+  assert.equal(await visibility(tab.id), originalVisibility);
+  assert.equal(await duplicate.nth(1).innerText(), 'Duplicate');
+  assert.equal((await duplicate.all()).length, 2);
+  assert.equal(await tab.playwright.getByRole('button').and(tab.playwright.getByTestId('save')).count(), 1);
+  assert.equal(await tab.playwright.getByTestId('save').or(duplicate).count(), 3);
+  assert.equal(await tab.playwright.locator('body').filter({has:tab.playwright.getByTestId('save')}).count(), 1);
+  assert.equal(await tab.playwright.locator('li').filter({hasText:'Beta'}).innerText(), 'Beta');
+  await tab.playwright.frameLocator('iframe').getByLabel('Child field').fill('Frame verified');
+  assert.equal(await tab.playwright.frameLocator('iframe').getByLabel('Child field').inputValue(), 'Frame verified');
+  const snapshot = await tab.playwright.domSnapshot();
+  assert.match(snapshot, /User name/);
+  assert.match(snapshot, /Child field/);
+  await tab.playwright.getByRole('button', {name:'Late button',exact:true}).click({timeoutMs:5000});
+  assert.equal(await tab.playwright.getByRole('button', {name:'Late clicked'}).isVisible(), true);
+  assert.equal((await api.listTabs({emit:false})).some(item=>item.id===tab.id), true);
+  await tab.getAXState();
+  const staleButton = find(await tab.getAXState({emit:false}), 'button', 'Save');
+  await tab.playwright.getByTestId('save').click();
+  await assert.rejects(tab.click(staleButton), /stale element index/);
+  await tab.goto(url.replace('/first','/locators'));
+  await user.fill('Locator survives navigation');
+  assert.equal(await user.inputValue(), 'Locator survives navigation');
+  const locatorWorker = new WorkerJavaScriptSession({native:{async request(){throw new Error('Native not used');}}});
+  try {
+    let result = await locatorWorker.run(`var locatorTab = await cua.getTab(${JSON.stringify(tab.id)}); var userLocator = locatorTab.playwright.getByLabel("User name"); await userLocator.fill("Worker locator"); nodeRepl.write(await userLocator.inputValue());`);
+    assert.equal(result.isError, false, JSON.stringify(result.content));
+    assert.equal(result.content.at(-1).text, 'Worker locator');
+    result = await locatorWorker.run(`await userLocator.fill("Persistent worker locator"); nodeRepl.write(await locatorTab.playwright.getByRole("button", {name:/^Save$/}).count());`);
+    assert.equal(result.isError, false, JSON.stringify(result.content));
+    assert.equal(result.content.at(-1).text, '1');
+  } finally {await locatorWorker.close();}
   await tab.goto(url.replace('/first','/pointer'));
   await assert.rejects(tab.click([50,40]), /fresh screenshot/);
   const pointerImage = await tab.getScreenshot({emit:false});
   const pointerState = await tab.getAXState({emit:false});
-  const width = Number(pointerState.match(/Viewport width (\d+)/)[1]);
+  const width = Number(pointerState.match(/Viewport width ([\d.]+)/)[1]);
   const scale = pointerImage.readUInt32BE(16) / width;
   const pixel = (x,y) => [x*scale,y*scale];
   await tab.click(pixel(50,40));
@@ -129,7 +192,7 @@ try {
   await assert.rejects(tab.click(pixel(50,40)), /geometry changed/);
   await tab.close();
   await assert.rejects(tab.getAXState(), /no longer available/);
-  console.log('PASS browser inventory, create/bind, AX, PNG, click/type/key/paste/scroll/setValue/selectText/coordinate-click/drag/scroll, stale-index rejection, navigation/history/reload, close, worker inventory failure isolation');
+  console.log('PASS browser inventory, create/bind, AX, PNG, click/type/key/paste/scroll/setValue/selectText/coordinate-click/drag/scroll/playwright, stale-index rejection, navigation/history/reload, close, worker inventory failure isolation');
 } finally {
   if (tab && (await api.listTabs({emit:false})).some(item=>item.id===tab.id)) await tab.close();
   server.closeAllConnections();

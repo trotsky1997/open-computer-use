@@ -93,3 +93,12 @@ DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
 THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+## Playwright Core
+
+The browser locator provider uses `playwright-core` 1.64.1, maintained by
+Microsoft and contributors under the Apache License 2.0. Source and license:
+https://github.com/microsoft/playwright and
+https://github.com/microsoft/playwright/blob/v1.64.1/LICENSE.
+The dependency's own LICENSE and ThirdPartyNotices files accompany its installed
+package, including the copy included by the Codex plugin installer.
