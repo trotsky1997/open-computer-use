@@ -1,7 +1,7 @@
 import {isAbsolute} from "node:path";
 import {stat} from "node:fs/promises";
 
-const active = new Map();
+import {browserPointerLeases as active} from "./browser-input.mjs";
 
 export function validateDrop(payload, options = {}) {
   if (!payload || typeof payload !== "object" || Array.isArray(payload) || Object.keys(payload).some(key=>!["data","files"].includes(key))) throw new Error("drop expects data and/or absolute file paths");
@@ -50,7 +50,7 @@ export class BrowserDrops {
       const endpoint = this.endpoint();
       if (!endpoint) throw new Error("No CDP browser configured");
       if (this.closedOwners.has(owner)) throw new Error("Native drop session closed");
-      if (active.has(endpoint)) throw new Error("A native drop already owns this browser");
+      if (active.has(endpoint)) throw new Error("A native pointer action already owns this browser");
       const lease = {id:++this.nextId,owner,endpoint,targetId:args.targetId,data,stage:0,started:false,canceled:false,sessions:new Map()};
       this.leases.set(lease.id,lease);
       active.set(endpoint,lease);

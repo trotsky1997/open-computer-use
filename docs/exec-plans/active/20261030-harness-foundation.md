@@ -57,3 +57,12 @@ are implemented; an assert-based Swift check emits no GUI input. Real AppKit
 verification is pending normal Mac unlock. Continue that check, remaining native
 input/paste/scroll operations, other platforms and the broader browser/host audit.
 See [native held clicks](../../native-held-clicks.md). The full goal stays active.
+
+
+## Browser held-click phase
+
+Raw CDP click key/durationMs now uses host-owned connections and release state.
+Managed pointer leases are shared with data drops and checked by raw input and
+locator action entry points. Continue press-key duration, legacy/native transport
+ownership, focus-loss/headful/platform checks and the broader feature audit.
+See [browser held clicks](../../browser-held-input.md). The full goal remains active.

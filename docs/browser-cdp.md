@@ -470,3 +470,11 @@ crashes, Linux and Windows remain open validation.
 Primary references: [Chromium's headless clipboard setup](https://raw.githubusercontent.com/chromium/chromium/main/chrome/browser/chrome_for_testing/chrome_browser_main_extra_parts_cft.cc),
 [virtual clipboard design](https://raw.githubusercontent.com/chromium/chromium/main/docs/chrome_for_testing/README.md),
 [Browser.getBrowserCommandLine](https://chromedevtools.github.io/devtools-protocol/tot/Browser/#method-getBrowserCommandLine).
+
+
+## Held native input
+
+The tab click wrapper now accepts key/durationMs with host-owned press/release
+state, duration waits, dialog continuation and cleanup recovery. See
+[browser held clicks](browser-held-input.md) for semantics, verified flows and
+remaining ownership/platform boundaries.

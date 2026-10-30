@@ -341,3 +341,12 @@ cancellation scope, retaining existing protected authorization and capture
 requirements. Native transport replacement waits for old-process exit, including
 lazy startup and source-level sessions. See [native held clicks](native-held-clicks.md)
 for schema gating, exact verification and current lock/platform boundaries.
+
+
+BrowserInputs owns held CDP click sequences outside the Worker. It shares the
+configured-origin pointer lease with BrowserDrops, guards document/geometry
+before presses, and releases buttons/keys through a fresh controller after
+cancellation. Raw input and locator action entry points consult this lease.
+Cleanup drains release dialogs and retains failed pointer/focus ownership for
+retry. Source-level sessions use the same manager with local focus cleanup.
+See [browser held clicks](browser-held-input.md).

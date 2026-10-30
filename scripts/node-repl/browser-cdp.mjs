@@ -1,3 +1,4 @@
+import {BrowserInputs,keyEvent,validateClick} from "./browser-input.mjs";
 import { BrowserDownloads } from "./browser-downloads.mjs";
 import { BrowserClipboard } from "./browser-clipboard.mjs";
 import {BrowserDrops} from "./browser-drop.mjs";
@@ -61,27 +62,7 @@ export function screenshotRegion(options, geometry) {
   return region;
 }
 
-export function keyEvent(key) {
-  if (typeof key !== "string" || !key) throw new Error("pressKey requires a key");
-  const parts = key.split("+");
-  const value = parts.pop();
-  let modifiers = 0;
-  for (const part of parts) {
-    const mask = {alt:1,ctrl:2,control:2,meta:4,super:4,cmd:4,shift:8}[part.toLowerCase()];
-    if (!mask) throw new Error(`Unsupported key modifier: ${part}`);
-    modifiers |= mask;
-  }
-  const named = {Return:["Enter",13],Enter:["Enter",13],Tab:["Tab",9],Escape:["Escape",27],BackSpace:["Backspace",8],Delete:["Delete",46],Up:["ArrowUp",38],Down:["ArrowDown",40],Left:["ArrowLeft",37],Right:["ArrowRight",39],Home:["Home",36],End:["End",35],Page_Up:["PageUp",33],Page_Down:["PageDown",34],space:[" ",32]};
-  const entry = named[value];
-  if (!entry && [...value].length !== 1) throw new Error(`Unsupported key: ${value}`);
-  const result = {key:entry?.[0] ?? value, windowsVirtualKeyCode:entry?.[1] ?? (/^[a-z0-9]$/iu.test(value) ? value.toUpperCase().charCodeAt(0) : 0), modifiers};
-  if (!(modifiers & 7) && ([...value].length === 1 || value === "space")) result.text = modifiers & 8 ? result.key.toUpperCase() : result.key;
-  if (/^[a-z]$/iu.test(value)) result.code = `Key${value.toUpperCase()}`;
-  // macOS CDP requires explicit editor commands for these shortcuts.
-  const command = {a:"selectAll",c:"copy",x:"cut",v:"paste"}[value.toLowerCase()];
-  if (process.platform === "darwin" && modifiers === 4 && command) result.commands = [command];
-  return result;
-}
+export {keyEvent} from "./browser-input.mjs";
 
 // Runs in the page realm; keep all dependencies inside the function.
 function editText(operation, text, options) {
@@ -479,9 +460,10 @@ Use cua.listTabs(), cua.getTab(id or {url}), and cua.createBrowserTab("cdp", url
 Tab bindings expose getAXState(), getScreenshot(), getAXStateAndScreenshot(), screenshot(),
 goto(url), back(), forward(), reload(), and close(). Observations emit by default;
 pass {emit:false} to suppress output. AX state uses browser accessibility node IDs.
-Tab input: click(elementIndex, {mouseButton?, clickCount?}), typeText(elementIndexOrNull, text),
+Tab input: click(elementIndex, {mouseButton?, clickCount?, key?, durationMs?}), typeText(elementIndexOrNull, text),
 pressKey(elementIndexOrNull, key), paste(elementIndexOrNull, text, {format:"text"|"html"}),
 and scroll(elementIndex, direction, pages). Read fresh AX state after actions.
+Held click keys/chords stay down across the click sequence; durationMs holds each press (finite, non-negative). Uses host-owned trusted CDP events and virtual focus. Ordinary keys type at the current focus before the click. Managed pointer actions block other raw input/locator actions until release; reset/timeout/close releases held state, and cleanup failure retains ownership for retry. Dialogs can be answered in later calls. Releases may finish already admitted effects.
 Screenshot-only reads invalidate element indices. Navigation invalidates all indices.
 setValue(elementIndex, value) replaces editable text; selectText(elementIndex, text, {prefix?,suffix?,selectionType?}) selects exact text or positions the cursor.
 click and scroll also accept screenshot pixel pairs. drag(fromPixelPair, toPixelPair) performs a pointer drag. Capture a new screenshot after input; changed document or viewport geometry invalidates coordinates. Pinch zoom is unsupported.
@@ -498,7 +480,7 @@ Clipboard: tab.clipboard.read()/readText()/write(items)/writeText(text) uses the
 Browser capabilities: await browser.capabilities.list(), then get("viewport") and documentation(). viewport.set({width,height}) applies explicit CSS dimensions for responsive tasks; viewport.reset() returns to normal sizing. The host cleans temporary overrides on reset/timeout/close. Competing sessions fail explicitly. Use existing sizing during normal tasks.
 Screenshots: tab.screenshot({fullPage?,clip?}) returns JPEG bytes with no implicit output; use nodeRepl.emitImage(bytes). getScreenshot returns/emits PNG. clip uses CSS pixels relative to the viewport or full-page area. Pixel input maps cropped viewport images back to CSS; full-page images require a new viewport capture before input. Geometry and viewport-revision changes invalidate capture coordinates.`;
 
-export function createBrowserApi(activeOutput, environment = process.env, {focusLease, downloadRequest, logRequest, dialogRequest, clipboardRequest, viewportRequest, dropRequest, onDispose = () => {}} = {}) {
+export function createBrowserApi(activeOutput, environment = process.env, {focusLease, downloadRequest, logRequest, dialogRequest, clipboardRequest, viewportRequest, dropRequest, inputRequest, onDispose = () => {}} = {}) {
   const clipboard = clipboardRequest ? undefined : new BrowserClipboard(() => endpoint()?.href,withConnection);
   const clipboardOwner = {};
   if (clipboard) onDispose(() => clipboard.cleanup(clipboardOwner));
@@ -515,6 +497,10 @@ export function createBrowserApi(activeOutput, environment = process.env, {focus
   const dialogOwner = {};
   if (dialogs) onDispose(() => dialogs.cleanup(dialogOwner));
   const requestDialog = dialogRequest ?? (args => dialogs.request(dialogOwner,args));
+  const inputs=inputRequest ? undefined : new BrowserInputs(()=>endpoint()?.href,openConnection,()=>requestViewport({action:"state"}),undefined,(_owner,targetId)=>requestDialog({action:"state",targetId}));
+  const inputOwner={};
+  if(inputs) onDispose(()=>inputs.cleanup(inputOwner));
+  const requestInput=inputRequest ?? (args=>inputs.request(inputOwner,args));
   const checkDialog = targetId => requestDialog({action:"check",targetId});
   async function withDialogAction(targetId, operation) {
     const id = await requestDialog({action:"watch",targetId});
@@ -581,6 +567,7 @@ export function createBrowserApi(activeOutput, environment = process.env, {focus
     };
     const command = (method, params) => operate(send => send(method, params));
     const input = operation => withDialogAction(target.id, () => operate(async send => {
+      await requestInput({action:"check"});
       await waitForBrowserEventReady(endpoint().href, target.id);
       try { return await operation(send); }
       finally { capture = undefined; }
@@ -680,7 +667,7 @@ export function createBrowserApi(activeOutput, environment = process.env, {focus
         await requestLogs({action:"start",targetId:target.id});
         return requestLogs({action:"read",targetId:target.id,options});
       }}),
-      playwright: createPlaywrightApi(() => { const value = endpoint(); if (!value) throw new Error("No CDP browser configured"); return value.href; }, target.id, invalidate, focusLease, requestDownload, operation => withDialogAction(target.id,operation), () => requestDialog({action:"checkPlaywright",targetId:target.id}), requestDrop),
+      playwright: createPlaywrightApi(() => { const value = endpoint(); if (!value) throw new Error("No CDP browser configured"); return value.href; }, target.id, invalidate, focusLease, requestDownload, operation => withDialogAction(target.id,operation), async action => {await requestDialog({action:"checkPlaywright",targetId:target.id});if(action) await requestInput({action:"check"});}, requestDrop),
       async getJsDialog() {
         const dialog = await requestDialog({action:"get",targetId:target.id});
         if (!dialog) return undefined;
@@ -695,12 +682,10 @@ export function createBrowserApi(activeOutput, environment = process.env, {focus
         return { state: await ax(options), screenshot: image };
       },
       async click(index, options = {}) {
-        for (const key of Object.keys(options)) if (!["mouseButton", "clickCount"].includes(key)) throw new Error(`Unsupported click option: ${key}`);
-        const button = ({l:"left",r:"right",m:"middle"})[options.mouseButton] ?? options.mouseButton ?? "left";
-        const clickCount = options.clickCount ?? 1;
-        if (!["left", "right", "middle"].includes(button) || !Number.isInteger(clickCount) || clickCount < 1 || clickCount > 3) throw new Error("Invalid click button or count");
+        const {button,count:clickCount}=validateClick(options);
         await input(async send => {
           const position = await point(send, index);
+          if(options.key!==undefined || options.durationMs!==undefined) return requestInput({targetId:target.id,position,geometry:await geometry(send),options});
           for (let count = 1; count <= clickCount; count++) {
             await send("Input.dispatchMouseEvent", {type:"mousePressed", ...position, button, clickCount:count});
             await send("Input.dispatchMouseEvent", {type:"mouseReleased", ...position, button, clickCount:count});
@@ -823,9 +808,10 @@ export function createBrowserApi(activeOutput, environment = process.env, {focus
     if (dialog) activeOutput().write(`Active JavaScript ${dialog.type} dialog; use tab.getJsDialog().`,"cua.state");
     else {
       const allowDialog=async error=>{if(!await requestDialog({action:"state",targetId:tab.id})) throw error;};
-      await withDialogAction(tab.id,()=>tab.getAXState().catch(allowDialog)).catch(allowDialog);
+      const state=await withDialogAction(tab.id,()=>tab.getAXState({emit:false}).catch(allowDialog)).catch(allowDialog);
       const opened = await requestDialog({action:"state",targetId:tab.id});
       if (opened) activeOutput().write(`Active JavaScript ${opened.type} dialog; use tab.getJsDialog().`,"cua.state");
+      else if(state!==undefined) activeOutput().write(state,"cua.state");
     }
     return tab;
   }

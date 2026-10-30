@@ -14,7 +14,7 @@ export function createPlaywrightApi(endpoint, targetId, invalidate, focusLease, 
   const reads = ["count", "innerText", "textContent", "allTextContents", "getAttribute", "inputValue", "isVisible", "isEnabled", "isChecked", "waitFor", "ariaSnapshot"];
   const actions = ["click", "dblclick", "fill", "press", "check", "uncheck", "setChecked", "selectOption", "hover", "scrollIntoViewIfNeeded", "pressSequentially", "type", "drop"];
   async function invoke(path, method, args) {
-    if (checkDialog) await checkDialog();
+    if (checkDialog) await checkDialog(actions.includes(method));
     if (withAction && actions.includes(method)) return withAction(opened => perform(path,method,args,opened));
     return perform(path,method,args);
   }
@@ -339,7 +339,11 @@ export class BrowserFocusLeases {
     this.entries.set(id, entry);
     entry.ready = Promise.resolve().then(() => this.updateFocus(targetId, true));
     try { await entry.ready; return id; }
-    catch (error) { await this.release(owner, id); throw error; }
+    catch (error) {
+      try {await this.release(owner,id);}
+      catch(cleanupError) {cleanupError.browserFocusLease=id;throw cleanupError;}
+      throw error;
+    }
   }
   async release(owner, id) {
     const entry = this.entries.get(id);

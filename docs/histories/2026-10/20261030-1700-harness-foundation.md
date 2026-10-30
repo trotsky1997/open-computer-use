@@ -407,3 +407,47 @@ was emitted. Real direct/proxy events, background focus/keyboard isolation,
 persistent-agent drain, other native platforms and remaining input APIs need
 verification/work. No lock or permission settings were changed. Full harness
 alignment remains active.
+
+
+### Browser held-click ownership
+
+Raw CDP click now accepts key/durationMs with validated chords, button aliases
+and click counts. The new browser-input module owns the CDP connection, pressed
+state, virtual focus and abortable dwell outside the Worker. It gates required
+protocol support and checks fresh loader/viewport/content geometry before
+presses. It shares an origin pointer lease with native data drops; new raw input
+and locator actions reject competing ownership. Reset/timeout/close releases
+held input before replacing the session, and failed cleanup retains ownership
+and supports reset retry without replaying new presses. Ambiguous focus setup
+also retains its lease until restoration succeeds. CLI/npm/plugin copies include
+the new runtime module, and the public documentation and parity plan are updated.
+
+Normal prompts can remain open beyond ten seconds and resume through later dialog
+responses. Cancellation drains release-triggered dialogs with a bounded loop. A
+real draggable-target probe caught cleanup motion starting a new native drag and
+swallowing DOM releases. Cleanup now cancels dragging and releases directly at
+outside coordinates without an intermediate mouse move. A regression assertion
+and the live draggable case cover that correction. Dialog regression also
+exposed a delayed AX read emitting into its previous JS evaluation after an
+immediate page-load dialog. Observation now reads silently inside the raced
+operation and emits only in the still-active caller.
+
+All 86 Node checks passed, including option validation, protocol gating, retained
+release failures and ambiguous focus restoration. Real disposable macOS headless
+Chrome at verified 1x and forced 2x passed trusted modifier/click sequencing,
+per-press duration, ordinary-key typing, prompts held beyond ten seconds,
+release-triggered dialogs, draggable cancellation, pointer/drop exclusivity,
+reset/timeout/close, failed cleanup and retry, cropped screenshot coordinates
+with explicit viewport overrides, and source-level sessions. The generic browser
+smoke at the default forced-2x viewport rejected its fixed coordinates outside
+the screenshot; that whole suite needs a sufficiently tall viewport. The generic
+browser and drop smokes passed at 1x. Dialog and clipboard regressions passed
+after the delayed observation output fix; installer/build-script syntax and
+whitespace checks passed.
+
+Releases may finish effects of already admitted presses; page changes are not
+rolled back. Uncertain acknowledgements can require repeated releases. Headful
+and hardware keyboard/focus behavior, browser/host crash recovery, press-key
+duration and full keyboard/layout coverage remain open. Native desktop live
+verification is still pending normal unlock. The full harness alignment goal
+remains active.

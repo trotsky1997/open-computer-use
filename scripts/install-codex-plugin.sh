@@ -196,7 +196,7 @@ fi
 if [[ ! -f "${repl_source_root}/open-computer-use-repl.mjs" ]]; then
   repl_source_root="${plugin_source_root}/scripts"
 fi
-for repl_file in open-computer-use-repl.mjs open-computer-use-kernel.mjs ocu-config.mjs browser-cdp.mjs browser-playwright.mjs browser-downloads.mjs browser-clipboard.mjs browser-viewport.mjs browser-drop.mjs; do
+for repl_file in open-computer-use-repl.mjs open-computer-use-kernel.mjs ocu-config.mjs browser-cdp.mjs browser-playwright.mjs browser-downloads.mjs browser-clipboard.mjs browser-viewport.mjs browser-drop.mjs browser-input.mjs; do
   if [[ ! -f "${repl_source_root}/${repl_file}" ]]; then
     echo "Missing JS REPL runtime at ${repl_source_root}/${repl_file}" >&2
     exit 1
@@ -225,6 +225,7 @@ cp "${repl_source_root}/open-computer-use-repl.mjs" "${plugin_install_root}/scri
 cp "${repl_source_root}/open-computer-use-kernel.mjs" "${plugin_install_root}/scripts/open-computer-use-kernel.mjs"
 mkdir -p "${plugin_install_root}/node_modules"
 cp -R "${playwright_root}" "${plugin_install_root}/node_modules/playwright-core"
+cp "${repl_source_root}/browser-input.mjs" "${plugin_install_root}/scripts/browser-input.mjs"
 cp "${repl_source_root}/browser-drop.mjs" "${plugin_install_root}/scripts/browser-drop.mjs"
 cp "${repl_source_root}/browser-viewport.mjs" "${plugin_install_root}/scripts/browser-viewport.mjs"
 cp "${repl_source_root}/browser-clipboard.mjs" "${plugin_install_root}/scripts/browser-clipboard.mjs"
