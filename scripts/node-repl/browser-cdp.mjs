@@ -1,3 +1,4 @@
+import {BrowserSelection} from "./browser-selection.mjs";
 import {BrowserEvaluator} from "./browser-evaluate.mjs";
 import {BrowserAssets,ASSETS_DOCUMENTATION} from "./browser-assets.mjs";
 import {BrowserDebugger,CDP_DOCUMENTATION,cdpCommand,cdpOptions} from "./browser-debugger.mjs";
@@ -461,9 +462,9 @@ export async function withConnection(url, operation) {
 }
 
 const DOCUMENTATION = `## CDP browser
-Use cua.listTabs(), cua.getTab(id or {url}), and cua.createBrowserTab("cdp", url).
+Use cua.listTabs(), cua.getTab(id or {url}), and cua.createBrowserTab("cdp", url, {visible?,sessionName?}). browser.tabs exposes list/get/new/selected; new() creates a background blank tab. browser.nameSession(name) labels this logical host session across turns and JS resets. It appears in browser inventory metadata and context output. Native selected-tab identity requires the bundled Chrome selection extension, loaded by the user in that CDP browser. Its private background control tab is hidden from normal inventory and cleaned at turn/reset/close. Selected lookup leaves native tab activation unchanged and remains accurate under focus emulation. This is the CDP provider with an extension selection bridge; full extension transport remains open.
 Tab bindings expose getAXState(), getScreenshot(), getAXStateAndScreenshot(), screenshot(),
-goto(url), back(), forward(), reload(), close(), markDeliverable() and markHandoff().
+title(), url(), goto(url), back(), forward(), reload(), close(), markDeliverable() and markHandoff().
 Created tabs/popups are ephemeral at turn end unless marked. Latest mark wins; both marks clear when the next turn begins, so mark again as needed. User tabs stay open. js_reset retains tab ownership. Session close keeps marked survivors. Observations emit by default;
 pass {emit:false} to suppress output. AX state uses browser accessibility node IDs.
 Tab input: click(elementIndex, {mouseButton?, clickCount?, key?, durationMs?}), typeText(elementIndexOrNull, text),
@@ -488,7 +489,7 @@ Tab capabilities: get("pageAssets").documentation() describes rendered resource 
 Browser capabilities: await browser.capabilities.list(), then get("viewport") and documentation(). viewport.set({width,height}) applies explicit CSS dimensions for responsive tasks; viewport.reset() returns to normal sizing. The host cleans temporary overrides on reset/timeout/close. Competing sessions fail explicitly. Use existing sizing during normal tasks.
 Screenshots: tab.screenshot({fullPage?,clip?}) returns JPEG bytes with no implicit output; use nodeRepl.emitImage(bytes). getScreenshot returns/emits PNG. clip uses CSS pixels relative to the viewport or full-page area. Pixel input maps cropped viewport images back to CSS; full-page images require a new viewport capture before input. Geometry and viewport-revision changes invalidate capture coordinates.`;
 
-export function createBrowserApi(activeOutput, environment = process.env, {focusLease, downloadRequest, logRequest, dialogRequest, clipboardRequest, viewportRequest, dropRequest, inputRequest, tabRequest, cdpRequest, assetsRequest, evaluateRequest, onDispose = () => {}} = {}) {
+export function createBrowserApi(activeOutput, environment = process.env, {focusLease, downloadRequest, logRequest, dialogRequest, clipboardRequest, viewportRequest, dropRequest, inputRequest, tabRequest, cdpRequest, assetsRequest, evaluateRequest, selectionRequest, onDispose = () => {}} = {}) {
   const cleanups=[];
   const debuggerApi=cdpRequest ? undefined : new BrowserDebugger(()=>endpoint()?.href,openConnection);
   const assetsApi=assetsRequest ? undefined : new BrowserAssets(()=>endpoint()?.href);
@@ -501,6 +502,9 @@ export function createBrowserApi(activeOutput, environment = process.env, {focus
   const debuggerOwner={};
   if(debuggerApi)cleanups.push(()=>debuggerApi.cleanup(debuggerOwner));
   const requestCdp=cdpRequest ?? (args=>debuggerApi.request(debuggerOwner,args));
+  const selection=selectionRequest ? undefined : new BrowserSelection(()=>endpoint()?.href,openConnection),selectionOwner={};
+  if(selection)cleanups.push(()=>selection.cleanup(selectionOwner));
+  const requestSelection=selectionRequest ?? (args=>selection.request(selectionOwner,args));
   const tabs=tabRequest ? undefined : new BrowserTabs(()=>endpoint()?.href,openConnection);
   const tabOwner={};
   const requestTab=tabRequest ?? (args=>tabs.request(tabOwner,args));
@@ -508,7 +512,7 @@ export function createBrowserApi(activeOutput, environment = process.env, {focus
   const clipboardOwner = {};
   if (clipboard) cleanups.push(() => clipboard.cleanup(clipboardOwner));
   const requestClipboard = clipboardRequest ?? (args => clipboard.request(clipboardOwner,args));
-  const viewport = viewportRequest ? undefined : new BrowserViewport(() => endpoint()?.href,openConnection,withConnection,()=>requestClipboard({method:"targets"}));
+  const viewport = viewportRequest ? undefined : new BrowserViewport(() => endpoint()?.href,openConnection,withConnection,async()=>{const hidden=await requestSelection({action:"targets"});return [...await requestClipboard({method:"targets"}),...hidden.ids,...hidden.urls];});
   const viewportOwner = {};
   if (viewport) cleanups.push(() => viewport.cleanup(viewportOwner));
   const requestViewport = viewportRequest ?? (args => viewport.request(viewportOwner,args));
@@ -566,8 +570,8 @@ export function createBrowserApi(activeOutput, environment = process.env, {focus
   async function targets() {
     const result = await json("/json/list");
     if (!Array.isArray(result)) throw new Error("Invalid browser target list");
-    const hidden = await requestClipboard({method:"targets"});
-    return result.filter(target => target.type === "page" && !hidden.includes(target.id));
+    const hidden = await requestClipboard({method:"targets"}),selection=await requestSelection({action:"targets"});
+    return result.filter(target => target.type === "page" && !hidden.includes(target.id) && !selection.ids.includes(target.id) && !selection.urls.includes(target.url));
   }
   const info = target => ({ id: target.id, providerTabId: target.id, browserId: "cdp", title: target.title, url: target.url });
   function checkBrowser(options = {}) {
@@ -711,6 +715,8 @@ export function createBrowserApi(activeOutput, environment = process.env, {focus
         const respond = (response,text) => requestDialog({action:"respond",targetId:target.id,id:dialog.id,response,text});
         return Object.freeze({type:dialog.type,dismiss:() => respond("dismiss"),...(["confirm","prompt"].includes(dialog.type) ? {accept: text => respond("accept",text)} : {})});
       },
+      title:async()=>(await targets()).find(item=>item.id===target.id)?.title,
+      url:async()=>(await targets()).find(item=>item.id===target.id)?.url,
       markDeliverable:()=>requestTab({action:"mark",targetId:target.id,mark:"deliverable"}),
       markHandoff:()=>requestTab({action:"mark",targetId:target.id,mark:"handoff"}),
       getAXState: ax,
@@ -852,9 +858,12 @@ export function createBrowserApi(activeOutput, environment = process.env, {focus
     }
     return tab;
   }
+  let browserDocsShown=false;
+  async function nameSession(name){await requestTab({action:"name",name});activeOutput().write(`Browser session: ${name}`,"cua.browser.session");}
   const api = {
     async listBrowsers(options = {}) {
-      const browsers = endpoint() ? [{ id: "cdp", name: "Configured CDP browser", type: "cdp" }] : [];
+      const session=endpoint()?await requestTab({action:"session"}):{};
+      const browsers = endpoint() ? [{ id: "cdp", name: "Configured CDP browser", type: "cdp",...(session.name?{metadata:{sessionName:session.name}}:{}) }] : [];
       if (options.emit !== false) activeOutput().write(browsers, "cua.state");
       return browsers;
     },
@@ -873,8 +882,13 @@ export function createBrowserApi(activeOutput, environment = process.env, {focus
         throw new Error("No configured browser contains that URL");
       }
       await json("/json/version");
-      activeOutput().write(DOCUMENTATION, "cua.browser");
-      return Object.freeze({ browserId: "cdp", async documentation() { return DOCUMENTATION; },capabilities:Object.freeze({
+      if(!browserDocsShown){activeOutput().write(DOCUMENTATION, "cua.browser");browserDocsShown=true;}
+      return Object.freeze({ browserId: "cdp",nameSession,tabs:Object.freeze({
+        list:()=>api.listTabs({browser:"cdp",emit:false}),
+        get:id=>{if(typeof id!=="string"||!id)throw Error('tabs.get requires a tab ID');return api.getTab(id,{browser:"cdp"});},
+        new:()=>api.createBrowserTab('cdp','about:blank',{visible:false}),
+        async selected(){const id=await requestSelection({action:'selected'});if(!id)return undefined;const target=(await targets()).find(item=>item.id===id);return target?observe(await prepare(target)):undefined;},
+      }),async documentation() { return DOCUMENTATION; },capabilities:Object.freeze({
         list:()=>requestViewport({action:"capabilities"}),
         async get(id) {
           const capabilities = await requestViewport({action:"capabilities"});
@@ -896,11 +910,12 @@ export function createBrowserApi(activeOutput, environment = process.env, {focus
     async createBrowserTab(browserId, url = "about:blank", options = {}) {
       if (browserId !== "cdp") throw new Error(`Unknown browser: ${browserId}`);
       for (const key of Object.keys(options)) {
-        if (key !== "visible") throw new Error(`Unsupported CDP tab creation option: ${key}`);
+        if (!["visible","sessionName"].includes(key)) throw new Error(`Unsupported CDP tab creation option: ${key}`);
       }
       if (options.visible !== undefined && typeof options.visible !== "boolean") throw new Error("visible must be a boolean");
       const parsed = new URL(url);
       if (!["http:", "https:", "about:"].includes(parsed.protocol)) throw new Error("Unsupported navigation URL protocol");
+      if(options.sessionName!==undefined)await nameSession(options.sessionName);
       const result=await requestTab({action:"create",visible:options.visible});
       try {
         const target = (await targets()).find(target => target.id === result.targetId);

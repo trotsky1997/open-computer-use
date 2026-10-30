@@ -45,6 +45,7 @@ export class BrowserViewport {
     const targets = await this.json(lease.endpoint,"/json/list");
     const target = targets.find(target=>target.type === "page" && target.id === targetId);
     if (!target) return;
+    const hidden=await this.hiddenTargets();if(hidden.includes(targetId)||hidden.includes(target.url))return;
     if (lease.closing || this.closedOwners.has(lease.owner)) throw new Error("Viewport session closed");
     let record = lease.targets.get(targetId);
     if (!record) lease.targets.set(targetId,record={});

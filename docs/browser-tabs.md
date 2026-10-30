@@ -81,3 +81,15 @@ Close requests admitted against a live target can race target destruction. The
 host reconciles a protocol close error with a fresh target snapshot. An absent
 target satisfies the close; a still-live target or unverified snapshot failure
 retains ownership and reports the error for retry.
+
+
+Browser namespaces, native selected-tab identity, fresh title/URL getters and
+logical session labels are described in [browser session metadata](browser-session.md).
+A private extension selection control page has independent per-turn ownership;
+its creation, cancellation and close barrier use the same tab controller.
+
+
+A close acknowledgement is followed by bounded confirmation that the exact target
+ID disappeared. Target-list lag is handled without resending close or counting
+the same closing target as a newly opened popup. A target that remains available
+after the deadline retains ownership and reports the close failure.

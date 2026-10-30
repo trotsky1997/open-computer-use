@@ -113,3 +113,14 @@ package installation paths and native DOM reads, write/network/global escape
 rejection, frame scopes and lifecycle have source/Worker evidence. Broader DOM/
 provider/syntax compatibility, content exports, crash recovery and native desktop
 work remain open. See [read-only evaluation](../../browser-evaluate.md). Keep the full parity goal active.
+
+## Browser session and selection phase
+
+Browser.tabs namespaces, fresh title/URL getters and logical-session naming are
+implemented.
+Selected-tab identity comes from native Chrome tab/window state, including
+while focus emulation is active. The bundled MV3 bridge maps native
+TabID to debugger targets and has isolated Chromium evidence in both session modes.
+Control tabs remain hidden from normal inventory/viewport targeting and close
+through the host turn/reset barrier. See [browser sessions](../../browser-session.md). Keep user-profile extension installation explicit, and retain
+all remaining native, transport, content-export and provider work in scope.

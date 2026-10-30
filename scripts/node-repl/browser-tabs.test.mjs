@@ -120,3 +120,11 @@ test('protocol close errors retain live targets until an acknowledged retry',asy
  await assert.rejects(tabs.end(owner),/Denied close/u);assert.equal(live.size,2);
  entry.connection.send=send;await tabs.end(owner);assert.deepEqual([...live.keys()],['user']);
 });
+
+
+test('acknowledged close waits for target disappearance without resending close',async()=>{
+ const {tabs,entry,live}=fixture(),owner={},send=entry.connection.send;
+ const {targetId}=await tabs.request(owner,{action:'create'});let closes=0;
+ entry.connection.send=async(method,args)=>{if(method==='Target.closeTarget'){closes++;setTimeout(()=>live.delete(args.targetId),35);return {success:true};}return send(method,args);};
+ await tabs.end(owner);assert.equal(closes,1);assert.equal(live.has(targetId),false);
+});

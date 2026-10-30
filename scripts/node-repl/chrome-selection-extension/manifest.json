@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "Open Computer Use selection bridge",
+  "version": "1.0.0",
+  "description": "Expose native selected-tab identity to the configured Open Computer Use CDP host.",
+  "permissions": [
+    "tabs",
+    "debugger"
+  ],
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAr4dPTNzz4/HQmPxw3B5NzwGAG5mDvP6QrCOhVhfaQGvgBApOKyc0pY6V8kmPypsd2IHwJsbcm0h60w1YgOmhEtVXGOMCZmyFAlxCJptBMlt6M1J4MU/lQNZVjDi7SUfKZyiKrSlx8FufH1H5SE4B77FcJDhTpn4YCOf07szC1nT9BYPNhzBYQ0/kz6lrtyph41ijPegN7u+AqmFEiLBovuIpFQ/4wxRXebwct++LltmYxdDOqFdPJm8JyXOxOgUcc6ZsbC8ruGbeKX0B+uZUsZgp6JDzTd8sbX75kItNDpAZ//IOUbyh51MNQl5OXC4kCz7KNs+3zj4nNYoPjRiTfQIDAQAB",
+  "minimum_chrome_version": "96"
+}

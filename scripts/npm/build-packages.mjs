@@ -434,7 +434,7 @@ function copyInstallerScripts(packageRoot) {
     "browser-cdp.mjs",
     "browser-downloads.mjs",
     "browser-clipboard.mjs",
-    "browser-viewport.mjs", "browser-input.mjs", "browser-tabs.mjs", "browser-debugger.mjs","browser-assets.mjs","browser-evaluate.mjs","browser-evaluate-dom.mjs","browser-evaluate-worker.mjs","runtime-dependencies.mjs","browser-drop.mjs",
+    "browser-viewport.mjs", "browser-input.mjs", "browser-tabs.mjs", "browser-debugger.mjs","browser-assets.mjs","browser-selection.mjs","browser-evaluate.mjs","browser-evaluate-dom.mjs","browser-evaluate-worker.mjs","runtime-dependencies.mjs","browser-drop.mjs",
     "browser-playwright.mjs",
     "open-computer-use-repl.mjs",
     "open-computer-use-kernel.mjs",
@@ -444,6 +444,9 @@ function copyInstallerScripts(packageRoot) {
       path.join(packageRoot, "scripts", "node-repl", scriptName),
     );
   }
+  cpSync(path.join(repoRoot,"scripts","node-repl","chrome-selection-extension"),path.join(packageRoot,"scripts","node-repl","chrome-selection-extension"),{recursive:true});
+  cpSync(path.join(repoRoot,"scripts","node-repl","chrome-selection-extension"),path.join(packageRoot,"plugins","open-computer-use","scripts","chrome-selection-extension"),{recursive:true});
+  cpSync(path.join(repoRoot,"scripts","node-repl","browser-selection.mjs"),path.join(packageRoot,"plugins","open-computer-use","scripts","browser-selection.mjs"));
   for(const module of ["browser-evaluate.mjs","browser-evaluate-dom.mjs","browser-evaluate-worker.mjs","runtime-dependencies.mjs"]) cpSync(
     path.join(repoRoot,"scripts","node-repl",module),path.join(packageRoot,"plugins","open-computer-use","scripts",module)
   );

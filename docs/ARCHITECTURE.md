@@ -406,3 +406,16 @@ Turn/reset/close, navigation and deadlines terminate workers and close readers;
 failed disconnect retains ownership for retry. Production package dependencies
 and installer copies include the pinned WASM runtime and transitive modules.
 See [read-only browser evaluation](browser-evaluate.md) for API, limits and evidence.
+
+
+## Native browser selection and session labels
+
+BrowserSelection owns per-turn private extension pages through BrowserTabs. The
+bundled MV3 bridge reads native active-tab state and maps TabID to debugger target
+ID; host identity/protocol checks precede selection. Normal inventories and
+viewport targeting exclude private IDs and pending creation URLs. Cancellation
+joins pending queries and closes the control target; failed close retains
+ownership. BrowserTabs stores logical session labels separately, preserving them
+across JS resets and idle turns and clearing them at final close. Browser
+namespaces and fresh title/URL getters share existing discovery/observation.
+See [browser session metadata](browser-session.md) for setup, evidence and limits.

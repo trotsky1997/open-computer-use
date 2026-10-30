@@ -36,8 +36,13 @@ export class BrowserTabs {
       const result=await entry.connection.send('Target.closeTarget',{targetId});
       if(!result.success && (await this.snapshot(entry)).has(targetId))throw Error('Browser refused to close tab');
     } catch(error) {
-      // A target can disappear after discovery or a prior close acknowledgement.
       if(!error.cdpError || (await this.snapshot(entry)).has(targetId))throw error;
+    }
+    // Chrome can acknowledge close before removing the target from discovery.
+    const deadline=Date.now()+10000;
+    while((await this.snapshot(entry)).has(targetId)){
+      if(Date.now()>=deadline)throw Error('Tab close was acknowledged but the target remained available');
+      await new Promise(resolve=>setTimeout(resolve,10));
     }
   }
   async browser(endpoint) {
@@ -67,10 +72,15 @@ export class BrowserTabs {
   request(owner,args) {
     const state=this.state(owner);
     if(state.ending || state.ended) throw new Error('Browser tab turn ended');
-    if(!args || !['create','mark','close'].includes(args.action)) throw new Error('Unknown browser tab action');
+    if(!args || !['create','mark','close','name','session'].includes(args.action)) throw new Error('Unknown browser tab action');
     if(args.action==='create' && args.visible!==undefined && typeof args.visible!=='boolean') throw new Error('Tab visible must be a boolean');
-    if(args.action!=='create' && (typeof args.targetId!=='string' || (args.action==='mark' && !['deliverable','handoff'].includes(args.mark)))) throw new Error('Invalid tab retention mark');
+    if(['mark','close'].includes(args.action) && (typeof args.targetId!=='string' || (args.action==='mark' && !['deliverable','handoff'].includes(args.mark)))) throw new Error('Invalid tab retention mark');
     const endpoint=this.endpoint();if(!endpoint) throw new Error('No CDP browser configured');
+    if(args.action==='name'){
+      if(typeof args.name!=='string'||!args.name.trim()||[...args.name].length>100||/[\u0000-\u001f\u007f-\u009f]/u.test(args.name))throw Error('Session name must be 1...100 characters without control characters');
+      state.sessionName=args.name;return Promise.resolve();
+    }
+    if(args.action==='session')return Promise.resolve({name:state.sessionName});
     this.active.set(endpoint,(this.active.get(endpoint) ?? 0)+1);
     const work=(async()=>{
       const entry=await this.browser(endpoint);
@@ -101,7 +111,7 @@ export class BrowserTabs {
   end(owner,{final=false}={}) {
     const state=this.state(owner);
     if(state.ending) return state.ending;
-    state.ended=true;
+    state.ended=true;if(final)state.sessionName=undefined;
     state.ending=(async()=>{
       await Promise.allSettled([...state.pending]);
       for(const entry of this.browsers.values()) {

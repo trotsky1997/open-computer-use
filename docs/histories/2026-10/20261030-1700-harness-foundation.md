@@ -741,3 +741,44 @@ The complete native release package/installer was not executed. Broader DOM and
 ECMAScript/provider compatibility, automatic crash recovery, content exports,
 remaining native/host features and Linux/Windows validation remain open. The
 full harness goal stays active.
+
+
+## Browser namespaces, logical names and native selected tabs
+
+Added browser.tabs list/get/new/selected, fresh tab title()/url() getters and
+logical-session naming through nameSession and createBrowserTab sessionName.
+Names are validated before target creation, independent across logical sessions,
+preserved through idle turns/JS reset and cleared at final close. Provider
+guidance emits once per REPL context.
+
+A bundled MV3 Chrome extension reads native active/last-focused-window state and
+maps TabID to exact debugger target ID. The host validates extension identity and
+protocol and observes a private background extension page for each resource owner.
+Normal inventories and viewport overrides exclude private IDs and pending marker
+URLs. Cancellation joins pending reads and closes owned targets, retaining failed
+cleanup for retry. Missing-extension initialization removes its temporary target
+and returns an explicit setup error. Source and Worker share the host service.
+Runtime/module checks, npm/plugin asset copying and installer preflight now include
+the bridge. User-profile extension installation remains an explicit user action.
+
+Real Chromium regression exposed target-discovery lag after a successful close
+acknowledgement. Shared tab closure now waits for the exact ID to disappear with
+a bounded deadline, instead of repeatedly closing it and exhausting the popup
+cleanup pass limit. Live/unverified failures continue to retain ownership.
+
+All 117 Node checks passed, including manifest identity/assets, name validation
+and lifecycle, pending selection cancellation/cleanup retry, private viewport
+marker exclusion and delayed target disappearance without duplicate closes.
+Disposable macOS headless Chromium 141 passed source/Worker session flows with
+and without the extension: duplicate page URLs, native selected identity under
+background focus emulation, fresh metadata across navigation, concurrent owners,
+hidden viewport/inventory targets, paused-control read cancellation, names across
+turn/reset, and missing-extension cleanup. Viewport, source/Worker turn-lifecycle
+and native-free CLI/MCP smokes passed. Installer/build-script syntax and whitespace
+checks passed. No new dependency or CI was added.
+
+The user browser/profile was untouched. User-profile installation, headful
+multi-window/incognito cases, complete native release packaging and Linux/Windows
+remain unverified. Full extension/in-app transport, user claims/takeover, content
+exports and the remaining native/provider work stay open. The full harness goal
+remains active.
