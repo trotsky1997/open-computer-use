@@ -16,7 +16,7 @@ current native/browser documentation on 2026-10-30.
 | Browser locators | Playwright Core selectors, actions, frames, composition, snapshots and fresh resolution | Broader dynamic/shadow/cross-origin coverage and per-operation connection overhead |
 | Browser scripting | Locator APIs and rendered snapshots | Read-only page/locator evaluation with enforced isolation |
 | Navigation / event waits | Basic navigation, locator waitFor, expectNavigation, URL/load waits and file chooser/download events, cancellation and failure recovery with real Chrome/Worker checks | Native picker presentation, popup-owned downloads and broader page event coverage |
-| Dialogs / clipboard / developer tools | Not exposed | Explicit dialog handles, session clipboard, logs and capability discovery |
+| Dialogs / clipboard / developer tools | Host-owned tab.dev.logs with filtering, bounded retention and real Chrome lifecycle checks | Explicit dialog handles, session clipboard, capability discovery and broader log sources |
 | Content / artifacts | Screenshots returned as binary; completed GUID-named downloads returned as local paths | Content export, remote delivery and artifact retention |
 | Host / session integration | Plugin installer, native permission boundaries, host-owned Worker focus cleanup with real timeout/reset/close/exit checks | Turn lifecycle, user takeover, ownership, managed tab cleanup and host integration |
 | Platform coverage | Node checks and real disposable macOS headless Chrome evidence | Native desktop, headful focus, Linux and Windows verification |

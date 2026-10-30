@@ -180,3 +180,20 @@ cancellation and MCP binding preservation. A real Chrome smoke exercised native-
 CLI/MCP entrypoints, inventory error isolation and browser field input. Native
 subprocess fixtures verified handshake/reuse. Real native desktop behavior and
 native-free source installation remain open.
+
+Browser tab.dev.logs now follows the inspected current reference signature with
+filter/levels/limit and level/message/timestamp/url records. Host-owned persistent
+CDP Runtime observers retain bounded shallow console messages across calls and
+main-frame navigation. Cached Runtime.enable history is excluded without comparing
+browser and host clocks. Worker reset/timeout/close and tab close release capture;
+pending observer startup is closed before host cleanup completes. Direct REPL
+sessions register observer disposal on their close event. The browser API's
+internal service arguments are grouped into one options object.
+
+All 63 Node checks passed, including malformed log-option rejection. The new real
+Chrome console smoke checks formatting, object previews, source URLs, filtering,
+retention/text limits, rebinding, separate sessions, navigation and reset/timeout/
+close/pending-startup cleanup. Existing browser, download and native-free CLI/MCP
+smokes passed. Worker/OOPIF console sources, network logs, uncaught exception events,
+host crashes and cross-platform/headful validation remain open. Objects are shallow
+protocol previews and messages are bounded to 16,384 UTF-16 code units.

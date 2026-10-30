@@ -1,8 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createBrowserApi, keyEvent, screenshotPoint } from "./browser-cdp.mjs";
+import { BrowserConsoleLogs, createBrowserApi, keyEvent, screenshotPoint } from "./browser-cdp.mjs";
 import { createCuaApi } from "./open-computer-use-repl.mjs";
 const output = () => ({ write() {}, async emitImage() {} });
+
+test("console log options reject malformed filters, levels, bounds and unknown fields", async () => {
+  const logs = new BrowserConsoleLogs();
+  for (const options of [null, [], {filter:42}, {levels:"warn"}, {levels:["fatal"]}, {limit:-1}, {limit:1.5}, {limit:Infinity}, {unknown:true}]) {
+    await assert.rejects(logs.read({},"missing",options), /options object|filter|levels|limit|Unknown/);
+  }
+  await assert.rejects(logs.read({},"missing",{levels:["warning"],limit:0}), /capture unavailable/);
+});
 
 test("unconfigured browser inventory is empty and binding fails explicitly", async () => {
   const api = createBrowserApi(output, {});

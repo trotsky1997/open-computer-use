@@ -274,3 +274,9 @@ Node adapter/kernel and support modules. Native artifacts are reported separatel
 and loaded on first app request. The shell plugin launcher can start the adapter
 without finding native payloads; native MCP compatibility and source payload
 installation retain their existing artifact requirements.
+
+Browser console observers are host-owned per Worker/tab and use a persistent CDP
+Runtime connection. Internal browser/logs requests start/read/stop capture. They
+exclude the initial Runtime.enable history replay, retain bounded shallow messages
+across calls/navigation, and close with Worker teardown or tab close. Direct
+in-process REPL sessions register observation cleanup on their REPL close event.

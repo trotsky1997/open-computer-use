@@ -1,5 +1,6 @@
 import { BrowserDownloads } from "./browser-downloads.mjs";
 import { createPlaywrightApi, waitForBrowserEventReady } from "./browser-playwright.mjs";
+import { format } from "node:util";
 
 export function screenshotPoint(point, image) {
   if (!Array.isArray(point) || point.length !== 2 || !point.every(Number.isFinite)) throw new Error("Coordinates must be two finite screenshot pixels");
@@ -94,7 +95,7 @@ function editText(operation, text, options) {
 
 const TIMEOUT = 10_000;
 
-async function openConnection(url) {
+async function openConnection(url, onEvent = () => {}, onClose = () => {}) {
   if (typeof WebSocket !== "function") throw new Error("CDP browser support requires Node.js 22 or newer");
   const socket = new WebSocket(url);
   const pending = new Map();
@@ -106,14 +107,19 @@ async function openConnection(url) {
   socket.addEventListener("message", event => {
     let message;
     try { message = JSON.parse(event.data); } catch { fail(new Error("Invalid CDP response")); socket.close(); return; }
+    if (message.method) {
+      try { onEvent(message); }
+      catch (error) { fail(error); socket.close(); onClose(); }
+      return;
+    }
     const request = pending.get(message.id);
     if (!request) return;
     pending.delete(message.id);
     if (message.error) request.reject(new Error(message.error.message));
     else request.resolve(message.result);
   });
-  socket.addEventListener("close", () => fail(new Error("Browser connection closed")));
-  socket.addEventListener("error", () => fail(new Error("Browser connection failed")));
+  socket.addEventListener("close", () => { fail(new Error("Browser connection closed")); onClose(); });
+  socket.addEventListener("error", () => { fail(new Error("Browser connection failed")); onClose(); });
   let timer;
   try {
     await new Promise((resolve, reject) => {
@@ -141,6 +147,91 @@ async function openConnection(url) {
   }
 }
 
+function browserEndpoint(environment) {
+  if (!environment.OPEN_COMPUTER_USE_CDP_URL) return null;
+  const url = new URL(environment.OPEN_COMPUTER_USE_CDP_URL);
+  if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.search || url.hash || url.pathname !== "/") {
+    throw new Error("OPEN_COMPUTER_USE_CDP_URL must be an HTTP(S) browser debugging origin");
+  }
+  return url;
+}
+
+export class BrowserConsoleLogs {
+  constructor(endpoint = () => browserEndpoint(process.env)?.href) {
+    this.endpoint = endpoint;
+    this.owners = new Map();
+    this.closedOwners = new WeakSet();
+  }
+  async start(owner, targetId) {
+    if (this.closedOwners.has(owner)) throw new Error("Browser log session closed");
+    let tabs = this.owners.get(owner);
+    if (!tabs) this.owners.set(owner, tabs = new Map());
+    const previous = tabs.get(targetId);
+    if (previous && !previous.error) return previous.ready;
+    previous?.connection?.close();
+    const entry = {logs:[], capturing:false, closed:false};
+    tabs.set(targetId, entry);
+    entry.ready = (async () => {
+      const endpoint = this.endpoint();
+      if (!endpoint) throw new Error("No CDP browser configured");
+      const response = await fetch(new URL("/json/list", endpoint), {signal:AbortSignal.timeout(TIMEOUT), redirect:"error"});
+      if (!response.ok) throw new Error(`Browser discovery failed: HTTP ${response.status}`);
+      const targets = await response.json();
+      const target = targets.find(item => item.type === "page" && item.id === targetId);
+      if (!target) throw new Error("Tab closed or no longer available");
+      const connection = await openConnection(target.webSocketDebuggerUrl, event => {
+        if (entry.closed || !entry.capturing || event.method !== "Runtime.consoleAPICalled") return;
+        const {type, args = [], timestamp, stackTrace} = event.params;
+        const level = ({debug:"debug",info:"info",log:"log",warning:"warn",error:"error",assert:"error",trace:"debug",dir:"log",dirxml:"log",table:"log",startGroup:"log",startGroupCollapsed:"log",count:"log",timeEnd:"log"})[type];
+        if (!level || !Array.isArray(args) || !Number.isFinite(timestamp) || !Number.isFinite(new Date(timestamp).getTime())) return;
+        const values = args.map(arg => {
+          if (arg.subtype === "null") return null;
+          if (Object.hasOwn(arg,"value")) return arg.value;
+          if (arg.preview?.properties?.length) return `${arg.description ?? arg.type} {${arg.preview.properties.map(property => `${property.name}: ${property.value ?? property.type}`).join(", ")}${arg.preview.overflow ? ", …" : ""}}`;
+          return arg.unserializableValue ?? arg.description ?? arg.type;
+        });
+        const url = stackTrace?.callFrames?.[0]?.url;
+        entry.logs.push({level, message:`${type === "assert" ? "Assertion failed: " : ""}${format(...values)}`.slice(0,16_384), timestamp:new Date(timestamp).toISOString(), ...(url ? {url} : {})});
+        if (entry.logs.length > 1000) entry.logs.shift();
+      }, () => { if (!entry.closed) entry.error = new Error("Browser log connection closed; bind the tab again to restart capture"); });
+      entry.connection = connection;
+      if (entry.closed) { connection.close(); throw new Error("Browser log session closed"); }
+      await connection.send("Runtime.enable");
+      // Runtime.enable replays old console entries before its response.
+      entry.capturing = true;
+    })().catch(error => { entry.error = error; entry.connection?.close(); throw error; });
+    entry.ready.catch(() => {});
+    return entry.ready;
+  }
+  async read(owner, targetId, options = {}) {
+    if (!options || typeof options !== "object" || Array.isArray(options)) throw new Error("logs expects an options object");
+    for (const key of Object.keys(options)) if (!["filter","levels","limit"].includes(key)) throw new Error(`Unknown logs option: ${key}`);
+    if (options.filter !== undefined && typeof options.filter !== "string") throw new Error("logs filter must be a string");
+    if (options.levels !== undefined && (!Array.isArray(options.levels) || options.levels.some(level => !["debug","info","log","warn","error","warning"].includes(level)))) throw new Error("Invalid log levels");
+    const limit = options.limit ?? 100;
+    if (!Number.isSafeInteger(limit) || limit < 0) throw new Error("logs limit must be a non-negative integer");
+    const entry = this.owners.get(owner)?.get(targetId);
+    if (!entry || entry.closed) throw new Error("Browser log capture unavailable; bind the tab again");
+    await entry.ready;
+    if (entry.error) throw entry.error;
+    await entry.connection.send("Runtime.getIsolateId");
+    const levels = options.levels?.map(level => level === "warning" ? "warn" : level);
+    return limit === 0 ? [] : entry.logs.filter(log => (!levels || levels.includes(log.level)) && (options.filter === undefined || log.message.includes(options.filter))).slice(-limit).map(log => ({...log}));
+  }
+  stop(owner, targetId) {
+    const tabs = this.owners.get(owner);
+    const entry = tabs?.get(targetId);
+    if (entry) { entry.closed = true; entry.connection?.close(); tabs.delete(targetId); }
+    if (tabs?.size === 0) this.owners.delete(owner);
+  }
+  cleanup(owner) {
+    this.closedOwners.add(owner);
+    const pending = [...(this.owners.get(owner)?.values() ?? [])].map(entry => entry.ready);
+    for (const targetId of this.owners.get(owner)?.keys() ?? []) this.stop(owner,targetId);
+    return Promise.allSettled(pending);
+  }
+}
+
 
 async function withConnection(url, operation) {
   const connection = await openConnection(url);
@@ -164,9 +255,19 @@ Chain locator/filter({hasText})/nth/first/last; read count/innerText/textContent
 act with click/dblclick/fill/press/check/uncheck/setChecked/selectOption/hover/scrollIntoViewIfNeeded.
 Playwright resolves fresh elements and waits for actionability; ambiguous matches fail. Default action timeout is 10 seconds.
 Navigation waits: tab.playwright.expectNavigation(async action, {url?,waitUntil?,timeoutMs?}), waitForURL(url, {waitUntil?,timeoutMs?}), waitForLoadState({state?,timeoutMs?}). expectNavigation installs a main-frame watcher before running the action and returns its result after navigation.
-Playwright actions invalidate prior AX and screenshot indices. Read current state afterwards. File chooser events: start tab.playwright.waitForEvent("filechooser", {timeoutMs?}) before clicking, then await the handle and use isMultiple() / setFiles(absolutePaths, {timeoutMs?}). The file handle is one-shot. Downloads: start waitForEvent("download") before clicking, then await download.path({timeoutMs?}) for the completed local artifact. Formatted paste remains unsupported.`;
+Playwright actions invalidate prior AX and screenshot indices. Read current state afterwards. File chooser events: start tab.playwright.waitForEvent("filechooser", {timeoutMs?}) before clicking, then await the handle and use isMultiple() / setFiles(absolutePaths, {timeoutMs?}). The file handle is one-shot. Downloads: start waitForEvent("download") before clicking, then await download.path({timeoutMs?}) for the completed local artifact. Formatted paste remains unsupported.
+Developer logs: await tab.dev.logs({filter?,levels?,limit?}) returns chronological console entries with level/message/timestamp/url. Capture begins at tab binding, continues across calls/navigation, and ends on close/reset/timeout. Levels: debug/info/log/warn/error (warning aliases warn). Default limit 100; retained cap 1000 entries, each at most 16,384 UTF-16 code units. Objects use shallow CDP descriptions; no page getters are executed. Prior console history and out-of-process frame/worker logs are excluded.`;
 
-export function createBrowserApi(activeOutput, environment = process.env, focusLease, downloadRequest) {
+export function createBrowserApi(activeOutput, environment = process.env, {focusLease, downloadRequest, logRequest, onDispose = () => {}} = {}) {
+  const logs = logRequest ? undefined : new BrowserConsoleLogs(() => endpoint()?.href);
+  const logOwner = {};
+  if (logs) onDispose(() => logs.cleanup(logOwner));
+  const requestLogs = logRequest ?? (args => {
+    if (args.action === "start") return logs.start(logOwner,args.targetId);
+    if (args.action === "read") return logs.read(logOwner,args.targetId,args.options);
+    if (args.action === "stop") return logs.stop(logOwner,args.targetId);
+    throw new Error("Unknown browser logs action");
+  });
   const downloads = downloadRequest ? undefined : new BrowserDownloads(() => endpoint()?.href);
   const downloadOwner = {};
   const requestDownload = downloadRequest ?? (args => {
@@ -176,12 +277,7 @@ export function createBrowserApi(activeOutput, environment = process.env, focusL
     throw new Error("Unknown download action");
   });
   function endpoint() {
-    if (!environment.OPEN_COMPUTER_USE_CDP_URL) return null;
-    const url = new URL(environment.OPEN_COMPUTER_USE_CDP_URL);
-    if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.search || url.hash || url.pathname !== "/") {
-      throw new Error("OPEN_COMPUTER_USE_CDP_URL must be an HTTP(S) browser debugging origin");
-    }
-    return url;
+    return browserEndpoint(environment);
   }
   async function json(path) {
     const base = endpoint();
@@ -302,6 +398,7 @@ export function createBrowserApi(activeOutput, environment = process.env, focusL
     }
     return Object.freeze({
       ...info(target),
+      dev: Object.freeze({logs: (options = {}) => requestLogs({action:"read",targetId:target.id,options})}),
       playwright: createPlaywrightApi(() => { const value = endpoint(); if (!value) throw new Error("No CDP browser configured"); return value.href; }, target.id, invalidate, focusLease, requestDownload),
       getAXState: ax,
       getScreenshot: screenshot,
@@ -410,6 +507,7 @@ export function createBrowserApi(activeOutput, environment = process.env, focusL
       async close() {
         const result = await browserCommand("Target.closeTarget", { targetId: target.id });
         if (!result.success) throw new Error("Browser refused to close tab");
+        await requestLogs({action:"stop",targetId:target.id});
       },
     });
     async function traverse(offset) {
@@ -450,6 +548,7 @@ export function createBrowserApi(activeOutput, environment = process.env, focusL
       const matches = (await targets()).filter(item => typeof reference === "string" ? item.id === reference : item.url === reference.url);
       if (matches.length !== 1) throw new Error(`Expected one matching tab; found ${matches.length}`);
       const tab = bind(matches[0]);
+      await requestLogs({action:"start",targetId:matches[0].id});
       activeOutput().write(DOCUMENTATION, "cua.browser");
       await tab.getAXState();
       return tab;

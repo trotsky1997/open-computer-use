@@ -11,7 +11,7 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { Worker } from "node:worker_threads";
 import { BrowserFocusLeases } from "./browser-playwright.mjs";
-import { createBrowserApi, updateBrowserFocus } from "./browser-cdp.mjs";
+import { BrowserConsoleLogs, createBrowserApi, updateBrowserFocus } from "./browser-cdp.mjs";
 import { inspectConfig } from "./ocu-config.mjs";
 
 const require = createRequire(import.meta.url);
@@ -28,6 +28,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const BROWSER_FAILURE_HANDLERS = new WeakMap();
 const HOST_BROWSER_DOWNLOADS = new BrowserDownloads(undefined,(owner,error)=>BROWSER_FAILURE_HANDLERS.get(owner)?.(error));
 const HOST_BROWSER_FOCUS = new BrowserFocusLeases(updateBrowserFocus);
+const HOST_BROWSER_LOGS = new BrowserConsoleLogs();
 
 const SERVER_INSTRUCTIONS = `UI automation through a persistent JavaScript REPL using the initialized cua API.
 
@@ -354,7 +355,7 @@ function optionsToKeyArgs(options = {}) {
   return args;
 }
 
-export function createCuaApi(native, activeOutput) {
+export function createCuaApi(native, activeOutput, onDispose) {
   let docsEmitted = false;
   const observations = new Map();
   async function call(tool, args = {}) {
@@ -482,7 +483,12 @@ export function createCuaApi(native, activeOutput) {
       async performSecondaryAction(elementIndex, action) { await call("perform_secondary_action", { app, element_index: elementIndex, action }); },
     });
   }
-  const browserApi = createBrowserApi(activeOutput, process.env, native.browserHost ? args => native.request("browser/focus", args) : undefined, native.browserHost ? args => native.request("browser/download",args) : undefined);
+  const browserApi = createBrowserApi(activeOutput, process.env, {
+    focusLease: native.browserHost ? args => native.request("browser/focus", args) : undefined,
+    downloadRequest: native.browserHost ? args => native.request("browser/download",args) : undefined,
+    logRequest: native.browserHost ? args => native.request("browser/logs",args) : undefined,
+    onDispose,
+  });
   const api = {
     ...browserApi,
     async getState(options = {}) {
@@ -604,7 +610,9 @@ export class PersistentJavaScriptSession {
     Object.freeze(nodeRepl);
     this.nodeRepl = nodeRepl;
     Object.defineProperty(this.repl.context, "nodeRepl", { value: nodeRepl, configurable: false, writable: false });
-    Object.defineProperty(this.repl.context, "cua", { value: createCuaApi(this.native, () => this.#currentOutput()), configurable: false, writable: false });
+    const disposers = [];
+    this.repl.once("close", () => { for (const dispose of disposers) dispose(); });
+    Object.defineProperty(this.repl.context, "cua", { value: createCuaApi(this.native, () => this.#currentOutput(), dispose => disposers.push(dispose)), configurable: false, writable: false });
   }
 
   async run(code, timeoutMs = DEFAULT_TIMEOUT_MS, requestMeta = {}) {
@@ -652,6 +660,7 @@ export class WorkerJavaScriptSession {
     this.invalidatedWorkers = new WeakSet();
     this.browserFocusLeases = HOST_BROWSER_FOCUS;
     this.browserDownloads = HOST_BROWSER_DOWNLOADS;
+    this.browserLogs = HOST_BROWSER_LOGS;
     this.stoppingWorkers = new WeakMap();
     this.#start();
   }
@@ -674,7 +683,7 @@ export class WorkerJavaScriptSession {
       this.native.endSession?.();
       this.stoppingWorkers.set(worker, (async () => {
         await worker.terminate();
-        const cleaned = await Promise.allSettled([this.browserFocusLeases.cleanup(worker),this.browserDownloads.cleanup(worker)]);
+        const cleaned = await Promise.allSettled([this.browserFocusLeases.cleanup(worker),this.browserDownloads.cleanup(worker),this.browserLogs.cleanup(worker)]);
         const failed = cleaned.find(result=>result.status === "rejected");
         if(failed) throw failed.reason;
         BROWSER_FAILURE_HANDLERS.delete(worker);
@@ -715,6 +724,12 @@ export class WorkerJavaScriptSession {
           else if(args?.action === "wait") result = await this.browserDownloads.wait(worker,args.id);
           else if(args?.action === "path") result = await this.browserDownloads.path(worker,args.id,args.options);
           else throw new Error("Unknown download action");
+        } else if(message.method === "browser/logs") {
+          const args = message.params;
+          if(args?.action === "start") result = await this.browserLogs.start(worker,args.targetId);
+          else if(args?.action === "read") result = await this.browserLogs.read(worker,args.targetId,args.options);
+          else if(args?.action === "stop") result = this.browserLogs.stop(worker,args.targetId);
+          else throw new Error("Unknown browser logs action");
         } else result = await this.native.request(message.method, message.params, message.timeoutMs);
         if (this.worker === worker && !this.invalidatedWorkers.has(worker)) worker.postMessage({ type: "native_response", id: message.id, result });
       } catch (error) {
