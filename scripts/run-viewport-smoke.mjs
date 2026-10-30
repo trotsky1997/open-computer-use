@@ -30,7 +30,7 @@ async function metrics(id) {
 }
 let id;
 try {
-  id = await run(`var browser=await cua.getBrowser({id:"cdp"}); var tab=await cua.createBrowserTab("cdp",${JSON.stringify(url)},{visible:false}); nodeRepl.write(JSON.stringify(tab.id));`);
+  id = await run(`var browser=await cua.getBrowser({id:"cdp"}); var tab=await cua.createBrowserTab("cdp",${JSON.stringify(url)},{visible:false}); await tab.markHandoff(); nodeRepl.write(JSON.stringify(tab.id));`);
   assert.ok((await run('nodeRepl.write(JSON.stringify(await browser.capabilities.list()));')).some(capability=>capability.id === "viewport"));
   assert.equal((await session.run('await browser.capabilities.get("missing");')).isError,true);
   const baseline = await shot({},"png"), original = await metrics(id);
@@ -90,7 +90,7 @@ try {
   assert.deepEqual(await shot({},"png"),baseline);
 
   await run('await viewport.set({width:360,height:260}); nodeRepl.write(JSON.stringify(true));');
-  const manager = session.browserViewport, lease = [...manager.leases.values()].find(lease=>lease.owner === session.worker);
+  const manager = session.browserViewport, lease = [...manager.leases.values()].find(lease=>lease.owner === session.resourceOwners.get(session.worker));
   const originalConnect = manager.connect;
   const originals = [...lease.targets.values()].filter(record=>record.connection).map(record=>[record.connection,record.connection.send]);
   const rejectClear = send=>(method,params)=>method === "Emulation.clearDeviceMetricsOverride" ? Promise.reject(new Error("Injected viewport cleanup outage")) : send(method,params);
@@ -107,14 +107,14 @@ try {
   await run(`var browser=await cua.getBrowser({id:"cdp"}); var viewport=await browser.capabilities.get("viewport"); var tab=await cua.getTab(${JSON.stringify(id)}); nodeRepl.write(JSON.stringify(true));`);
   await run('await viewport.set({width:360,height:260}); nodeRepl.write(JSON.stringify(true));');
   const disconnectedOwner = session.worker;
-  [...manager.leases.values()].find(lease=>lease.owner === disconnectedOwner).connection.close();
+  [...manager.leases.values()].find(lease=>lease.owner === session.resourceOwners.get(disconnectedOwner)).connection.close();
   for (let attempt=0;attempt<250 && session.worker === disconnectedOwner;attempt++) await new Promise(resolve=>setTimeout(resolve,20));
   assert.notEqual(session.worker,disconnectedOwner,"Observer disconnect did not recover the idle session");
   assert.equal((await metrics(id)).clientWidth,original.clientWidth);
   await run(`var browser=await cua.getBrowser({id:"cdp"}); var viewport=await browser.capabilities.get("viewport"); var tab=await cua.getTab(${JSON.stringify(id)}); nodeRepl.write(JSON.stringify(true));`);
   for (const mode of ["reset","timeout","close"]) {
     await run('await viewport.set({width:360,height:260}); nodeRepl.write(JSON.stringify(true));');
-    const owner = session.worker;
+    const owner = session.resourceOwners.get(session.worker);
     if (mode === "timeout") assert.equal((await session.run('while(true){}',150)).isError,true);
     else await session[mode]();
     assert.equal([...session.browserViewport.leases.values()].some(lease=>lease.owner === owner),false);

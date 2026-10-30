@@ -38,7 +38,7 @@ try {
   assert.equal(await run('var immediateDialog; for(var attempt=0;attempt<100;attempt++){immediateDialog=await immediate.getJsDialog();if(immediateDialog)break;await new Promise(resolve=>setTimeout(resolve,10));} nodeRepl.write(JSON.stringify(immediateDialog.type));'),"alert");
   assert.equal(await run('await immediateDialog.dismiss(); nodeRepl.write(JSON.stringify(await immediate.playwright.locator("output").innerText()));'),"Immediate dismissed");
   await run('await immediate.close(); nodeRepl.write(JSON.stringify(true));');
-  targetId = await run(`var tab=await cua.createBrowserTab("cdp",${JSON.stringify(url)},{visible:false}); nodeRepl.write(JSON.stringify(tab.id));`);
+  targetId = await run(`var tab=await cua.createBrowserTab("cdp",${JSON.stringify(url)},{visible:false}); await tab.markHandoff(); nodeRepl.write(JSON.stringify(tab.id));`);
   assert.equal(await run('nodeRepl.write(JSON.stringify((await tab.getJsDialog())===undefined));'),true);
   assert.deepEqual(await run('await tab.playwright.getByRole("button",{name:"Alert",exact:true}).click(); var alertDialog=await tab.getJsDialog(); nodeRepl.write(JSON.stringify({type:alertDialog.type,accept:typeof alertDialog.accept}));'),{type:"alert",accept:"undefined"});
   const blocked = await session.run('await tab.playwright.domSnapshot();');
@@ -104,7 +104,7 @@ try {
 
   for (const mode of ["reset","timeout","close"]) {
     await run('await tab.playwright.getByRole("button",{name:"Confirm",exact:true}).click(); nodeRepl.write(JSON.stringify((await tab.getJsDialog()).type));');
-    const owner = session.worker;
+    const owner = session.resourceOwners.get(session.worker);
     if (mode === "timeout") {
       const result = await session.run('while(true){}',150);
       assert.equal(result.isError,true);

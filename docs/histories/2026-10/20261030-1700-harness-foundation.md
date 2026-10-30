@@ -487,3 +487,49 @@ names/layouts, headful/hardware focus state, native app press-key duration and
 transport/crash ownership remain open in the full parity audit. Native desktop
 live work is still waiting for normal manual unlock; that blocker does not stop
 independent browser work. Full harness alignment remains active.
+
+
+### Host turn boundaries and managed tabs
+
+Added BrowserTabs with logical-session ownership distinct from per-turn browser
+resources. The host creates targets before handing them to the Worker, discovers
+opener ancestry including nested popups, reconciles live target IDs, and closes
+unmarked owned pages at turn end. Existing user tabs stay open. markDeliverable
+and markHandoff use the last mark for the current turn; resuming clears previous
+marks. Final session close leaves marked survivors open and detaches ownership.
+JS reset and Worker replacement retain tab ownership until the turn boundary.
+The CLI, installer and npm/plugin runtime copies include the new module.
+
+Creation uses a unique temporary blank-page marker, then navigates after host
+registration. Lost acknowledgements retain uncertain creation records for retry;
+definite CDP errors release speculative records. Empty observers close when
+no operation or owned lineage remains. Closing owned targets and creation-error
+rollback run through the host so stale JS callbacks cannot close retained pages.
+Resource disposal completes before standalone API tabs are closed.
+
+MCP turn-ended notifications now bypass the ordinary request queue to interrupt
+an active call, reject earlier queued JS and establish a barrier for following
+calls. Idle contexts retain JS variables and browser bindings. Each new turn
+gets a fresh resource owner; proxy requests carry their originating async turn
+ID, and old callbacks fail before native/browser actions. Retained bindings
+re-establish dialog capture lazily. Active interrupted execution, including detached browser actions after a JS
+call has returned, loses its Worker context. Cleanup failure blocks reuse until retry succeeds; shutdown reports a
+nonzero failure instead of reporting successful cleanup.
+
+All 92 Node checks passed, including popup/mark ownership, uncertain and definite
+creation failures, cleanup retry, idle JS persistence, stale native callbacks
+and active CPU/queued-call interruption. Real disposable macOS headless Chrome
+passed user-page preservation, temporary tabs and two popup generations, latest
+marks and re-marking, delayed input/close callback fencing, held-key and viewport
+release, tab-close failure with stopped reuse and reset retry, source-session
+reset/close, and actual native-free MCP turn-ended interruption. The extended
+held-input smoke passed with explicit retention for inspected pages. Generic
+browser, drop, dialog, clipboard, viewport and native-free CLI/MCP regressions
+passed; their ownership assertions now inspect per-turn resource owners. Build
+script/installer syntax and whitespace checks passed. No CI was added.
+
+Direct source-session turn notifications/idle context retention, user takeover
+and exclusive claims, extension/in-app transports, browser/host crash recovery
+and headful/native/cross-platform verification remain open. Arbitrary Node.js
+code remains trusted; proxy lifecycle guards do not sandbox arbitrary scripts.
+The complete harness parity goal remains active.

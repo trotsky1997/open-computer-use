@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import {BrowserTabs} from "./browser-tabs.mjs";
 import { BrowserDownloads } from "./browser-downloads.mjs";
 import { BrowserClipboard } from "./browser-clipboard.mjs";
 import {BrowserInputs} from "./browser-input.mjs";
@@ -37,6 +38,7 @@ const HOST_BROWSER_DIALOGS = new BrowserDialogs();
 const HOST_BROWSER_CLIPBOARD = new BrowserClipboard(() => browserEndpoint(process.env)?.href,withConnection);
 const HOST_BROWSER_VIEWPORT = new BrowserViewport(() => browserEndpoint(process.env)?.href,openConnection,withConnection,()=>HOST_BROWSER_CLIPBOARD.internalTargets(),(owner,error)=>BROWSER_FAILURE_HANDLERS.get(owner)?.(error));
 const HOST_BROWSER_DROPS = new BrowserDrops(() => browserEndpoint(process.env)?.href,openConnection,withConnection,()=>HOST_BROWSER_VIEWPORT.request(null,{action:"state"}));
+const HOST_BROWSER_TABS = new BrowserTabs(()=>browserEndpoint(process.env)?.href,openConnection);
 const HOST_BROWSER_INPUTS = new BrowserInputs(()=>browserEndpoint(process.env)?.href,openConnection,()=>HOST_BROWSER_VIEWPORT.request(null,{action:"state"}),HOST_BROWSER_FOCUS,(owner,targetId)=>HOST_BROWSER_DIALOGS.request(owner,{action:"state",targetId}));
 
 const SERVER_INSTRUCTIONS = `UI automation through a persistent JavaScript REPL using the initialized cua API.
@@ -401,7 +403,7 @@ function optionsToKeyArgs(options = {}) {
   return args;
 }
 
-export function createCuaApi(native, activeOutput, onDispose) {
+export function createCuaApi(native, activeOutput, onDispose, {tabRequest}={}) {
   let docsEmitted = false;
   const observations = new Map();
   if(native.endSession) onDispose?.(()=>native.endSession());
@@ -542,6 +544,7 @@ export function createCuaApi(native, activeOutput, onDispose) {
     logRequest: native.browserHost ? args => native.request("browser/logs",args) : undefined,
     dialogRequest: native.browserHost ? args => native.request("browser/dialog",args) : undefined,
     clipboardRequest: native.browserHost ? args => native.request("browser/clipboard",args) : undefined,
+    tabRequest: native.browserHost ? args=>native.request("browser/tabs",args,0) : tabRequest,
     inputRequest: native.browserHost ? args=>native.request("browser/input",args,0) : undefined,
     dropRequest: native.browserHost ? args => native.request("browser/drop",args) : undefined,
     viewportRequest: native.browserHost ? args => native.request("browser/viewport",args) : undefined,
@@ -602,6 +605,7 @@ export class PersistentJavaScriptSession {
     this.native = native;
     this.active = null;
     this.disposers = [];
+    this.browserTabs=HOST_BROWSER_TABS;
     this.ready = Promise.resolve();
     this.reset();
   }
@@ -645,6 +649,7 @@ export class PersistentJavaScriptSession {
   reset() {
     this.ready = this.ready.catch(() => {}).then(async () => {
       await this.#dispose();
+      this.browserTabs.begin(this);
       this.#initialize();
       this.closed = false;
     });
@@ -654,7 +659,7 @@ export class PersistentJavaScriptSession {
 
   close() {
     this.closed = true;
-    this.ready = this.ready.catch(() => {}).then(async () => {await this.#dispose();this.closed=true;});
+    this.ready = this.ready.catch(() => {}).then(async () => {await this.#dispose();await this.browserTabs.end(this,{final:true});this.closed=true;});
     this.ready.catch(() => {});
     return this.ready;
   }
@@ -694,7 +699,7 @@ export class PersistentJavaScriptSession {
     Object.freeze(nodeRepl);
     this.nodeRepl = nodeRepl;
     Object.defineProperty(this.repl.context, "nodeRepl", { value: nodeRepl, configurable: false, writable: false });
-    Object.defineProperty(this.repl.context, "cua", { value: createCuaApi(this.native, () => this.#currentOutput(), dispose => this.disposers.push(dispose)), configurable: false, writable: false });
+    Object.defineProperty(this.repl.context, "cua", { value: createCuaApi(this.native, () => this.#currentOutput(), dispose => this.disposers.push(dispose),{tabRequest:args=>this.browserTabs.request(this,args)}), configurable: false, writable: false });
   }
 
   async run(code, timeoutMs = DEFAULT_TIMEOUT_MS, requestMeta = {}) {
@@ -741,6 +746,8 @@ export class WorkerJavaScriptSession {
   constructor({ native }) {
     this.native = native;
     this.nextId = 1;
+    this.nextOwnerId=0;this.resourceOwners=new WeakMap();this.turnGeneration=0;
+    this.browserTabs=HOST_BROWSER_TABS;
     this.pending = new Map();
     this.runQueue = Promise.resolve();
     this.invalidatedWorkers = new WeakSet();
@@ -759,7 +766,7 @@ export class WorkerJavaScriptSession {
   #start() {
     const worker = new Worker(new URL("./open-computer-use-kernel.mjs", import.meta.url));
     this.worker = worker;
-    BROWSER_FAILURE_HANDLERS.set(worker,error=>void this.#workerFailed(worker,error));
+    this.#newOwner(worker);
     worker.on("message", message => void this.#onMessage(worker, message));
     worker.on("error", error => void this.#workerFailed(worker, error));
     worker.on("exit", code => {
@@ -767,32 +774,44 @@ export class WorkerJavaScriptSession {
     });
   }
 
+  #newOwner(worker) {
+    const owner={id:++this.nextOwnerId};this.resourceOwners.set(worker,owner);
+    BROWSER_FAILURE_HANDLERS.set(owner,error=>void this.#workerFailed(worker,error));
+  }
+  async #release(owner,stopped=Promise.resolve()) {
+    this.browserClipboard.cancel(owner);this.browserViewport.cancel(owner);
+    this.browserDrops.cancel(owner);this.browserInputs.cancel(owner);
+    const nativeStopped=Promise.resolve(this.native.endSession?.());nativeStopped.catch(()=>{});
+    await stopped;await nativeStopped;
+    await this.browserDialogs.cleanup(owner);
+    await this.browserDrops.cleanup(owner);await this.browserInputs.cleanup(owner);
+    const cleaned=await Promise.allSettled([this.browserFocusLeases.cleanup(owner),this.browserDownloads.cleanup(owner),this.browserLogs.cleanup(owner),this.browserClipboard.cleanup(owner),this.browserViewport.cleanup(owner)]);
+    const failed=cleaned.find(result=>result.status==='rejected');if(failed) throw failed.reason;
+    BROWSER_FAILURE_HANDLERS.delete(owner);
+  }
   #stop(worker) {
-    if (!this.stoppingWorkers.has(worker)) {
+    if(!this.stoppingWorkers.has(worker)) {
       this.invalidatedWorkers.add(worker);
-      this.browserClipboard.cancel(worker);
-      this.browserViewport.cancel(worker);
-      this.browserDrops.cancel(worker);
-      this.browserInputs.cancel(worker);
-      for (const pending of this.pending.values()) if (pending.worker === worker) clearTimeout(pending.timer);
-      const nativeStopped=this.native.endSession?.();
-      this.stoppingWorkers.set(worker, (async () => {
-        await worker.terminate();
-        await nativeStopped;
-        await this.browserDialogs.cleanup(worker);
-        await this.browserDrops.cleanup(worker);
-        await this.browserInputs.cleanup(worker);
-        const cleaned = await Promise.allSettled([this.browserFocusLeases.cleanup(worker),this.browserDownloads.cleanup(worker),this.browserLogs.cleanup(worker),this.browserClipboard.cleanup(worker),this.browserViewport.cleanup(worker)]);
-        const failed = cleaned.find(result=>result.status === "rejected");
-        if(failed) throw failed.reason;
-        BROWSER_FAILURE_HANDLERS.delete(worker);
-      })().catch(error => { this.stoppingWorkers.delete(worker); throw error; }));
+      for(const pending of this.pending.values()) if(pending.worker===worker) clearTimeout(pending.timer);
+      this.stoppingWorkers.set(worker,this.#release(this.resourceOwners.get(worker),worker.terminate()).catch(error=>{this.stoppingWorkers.delete(worker);throw error;}));
     }
     return this.stoppingWorkers.get(worker);
   }
+  endTurn({final=false}={}) {
+    if(this.endingTurn) return this.endingTurn;
+    if(this.turnEnded && !final) return this.turnBarrier;
+    const worker=this.worker,owner=this.resourceOwners.get(worker);
+    this.turnGeneration++;this.turnEnding=true;
+    const active=[...this.pending.values()].some(pending=>pending.worker===worker) || [...this.browserDialogs.waiters.values()].some(watch=>watch.owner===owner);
+    const released=active || final || this.invalidatedWorkers.has(worker) ? this.#stop(worker) : this.#release(owner);
+    this.endingTurn=released.then(()=>this.browserTabs.end(this,{final})).then(()=>{
+      this.turnEnded=true;this.turnEnding=false;
+    }).finally(()=>{this.#failWorker(worker,new Error('Execution turn ended'));this.endingTurn=undefined;});
+    this.turnBarrier=this.endingTurn;this.turnBarrier.catch(()=>{});return this.turnBarrier;
+  }
 
   async #workerFailed(worker, error) {
-    if (this.invalidatedWorkers.has(worker)) return;
+    if (this.invalidatedWorkers.has(worker) || this.turnEnding) return;
     try {
       await this.#stop(worker);
       if (this.worker === worker) this.#start();
@@ -811,29 +830,41 @@ export class WorkerJavaScriptSession {
       return;
     }
     if (message.type === "native_request") {
+      const owner=this.resourceOwners.get(worker);
+      if(this.turnEnding || message.turnId!==owner.id) {
+        worker.postMessage({type:'native_response',id:message.id,error:'Execution turn ended'});return;
+      }
       try {
         let result;
         if (message.method === "browser/focus") {
-          if (message.params?.action === "acquire") result = await this.browserFocusLeases.acquire(worker, message.params.targetId);
-          else if (message.params?.action === "release") result = await this.browserFocusLeases.release(worker, message.params.lease);
+          if (message.params?.action === "acquire") result = await this.browserFocusLeases.acquire(owner, message.params.targetId);
+          else if (message.params?.action === "release") result = await this.browserFocusLeases.release(owner, message.params.lease);
           else throw new Error("Unknown browser focus action");
         } else if(message.method === "browser/download") {
           const args = message.params;
-          if(args?.action === "start") result = await this.browserDownloads.start(worker,args.targetId,args.options);
-          else if(args?.action === "wait") result = await this.browserDownloads.wait(worker,args.id);
-          else if(args?.action === "path") result = await this.browserDownloads.path(worker,args.id,args.options);
+          if(args?.action === "start") result = await this.browserDownloads.start(owner,args.targetId,args.options);
+          else if(args?.action === "wait") result = await this.browserDownloads.wait(owner,args.id);
+          else if(args?.action === "path") result = await this.browserDownloads.path(owner,args.id,args.options);
           else throw new Error("Unknown download action");
         } else if(message.method === "browser/logs") {
           const args = message.params;
-          if(args?.action === "start") result = await this.browserLogs.start(worker,args.targetId);
-          else if(args?.action === "read") result = await this.browserLogs.read(worker,args.targetId,args.options);
-          else if(args?.action === "stop") result = this.browserLogs.stop(worker,args.targetId);
+          if(args?.action === "start") result = await this.browserLogs.start(owner,args.targetId);
+          else if(args?.action === "read") result = await this.browserLogs.read(owner,args.targetId,args.options);
+          else if(args?.action === "stop") result = this.browserLogs.stop(owner,args.targetId);
           else throw new Error("Unknown browser logs action");
-        } else if(message.method === "browser/dialog") result = await this.browserDialogs.request(worker,message.params);
-        else if(message.method === "browser/clipboard") result = await this.browserClipboard.request(worker,message.params);
-        else if(message.method === "browser/input") result = await this.browserInputs.request(worker,message.params);
-        else if(message.method === "browser/drop") result = await this.browserDrops.request(worker,message.params);
-        else if(message.method === "browser/viewport") result = await this.browserViewport.request(worker,message.params);
+        } else if(message.method === "browser/dialog") {
+          const args=message.params;
+          if(args?.targetId && !['start','stop'].includes(args.action)) {
+            const entry=this.browserDialogs.targets.get(`${this.browserDialogs.endpoint()}|${args.targetId}`);
+            if(!entry?.owners.has(owner)) await this.browserDialogs.start(owner,args.targetId);
+          }
+          result=await this.browserDialogs.request(owner,args);
+        }
+        else if(message.method === "browser/clipboard") result = await this.browserClipboard.request(owner,message.params);
+        else if(message.method === "browser/tabs") result=await this.browserTabs.request(this,message.params);
+        else if(message.method === "browser/input") result = await this.browserInputs.request(owner,message.params);
+        else if(message.method === "browser/drop") result = await this.browserDrops.request(owner,message.params);
+        else if(message.method === "browser/viewport") result = await this.browserViewport.request(owner,message.params);
         else result = await this.native.request(message.method, message.params, message.timeoutMs);
         if (this.worker === worker && !this.invalidatedWorkers.has(worker)) worker.postMessage({ type: "native_response", id: message.id, result });
       } catch (error) {
@@ -856,24 +887,34 @@ export class WorkerJavaScriptSession {
   }
 
   async reset() {
+    if(this.turnEnding) await this.endTurn();
     const old = this.worker;
     try {
       await this.#stop(old);
       if (this.worker === old) this.#start();
+      this.browserTabs.begin(this);this.turnEnded=false;this.turnBarrier=undefined;this.closed=false;
     } catch (error) { this.#failWorker(old, error); throw error; }
     this.#failWorker(old, new Error("JavaScript session reset"));
   }
 
-  async close() {
-    const old = this.worker;
-    try { await this.#stop(old); }
-    finally { this.#failWorker(old, new Error("JavaScript session closed")); }
-  }
+  async close() {this.closed=true;if(this.endingTurn) await this.endingTurn;await this.endTurn({final:true});}
 
-  run(code, timeoutMs = DEFAULT_TIMEOUT_MS, requestMeta = {}) {
-    const queued = this.runQueue.then(() => this.#run(code, timeoutMs, requestMeta));
-    this.runQueue = queued.catch(() => {});
-    return queued;
+  run(code,timeoutMs=DEFAULT_TIMEOUT_MS,requestMeta={}) {
+    const generation=this.turnGeneration;
+    const queued=this.runQueue.then(async()=>{
+      try {
+        if(this.closed) throw new Error('JavaScript session closed');
+        if(generation!==this.turnGeneration) throw new Error('Execution turn ended');
+        await this.turnBarrier;
+        if(this.turnEnded) {
+          this.browserTabs.begin(this);
+          if(this.invalidatedWorkers.has(this.worker)) this.#start();else this.#newOwner(this.worker);
+          this.turnEnded=false;this.turnBarrier=undefined;
+        }
+        return this.#run(code,timeoutMs,requestMeta);
+      } catch(error) {return {content:[{type:'text',text:`Error: ${asError(error).message}`}],isError:true};}
+    });
+    this.runQueue=queued.catch(()=>{});return queued;
   }
 
   #run(code, timeoutMs, requestMeta) {
@@ -893,7 +934,7 @@ export class WorkerJavaScriptSession {
         resolve({ content: [{ type: "text", text: `Error: ${error}` }], isError: true });
       }, timeoutMs);
       this.pending.set(id, { resolve, timer, worker });
-      worker.postMessage({ type: "exec", id, code, timeoutMs, requestMeta });
+      worker.postMessage({ type: "exec", id, code, timeoutMs, requestMeta,turnId:this.resourceOwners.get(worker).id });
     });
   }
 }
@@ -932,15 +973,24 @@ export async function runServer({ command, args }) {
       if (newline < 0) break;
       const line = buffer.slice(0, newline).trim();
       buffer = buffer.slice(newline + 1);
-      if (line) requestQueue = requestQueue.then(() => handle(line)).catch(error => console.error(asError(error).message));
+      if(line) {
+        let event;try {event=JSON.parse(line);}catch {}
+        if(event?.id===undefined && event?.method==='notifications/turn-ended') {
+          native.notify(event.method,event.params ?? {});
+          const boundary=session.endTurn();
+          requestQueue=requestQueue.then(()=>boundary).catch(error=>console.error(asError(error).message));
+        } else {
+          const generation=session.turnGeneration;
+          requestQueue=requestQueue.then(()=>handle(line,generation)).catch(error=>console.error(asError(error).message));
+        }
+      }
     }
   });
-  async function handle(line) {
+  async function handle(line,generation) {
     let request;
     try { request = JSON.parse(line); } catch { return send({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "Invalid JSON-RPC payload" } }); }
     const { id, method, params = {} } = request;
     if (id === undefined) {
-      if (method === "notifications/turn-ended") { native.notify(method, params); native.endSession(); }
       return;
     }
     try {
@@ -950,6 +1000,7 @@ export async function runServer({ command, args }) {
       if (method === "tools/call") {
         if (params.name === "js_reset") { await session.reset(); return send({ jsonrpc: "2.0", id, result: { content: [{ type: "text", text: "Open Computer Use JavaScript session reset" }], isError: false } }); }
         if (params.name === "js") {
+          if(generation!==session.turnGeneration) return send({jsonrpc:"2.0",id,result:{isError:true,content:[{type:"text",text:"Error: Execution turn ended"}]}});
           const requestedTimeoutMs = params.arguments?.timeout_ms;
           const timeoutMs = Number.isInteger(requestedTimeoutMs) && requestedTimeoutMs > 0
             ? Math.min(requestedTimeoutMs, MAX_TIMEOUT_MS)
@@ -970,8 +1021,9 @@ export async function runServer({ command, args }) {
     if (!shuttingDown) shuttingDown = session.close().finally(() => native.close());
     return shuttingDown;
   };
-  for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) process.on(signal, () => { void shutdown().finally(() => process.exit(0)); });
-  process.stdin.on("end", () => { void requestQueue.finally(shutdown); });
+  const failedShutdown=error=>{console.error(`Session cleanup failed: ${asError(error).message}`);process.exit(1);};
+  for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) process.on(signal, () => { void shutdown().then(()=>process.exit(0),failedShutdown); });
+  process.stdin.on("end", () => { void requestQueue.then(shutdown,shutdown).catch(failedShutdown); });
 }
 
 export function toolDefinitions() {

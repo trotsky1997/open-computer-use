@@ -1,3 +1,4 @@
+import {BrowserTabs} from "./browser-tabs.mjs";
 import {BrowserInputs,validatePressKey,validateClick} from "./browser-input.mjs";
 import { BrowserDownloads } from "./browser-downloads.mjs";
 import { BrowserClipboard } from "./browser-clipboard.mjs";
@@ -151,7 +152,7 @@ export async function openConnection(url, onEvent = () => {}, onClose = () => {}
     const request = pending.get(message.id);
     if (!request) return;
     pending.delete(message.id);
-    if (message.error) request.reject(new Error(message.error.message));
+    if (message.error) request.reject(Object.assign(new Error(message.error.message),{cdpError:true}));
     else request.resolve(message.result);
   });
   socket.addEventListener("close", () => { fail(new Error("Browser connection closed")); onClose(); });
@@ -458,7 +459,8 @@ export async function withConnection(url, operation) {
 const DOCUMENTATION = `## CDP browser
 Use cua.listTabs(), cua.getTab(id or {url}), and cua.createBrowserTab("cdp", url).
 Tab bindings expose getAXState(), getScreenshot(), getAXStateAndScreenshot(), screenshot(),
-goto(url), back(), forward(), reload(), and close(). Observations emit by default;
+goto(url), back(), forward(), reload(), close(), markDeliverable() and markHandoff().
+Created tabs/popups are ephemeral at turn end unless marked. Latest mark wins; both marks clear when the next turn begins, so mark again as needed. User tabs stay open. js_reset retains tab ownership. Session close keeps marked survivors. Observations emit by default;
 pass {emit:false} to suppress output. AX state uses browser accessibility node IDs.
 Tab input: click(elementIndex, {mouseButton?, clickCount?, key?, durationMs?}), typeText(elementIndexOrNull, text),
 pressKey(elementIndexOrNull, key, {durationMs?}), paste(elementIndexOrNull, text, {format:"text"|"html"}),
@@ -480,26 +482,30 @@ Clipboard: tab.clipboard.read()/readText()/write(items)/writeText(text) uses the
 Browser capabilities: await browser.capabilities.list(), then get("viewport") and documentation(). viewport.set({width,height}) applies explicit CSS dimensions for responsive tasks; viewport.reset() returns to normal sizing. The host cleans temporary overrides on reset/timeout/close. Competing sessions fail explicitly. Use existing sizing during normal tasks.
 Screenshots: tab.screenshot({fullPage?,clip?}) returns JPEG bytes with no implicit output; use nodeRepl.emitImage(bytes). getScreenshot returns/emits PNG. clip uses CSS pixels relative to the viewport or full-page area. Pixel input maps cropped viewport images back to CSS; full-page images require a new viewport capture before input. Geometry and viewport-revision changes invalidate capture coordinates.`;
 
-export function createBrowserApi(activeOutput, environment = process.env, {focusLease, downloadRequest, logRequest, dialogRequest, clipboardRequest, viewportRequest, dropRequest, inputRequest, onDispose = () => {}} = {}) {
+export function createBrowserApi(activeOutput, environment = process.env, {focusLease, downloadRequest, logRequest, dialogRequest, clipboardRequest, viewportRequest, dropRequest, inputRequest, tabRequest, onDispose = () => {}} = {}) {
+  const cleanups=[];
+  const tabs=tabRequest ? undefined : new BrowserTabs(()=>endpoint()?.href,openConnection);
+  const tabOwner={};
+  const requestTab=tabRequest ?? (args=>tabs.request(tabOwner,args));
   const clipboard = clipboardRequest ? undefined : new BrowserClipboard(() => endpoint()?.href,withConnection);
   const clipboardOwner = {};
-  if (clipboard) onDispose(() => clipboard.cleanup(clipboardOwner));
+  if (clipboard) cleanups.push(() => clipboard.cleanup(clipboardOwner));
   const requestClipboard = clipboardRequest ?? (args => clipboard.request(clipboardOwner,args));
   const viewport = viewportRequest ? undefined : new BrowserViewport(() => endpoint()?.href,openConnection,withConnection,()=>requestClipboard({method:"targets"}));
   const viewportOwner = {};
-  if (viewport) onDispose(() => viewport.cleanup(viewportOwner));
+  if (viewport) cleanups.push(() => viewport.cleanup(viewportOwner));
   const requestViewport = viewportRequest ?? (args => viewport.request(viewportOwner,args));
   const drops = dropRequest ? undefined : new BrowserDrops(() => endpoint()?.href,openConnection,withConnection,()=>requestViewport({action:"state"}));
   const dropOwner = {};
-  if (drops) onDispose(() => drops.cleanup(dropOwner));
+  if (drops) cleanups.push(() => drops.cleanup(dropOwner));
   const requestDrop = dropRequest ?? (args=>drops.request(dropOwner,args));
   const dialogs = dialogRequest ? undefined : new BrowserDialogs(() => endpoint()?.href);
   const dialogOwner = {};
-  if (dialogs) onDispose(() => dialogs.cleanup(dialogOwner));
+  if (dialogs) cleanups.push(() => dialogs.cleanup(dialogOwner));
   const requestDialog = dialogRequest ?? (args => dialogs.request(dialogOwner,args));
   const inputs=inputRequest ? undefined : new BrowserInputs(()=>endpoint()?.href,openConnection,()=>requestViewport({action:"state"}),undefined,(_owner,targetId)=>requestDialog({action:"state",targetId}));
   const inputOwner={};
-  if(inputs) onDispose(()=>inputs.cleanup(inputOwner));
+  if(inputs) cleanups.push(()=>inputs.cleanup(inputOwner));
   const requestInput=inputRequest ?? (args=>inputs.request(inputOwner,args));
   const checkDialog = targetId => requestDialog({action:"check",targetId});
   async function withDialogAction(targetId, operation) {
@@ -515,7 +521,7 @@ export function createBrowserApi(activeOutput, environment = process.env, {focus
   }
   const logs = logRequest ? undefined : new BrowserConsoleLogs(() => endpoint()?.href);
   const logOwner = {};
-  if (logs) onDispose(() => logs.cleanup(logOwner));
+  if (logs) cleanups.push(() => logs.cleanup(logOwner));
   const requestLogs = logRequest ?? (args => {
     if (args.action === "start") return logs.start(logOwner,args.targetId);
     if (args.action === "read") return logs.read(logOwner,args.targetId,args.options);
@@ -674,6 +680,8 @@ export function createBrowserApi(activeOutput, environment = process.env, {focus
         const respond = (response,text) => requestDialog({action:"respond",targetId:target.id,id:dialog.id,response,text});
         return Object.freeze({type:dialog.type,dismiss:() => respond("dismiss"),...(["confirm","prompt"].includes(dialog.type) ? {accept: text => respond("accept",text)} : {})});
       },
+      markDeliverable:()=>requestTab({action:"mark",targetId:target.id,mark:"deliverable"}),
+      markHandoff:()=>requestTab({action:"mark",targetId:target.id,mark:"handoff"}),
       getAXState: ax,
       getScreenshot: screenshot,
       screenshot: (options = {}) => screenshot(options,"jpeg",false),
@@ -781,8 +789,7 @@ export function createBrowserApi(activeOutput, environment = process.env, {focus
       async forward() { await traverse(1); },
       async reload() { invalidate(); await withDialogAction(target.id, () => command("Page.reload")); },
       async close() {
-        const result = await browserCommand("Target.closeTarget", { targetId: target.id });
-        if (!result.success) throw new Error("Browser refused to close tab");
+        await requestTab({action:"close",targetId:target.id});
         await requestDialog({action:"stop",targetId:target.id});
         await requestLogs({action:"stop",targetId:target.id});
       },
@@ -863,21 +870,26 @@ export function createBrowserApi(activeOutput, environment = process.env, {focus
       if (options.visible !== undefined && typeof options.visible !== "boolean") throw new Error("visible must be a boolean");
       const parsed = new URL(url);
       if (!["http:", "https:", "about:"].includes(parsed.protocol)) throw new Error("Unsupported navigation URL protocol");
-      const result = await browserCommand("Target.createTarget", { url: "about:blank", background: options.visible === false });
+      const result=await requestTab({action:"create",visible:options.visible});
       try {
         const target = (await targets()).find(target => target.id === result.targetId);
         if (!target) throw new Error("Created tab is unavailable");
         const tab = await prepare(target);
-        if (parsed.href !== "about:blank") await tab.goto(parsed.href);
+        await tab.goto(parsed.href);
         return observe(bind((await targets()).find(target => target.id === result.targetId) ?? target));
       } catch (error) {
-        await browserCommand("Target.closeTarget",{targetId:result.targetId}).catch(() => {});
+        await requestTab({action:"close",targetId:result.targetId}).catch(() => {});
         await requestDialog({action:"stop",targetId:result.targetId});
         await requestLogs({action:"stop",targetId:result.targetId});
         throw error;
       }
     },
   };
+  if(cleanups.length || tabs) onDispose(async()=>{
+    const results=await Promise.allSettled(cleanups.map(cleanup=>Promise.resolve().then(cleanup)));
+    const failed=results.find(result=>result.status==='rejected');if(failed)throw failed.reason;
+    await tabs?.end(tabOwner,{final:true});
+  });
   return Object.freeze(api);
 }
 

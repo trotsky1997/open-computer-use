@@ -125,13 +125,14 @@ try{
  await session.reset();
  assert.equal(JSON.parse(await run(`var timeoutTab=await cua.getTab(${JSON.stringify(timeoutTab)});nodeRepl.write(JSON.stringify(await timeoutTab.playwright.locator('#result').innerText()));`)).events.filter(e=>e.type==='drop').length,1);
  await run(`await timeoutTab.playwright.locator('#zone').drop({data:{'text/plain':'retry success'}});nodeRepl.write(JSON.stringify(true));`);
- const closeTab=await run(`var closeTab=await cua.createBrowserTab('cdp',${JSON.stringify(url+'?dialog')},{visible:false});await closeTab.playwright.locator('#zone').drop({data:{'text/plain':'closed'}});nodeRepl.write(JSON.stringify(closeTab.id));`);ids.push(closeTab);
+ const closeTab=await run(`var closeTab=await cua.createBrowserTab('cdp',${JSON.stringify(url+'?dialog')},{visible:false});await closeTab.markHandoff();await closeTab.playwright.locator('#zone').drop({data:{'text/plain':'closed'}});nodeRepl.write(JSON.stringify(closeTab.id));`);ids.push(closeTab);
  await session.close();
  assert.equal(await run(`var closedTab=await cua.getTab(${JSON.stringify(closeTab)});nodeRepl.write(JSON.stringify(await closedTab.playwright.locator('#result').innerText()));`,other),'[]');
  console.log(`Native drop smoke passed at raster scale ${rasterScale}: trusted mixed MIME/file data, protected mode, iframe, invalid files, covered target timeout, prompt response/reset/timeout/close and reuse, browser exclusivity, nested cross-process frame delivery and prompts, same-URL native owners including shadow/reorder/navigation, cleanup failure/retry without replay`);
 }finally{
  await Promise.allSettled([session.close(),other.close()]);
  const version=await(await fetch(new URL('/json/version',endpoint))).json();
- for(const targetId of ids) await withConnection(version.webSocketDebuggerUrl,send=>send('Target.closeTarget',{targetId}));
+ const live=new Set((await(await fetch(new URL('/json/list',endpoint))).json()).map(target=>target.id));
+ for(const targetId of ids.filter(id=>live.has(id))) await withConnection(version.webSocketDebuggerUrl,send=>send('Target.closeTarget',{targetId}));
  server.closeAllConnections();await new Promise(resolve=>server.close(resolve));await rm(dir,{recursive:true,force:true});
 }

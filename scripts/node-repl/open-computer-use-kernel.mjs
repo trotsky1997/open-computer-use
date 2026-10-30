@@ -1,3 +1,5 @@
+import {AsyncLocalStorage} from "node:async_hooks";
+const nativeOwner=new AsyncLocalStorage();
 import { parentPort } from "node:worker_threads";
 import { PersistentJavaScriptSession } from "./open-computer-use-repl.mjs";
 
@@ -10,7 +12,7 @@ const native = {
     const id = nextNativeId++;
     return new Promise((resolve, reject) => {
       pendingNative.set(id, { resolve, reject });
-      parentPort.postMessage({ type: "native_request", id, method, params, timeoutMs });
+      parentPort.postMessage({ type: "native_request", id, method, params, timeoutMs,turnId:nativeOwner.getStore() });
     });
   },
 };
@@ -29,7 +31,7 @@ parentPort.on("message", async message => {
     let result;
     try {
       activeTimeoutMs = message.timeoutMs;
-      result = await session.run(message.code, 0, message.requestMeta);
+      result = await nativeOwner.run(message.turnId,()=>session.run(message.code, 0, message.requestMeta));
     } catch (error) {
       result = { content: [{ type: "text", text: `Error: ${error instanceof Error ? error.message : String(error)}` }], isError: true };
     }

@@ -91,14 +91,14 @@ try {
   assert.equal(await run('nodeRepl.write(JSON.stringify(await tab.playwright.getByRole("textbox",{name:"Rich",exact:true}).getAttribute("data-file-type")));'),"image/png");
 
   await run('await tab.clipboard.writeText("persistent browser state"); nodeRepl.write(JSON.stringify(true));');
-  const owner = session.worker;
+  const owner = session.resourceOwners.get(session.worker);
   await session.reset();
   assert.equal(session.browserClipboard.owners.has(owner),false);
   assert.equal(await run('nodeRepl.write(JSON.stringify(await tab.clipboard.readText()));',other),"persistent browser state");
   await other.close();
   assert.equal(session.browserClipboard.server,undefined);
   assert.equal(await run(`var tab=await cua.getTab(${JSON.stringify(id)}); nodeRepl.write(JSON.stringify(await tab.clipboard.readText()));`),"persistent browser state");
-  const timedOutOwner = session.worker;
+  const timedOutOwner = session.resourceOwners.get(session.worker);
   assert.equal((await session.run('while(true){}',150)).isError,true);
   assert.equal(session.browserClipboard.owners.has(timedOutOwner),false);
   assert.equal(session.browserClipboard.server,undefined);

@@ -22,7 +22,7 @@ const native={async request(){throw Error('Native unused');}};
 const session=new WorkerJavaScriptSession({native}),other=new WorkerJavaScriptSession({native});
 const ids=[];
 async function run(source,target=session,timeout=30000){const result=await target.run(source,timeout);assert.equal(result.isError,false,result.content.at(-1).text);return JSON.parse(result.content.at(-1).text);}
-async function setup(route='',name='tab',target=session){const id=await run(`var ${name}=await cua.createBrowserTab('cdp',${JSON.stringify(url+route)},{visible:false});nodeRepl.write(JSON.stringify(${name}.id));`,target);ids.push(id);return id;}
+async function setup(route='',name='tab',target=session){const id=await run(`var ${name}=await cua.createBrowserTab('cdp',${JSON.stringify(url+route)},{visible:false});await ${name}.markHandoff();nodeRepl.write(JSON.stringify(${name}.id));`,target);ids.push(id);return id;}
 async function state(name='tab'){return run(`nodeRepl.write(JSON.stringify(await ${name}.getAXState({emit:false})));`);}
 async function index(name='tab'){const result=(await state(name)).match(/\[(\d+)\] button "Held target"/);assert.ok(result);return result[1];}
 async function events(id){const target=(await(await fetch(new URL('/json/list',endpoint))).json()).find(target=>target.id===id);return withConnection(target.webSocketDebuggerUrl,async send=>JSON.parse((await send('Runtime.evaluate',{expression:'document.querySelector("output").textContent',returnByValue:true})).result.value));}

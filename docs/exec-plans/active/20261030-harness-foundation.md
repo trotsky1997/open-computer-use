@@ -67,3 +67,13 @@ locator action entry points. Press-key duration now shares host-owned releases a
 Continue full keyboard/layout coverage, legacy/native transport
 ownership, focus-loss/headful/platform checks and the broader feature audit.
 See [browser held clicks](../../browser-held-input.md). The full goal remains active.
+
+
+## Turn and tab ownership phase
+
+Host-owned target creation, popup ancestry, per-turn retention marks and immediate
+MCP turn-ended cleanup are implemented. Idle Worker contexts survive; active
+execution is interrupted, and old API callbacks carry a fenced turn ID. Failure
+keeps ownership until retry succeeds. Continue source-session turn lifecycle,
+user takeover/claims, crash recovery and the broader feature audit.
+See [tabs and turn boundaries](../../browser-tabs.md). The full goal stays active.

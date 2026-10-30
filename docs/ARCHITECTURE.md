@@ -356,3 +356,11 @@ The host focuses validated backend-node IDs after acquiring the origin lease,
 checks the loader before each new down, holds the whole chord and releases in
 reverse. Key-triggered scroll/navigation is allowed after the last down; key-up
 cleanup does not depend on the original geometry or loader.
+
+BrowserTabs tracks logical-session ownership separately from per-turn resources.
+The host creates and closes targets, discovers opener ancestry and reconciles
+target IDs. Retention marks last one turn. Worker proxy requests carry an async
+turn ID, so retained JS bindings can use fresh resource owners while prior-turn
+callbacks fail. MCP turn-ended notifications interrupt active execution before
+the normal request queue and establish a cleanup barrier for following calls.
+See [tabs and turn boundaries](browser-tabs.md) for lifecycle and limits.

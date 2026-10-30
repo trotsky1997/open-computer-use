@@ -1,0 +1,120 @@
+import {randomUUID} from "node:crypto";
+
+export class BrowserTabs {
+  constructor(endpoint,open) {this.endpoint=endpoint;this.open=open;this.browsers=new Map();this.owners=new WeakMap();this.active=new Map();}
+  state(owner) {
+    if(!this.owners.has(owner)) this.owners.set(owner,{pending:new Set(),ended:false});
+    return this.owners.get(owner);
+  }
+  begin(owner) {
+    const state=this.state(owner);
+    if(state.ending) throw new Error('Browser tab cleanup is still running');
+    if(state.ended) {
+      for(const entry of this.browsers.values()) for(const record of entry.tabs.values()) if(record.owner===owner) record.mark=undefined;
+      state.ended=false;
+    }
+  }
+  inherit(entry,info) {
+    if(info.type!=='page') return;
+    const owner=entry.creating.get(info.url) ?? entry.lineage.get(info.openerId);
+    if(owner && !entry.tabs.has(info.targetId)) {
+      entry.tabs.set(info.targetId,{owner});entry.lineage.set(info.targetId,owner);entry.creating.delete(info.url);
+    }
+  }
+  async snapshot(entry) {
+    const {targetInfos}=await entry.connection.send('Target.getTargets');
+    for(let pass=0;pass<targetInfos.length;pass++) {
+      const before=entry.tabs.size;for(const info of targetInfos) this.inherit(entry,info);
+      if(entry.tabs.size===before) break;
+    }
+    const live=new Set(targetInfos.filter(info=>info.type==='page').map(info=>info.targetId));
+    for(const id of entry.tabs.keys()) if(!live.has(id)) entry.tabs.delete(id);
+    return live;
+  }
+  async browser(endpoint) {
+    let entry=this.browsers.get(endpoint);
+    if(entry?.ready && !entry.error) {await entry.ready;return entry;}
+    if(!entry) {entry={endpoint,tabs:new Map(),lineage:new Map(),creating:new Map()};this.browsers.set(endpoint,entry);}
+    entry.error=undefined;
+    entry.ready=(async()=>{
+      const response=await fetch(new URL('/json/version',endpoint),{signal:AbortSignal.timeout(10000),redirect:'error'});
+      if(!response.ok) throw new Error(`Tab discovery failed: HTTP ${response.status}`);
+      const {webSocketDebuggerUrl}=await response.json();
+      let connection;connection=await this.open(webSocketDebuggerUrl,event=>{
+        if(event.method==='Target.targetCreated') this.inherit(entry,event.params.targetInfo);
+        if(event.method==='Target.targetDestroyed') entry.tabs.delete(event.params.targetId);
+      },error=>{if(connection && entry.connection===connection)entry.error=error ?? new Error('Browser tab observer closed');});
+      entry.connection=connection;
+      await entry.connection.send('Target.setDiscoverTargets',{discover:true});
+      await this.snapshot(entry);
+    })().catch(error=>{entry.error=error;entry.connection?.close();throw error;});
+    await entry.ready;return entry;
+  }
+  idle(entry) {
+    if(entry && !entry.lineage.size && !entry.creating.size && !this.active.get(entry.endpoint)) {
+      this.browsers.delete(entry.endpoint);entry.connection?.close();
+    }
+  }
+  request(owner,args) {
+    const state=this.state(owner);
+    if(state.ending || state.ended) throw new Error('Browser tab turn ended');
+    if(!args || !['create','mark','close'].includes(args.action)) throw new Error('Unknown browser tab action');
+    if(args.action==='create' && args.visible!==undefined && typeof args.visible!=='boolean') throw new Error('Tab visible must be a boolean');
+    if(args.action!=='create' && (typeof args.targetId!=='string' || (args.action==='mark' && !['deliverable','handoff'].includes(args.mark)))) throw new Error('Invalid tab retention mark');
+    const endpoint=this.endpoint();if(!endpoint) throw new Error('No CDP browser configured');
+    this.active.set(endpoint,(this.active.get(endpoint) ?? 0)+1);
+    const work=(async()=>{
+      const entry=await this.browser(endpoint);
+      if(args.action==='create') {
+        const marker=`about:blank#ocu-${randomUUID()}`;entry.creating.set(marker,owner);
+        let result;
+        try {result=await entry.connection.send('Target.createTarget',{url:marker,background:args.visible===false});}
+        catch(error) {if(error.cdpError)entry.creating.delete(marker);throw error;}
+        if(typeof result.targetId!=='string' || !result.targetId) throw new Error('Created tab identity unavailable');
+        if(!entry.tabs.has(result.targetId)) entry.tabs.set(result.targetId,{owner});entry.lineage.set(result.targetId,owner);entry.creating.delete(marker);
+        await this.snapshot(entry);
+        return result;
+      }
+      const live=await this.snapshot(entry);
+      if(!live.has(args.targetId)) throw new Error('Tab closed or no longer available');
+      const record=entry.tabs.get(args.targetId);
+      if(record && record.owner!==owner) throw new Error('Tab retention belongs to another session');
+      if(args.action==='close') {
+        const result=await entry.connection.send('Target.closeTarget',{targetId:args.targetId});
+        if(!result.success) throw new Error('Browser refused to close tab');
+      } else if(record) record.mark=args.mark;
+    })();
+    state.pending.add(work);work.finally(()=>{
+      state.pending.delete(work);this.active.set(endpoint,this.active.get(endpoint)-1);
+      if(!this.active.get(endpoint)) this.active.delete(endpoint);
+      this.idle(this.browsers.get(endpoint));
+    }).catch(()=>{});return work;
+  }
+  end(owner,{final=false}={}) {
+    const state=this.state(owner);
+    if(state.ending) return state.ending;
+    state.ended=true;
+    state.ending=(async()=>{
+      await Promise.allSettled([...state.pending]);
+      for(const entry of this.browsers.values()) {
+        if(![...entry.lineage.values(),...entry.creating.values()].includes(owner)) continue;
+        await this.browser(entry.endpoint);
+        for(let pass=0;pass<16;pass++) {
+          await this.snapshot(entry);
+          const close=[...entry.tabs].filter(([,record])=>record.owner===owner && !record.mark);
+          if(!close.length) break;
+          if(pass===15) throw new Error('Owned popups kept opening during tab cleanup');
+          for(const [targetId] of close) {
+            const result=await entry.connection.send('Target.closeTarget',{targetId});
+            if(!result.success && (await this.snapshot(entry)).has(targetId)) throw new Error('Browser refused to close owned tab');
+          }
+        }
+        if([...entry.creating.values()].includes(owner)) throw new Error('The outcome of tab creation is unknown; retry cleanup after browser recovery');
+        for(const [id,record] of entry.tabs) if(record.owner===owner && final) entry.tabs.delete(id);
+        for(const [id,recordOwner] of entry.lineage) if(recordOwner===owner && !entry.tabs.has(id)) entry.lineage.delete(id);
+        this.idle(entry);
+      }
+    })().finally(()=>{state.ending=undefined;});
+    state.ending.catch(()=>{});return state.ending;
+  }
+}
