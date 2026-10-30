@@ -24,8 +24,15 @@ and receiving-frame loaders, hit-frame ancestry, viewport metrics and revision.
 Cross-process frame sessions bind the native target/frame identity explicitly.
 Native hit testing descends through iframe content quads into each child layout
 viewport, including document scroll offsets. Nested process boundaries and
-identical-URL independently hosted frames are supported. Same-process sibling
-frames still require unique URL ancestry; ambiguous paths fail before delivery.
+identical-URL independently hosted frames are supported. Same-process frames bind
+recursively through DOM.getFrameOwner backend identities. Owner traversal runs
+in an isolated world; a private isolated selector follows element-child and
+shadow-root steps, then public contentFrame() verifies the selected Core frame
+object. URL uniqueness and frame-tree creation order are unnecessary. Native
+objects and temporary handles are released; missing or changed owners fail
+before delivery. The selector registers through a pinned Core context channel
+because public selector registration omits CDP default-context setup in 1.64.1.
+Upgrade that registration when the public CDP path works, and rerun these smokes.
 Scaled/rotated/perspective frame transforms, zoom, headful browsers and other
 platforms need additional evidence. A final native loader/viewport check precedes
 each dispatch; document changes fail without replaying the drag.
@@ -53,6 +60,10 @@ Unicode MIME and file bytes, native rich editor insertion, same-target iframe
 input, cross-process MIME/file delivery, nested cross-process and same-process
 children with scrolling, identical-URL independently hosted siblings, invalid paths and
 covered-target action timeout, cross-process frame prompt response, dialog response beyond the action deadline,
+same-URL siblings and nested sibling documents, open shadow roots, light/shadow
+host paths, main-world DOM getter poisoning, DOM reordering with preserved frame
+contexts, and frame navigation after a prompt without file delivery. Responses
+to dialogs now report a resumed action failure. Checks also cover
 reset/timeout/close before delivery, modal ownership, failed cancellation with
 blocked reuse and successful reset retry without replay. Unit
 checks exercise trust-boundary validation, canceled startup, browser lease

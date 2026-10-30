@@ -321,6 +321,14 @@ Separate frame targets attach through flat CDP sessions owned by the drag lease.
 Hit testing descends native content quads using child layout viewport dimensions
 and document scroll offsets. Main and receiver loaders are checked again after
 hit testing. Nested process boundaries and identical-URL separate targets have
-real Chrome evidence; ambiguous same-process sibling URL paths fail before
-delivery. Native drop uses browser events rather than the dependency's synthetic
+real Chrome evidence. Same-process identities resolve recursively through native
+frame owners and an isolated DOM/shadow path selector, then compare public Core
+frame object identity. The pinned context-channel registration works around
+missing public CDP default-context engine setup. Native objects and Core handles
+are disposed before stage dispatch; URL ambiguity no longer controls binding. Native drop uses browser events rather than the dependency's synthetic
 DataTransfer dispatch. See [native drag-and-drop](browser-drop.md).
+
+Dialog watchers retain resumed-action failures through response cleanup, including
+watch completion while Page.handleJavaScriptDialog is in flight. Responding to the
+dialog reports those failures. Observation interruptions during initial page
+dialogs are handled within the observation operation, preserving normal startup.

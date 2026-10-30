@@ -40,6 +40,8 @@ export function createPlaywrightApi(endpoint, targetId, invalidate, focusLease, 
       const selected = await findBrowserPage(browser,targetId);
       const page = selected.page;
       focusSession = selected.session;
+      // shortcut: pinned Core CDP contexts omit registered engines; use public registration once CDP supports it.
+      if(method==="drop") await page.context()._channel.registerSelectorEngine({selectorEngine:{name:"ocu_frame_owner",source:`(${frameOwnerEngine.toString()})()`,contentScript:true}});
       page.setDefaultTimeout(10_000);
       const convert = value => {
         if (value && recipes.has(value)) return resolve(recipes.get(value));
@@ -213,6 +215,7 @@ export function createPlaywrightApi(endpoint, targetId, invalidate, focusLease, 
 
 async function nativeDropPoint(locator,page,session,options,request) {
   const handle = await locator.elementHandle({timeout:0});
+  const childSessions=[];
   if (!handle) throw new Error("Drop target missing");
   try {
     await handle.hover({trial:true,timeout:0});
@@ -237,7 +240,8 @@ async function nativeDropPoint(locator,page,session,options,request) {
     if (!after || ["x","y","width","height"].some(key=>Math.abs(after[key]-box[key])>.25)) throw new Error("Drop target moved; resolve again");
     const frames = dropFrames((await session.send("Page.getFrameTree")).frameTree);
     const frameTargets=[];
-    let nearest;
+    const nativeIds=new Map([[page.mainFrame(),frames[0].id]]);
+    const frameSessions=new Map([[page.mainFrame(),session]]);
     for(let current=frame;current && current!==page.mainFrame();current=current.parentFrame()) {
       let child;
       try {child=await page.context().newCDPSession(current);}
@@ -245,27 +249,80 @@ async function nativeDropPoint(locator,page,session,options,request) {
         if(!error.message.includes("does not have a separate CDP session")) throw error;
         continue;
       }
-      try {
-        const tree=dropFrames((await child.send("Page.getFrameTree")).frameTree);
-        const {targetInfo}=await child.send("Target.getTargetInfo");
-        nearest ??= tree[0].id;
-        frameTargets.push({frameId:tree[0].id,targetId:targetInfo.targetId});
-        for(const item of tree) if(!frames.some(existing=>existing.id===item.id)) frames.push(item);
-      } finally {await child.detach();}
+      childSessions.push(child);
+      const tree=dropFrames((await child.send("Page.getFrameTree")).frameTree);
+      const {targetInfo}=await child.send("Target.getTargetInfo");
+      nativeIds.set(current,tree[0].id);
+      frameSessions.set(current,child);
+      frameTargets.push({frameId:tree[0].id,targetId:targetInfo.targetId});
+      for(const item of tree) if(!frames.some(existing=>existing.id===item.id)) frames.push(item);
     }
-    nearest ??= frames[0].id;
+    const frameId=await bindDropFrame(frame,frames,nativeIds,frameSessions);
     const framePath=[];
     for(let current=frame;current;current=current.parentFrame()) framePath.unshift(current.url());
-    const matching = frames.filter(item=>{
-      const path=[], ids=[];
-      for(let current=item;current;current=frames.find(parent=>parent.id===current.parentId)) {path.unshift(current.url);ids.push(current.id);}
-      return ids.includes(nearest) && JSON.stringify(path)===JSON.stringify(framePath);
-    });
-    // shortcut: identical same-process sibling URLs need an additional native owner binding.
-    if(matching.length!==1) throw new Error("Native drop frame path is ambiguous or changed");
-    return {point,frames,framePath,frameTargets,frameId:matching[0].id,geometry:{loaderId:frames[0].loaderId,viewport,revision:await request({action:"revision"})}};
-  } finally {await handle.dispose();}
+    return {point,frames,framePath,frameTargets,frameId,geometry:{loaderId:frames[0].loaderId,viewport,revision:await request({action:"revision"})}};
+  } finally {
+    await Promise.allSettled(childSessions.map(child=>child.detach()));
+    await handle.dispose();
+  }
 }
+
+export async function bindDropFrame(frame,frames,nativeIds,sessions) {
+  if(nativeIds.has(frame)) return nativeIds.get(frame);
+
+  const parent=frame.parentFrame();
+  if(!parent) throw new Error("Native drop frame detached");
+  const parentId=await bindDropFrame(parent,frames,nativeIds,sessions);
+  let ancestor=parent;
+  while(ancestor && !sessions.has(ancestor)) ancestor=ancestor.parentFrame();
+  if(!ancestor) throw new Error("Native drop frame detached");
+  const session=sessions.get(ancestor);
+  const {executionContextId}=await session.send("Page.createIsolatedWorld",{frameId:parentId,worldName:"ocu-drop-owner"});
+  const matches=[];
+  for(const candidate of frames.filter(item=>item.parentId===parentId)) {
+    const {backendNodeId}=await session.send("DOM.getFrameOwner",{frameId:candidate.id});
+    const {object}=await session.send("DOM.resolveNode",{backendNodeId,executionContextId});
+    try {
+      const result=await session.send("Runtime.callFunctionOn",{objectId:object.objectId,returnByValue:true,functionDeclaration:FRAME_OWNER_PATH});
+      if(result.exceptionDetails || typeof result.result?.value!=="string") throw new Error("Native drop owner path unavailable");
+      const steps=JSON.parse(result.result.value);
+      if(!Array.isArray(steps) || !steps.length || steps.length>1024 || steps.some(step=>step!=="shadow" && (!Number.isInteger(step) || step<0))) throw new Error("Invalid native drop owner path");
+      const hosts=await parent.locator("ocu_frame_owner="+JSON.stringify(steps)).elementHandles();
+      try {
+        if(hosts.length===1 && await hosts[0].contentFrame()===frame) matches.push({id:candidate.id,backendNodeId});
+      } finally {await Promise.allSettled(hosts.map(host=>host.dispose()));}
+    } finally {if(object.objectId) await session.send("Runtime.releaseObject",{objectId:object.objectId});}
+  }
+  if(matches.length!==1) throw new Error("Native drop frame owner changed or is ambiguous");
+  const match=matches[0];
+  if((await session.send("DOM.getFrameOwner",{frameId:match.id})).backendNodeId!==match.backendNodeId) throw new Error("Native drop frame owner changed");
+  nativeIds.set(frame,match.id);
+  return match.id;
+}
+
+function frameOwnerEngine() {
+  const query=(root,body)=>{
+    let node=root;
+    for(const step of JSON.parse(body)) node=step==="shadow"?node?.shadowRoot:node?.children?.[step];
+    return node ?? null;
+  };
+  return {query,queryAll(root,body){const node=query(root,body);return node?[node]:[];}};
+}
+
+const FRAME_OWNER_PATH = `function() {
+  const parts=[];
+  for(let element=this;element;) {
+    let index=0;
+    for(let sibling=element.previousElementSibling;sibling;sibling=sibling.previousElementSibling) index++;
+    parts.unshift(index);
+    const parent=element.parentElement;
+    const root=element.getRootNode();
+    if(!parent && root.host) parts.unshift("shadow");
+    element=parent || root.host;
+  }
+  return JSON.stringify(parts);
+}`;
+
 
 
 export class BrowserFocusLeases {

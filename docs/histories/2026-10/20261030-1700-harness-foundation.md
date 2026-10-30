@@ -336,3 +336,37 @@ architecture and the active parity audit now record the supported frame cases.
 Ambiguous same-process sibling URL ancestry, frame transforms/zoom, headful and
 native desktop/platform verification, remote artifacts and host integration
 remain open; the full harness goal stays active.
+
+
+### Native same-process frame owner binding
+
+Replaced same-process URL ancestry disambiguation with recursive native frame
+owner binding. DOM.getFrameOwner backend node identities resolve into an isolated
+DOM path; a content-script selector traverses explicit child/shadow-root steps and
+public contentFrame() confirms the selected Core frame object. Light/shadow paths
+stay distinct even when host indices coincide. Candidate owners are rechecked,
+and native objects/Core handles are released before native dispatch. Separate
+frame sessions stay available through binding, then detach in cleanup.
+
+Pinned Core 1.64.1 omits registered selector engines when setting up CDP default
+contexts: registering publicly after selector injection leaves a missing engine,
+and registration before connecting is omitted by server context setup. A scoped
+context-channel registration before the first locator supplies this small engine.
+The shortcut and its upgrade condition are documented; no dependency was added.
+
+A navigation-during-drop check exposed deferred action errors being swallowed
+after dialogs. Watchers now retain the failure, and response calls capture watches
+before sending the response so completion during that round trip is reported.
+Failures that finish before the response stay attached to the observed dialog.
+Initial observation interruptions are handled inside the observation operation,
+preserving initial page dialog behavior without reporting a skipped read as a
+failed resumed input.
+
+All 79 Node checks passed. Real macOS headless Chrome at verified 1x and forced 2x
+passed same-URL sibling and nested-sibling file drops, open shadow owners,
+coincident light/shadow host paths, main-world DOM getter poisoning, preserved
+frame reordering, sibling non-delivery, and prompt-triggered frame replacement
+with an action error and no file delivery. The expanded drop smoke retains nested
+process, dialogs, cancellation and cleanup retry evidence. Browser, dialog and
+clipboard regression smokes passed. Frame transforms/zoom, headful/native desktop
+and broader platform/host integration remain open in the full harness audit.

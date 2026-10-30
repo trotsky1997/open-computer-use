@@ -1,5 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import {bindDropFrame} from "./browser-playwright.mjs";
+import {BrowserDialogs} from "./browser-cdp.mjs";
 import {BrowserDrops,validateDrop} from "./browser-drop.mjs";
 
 test("drop validates native MIME data, absolute paths and action options",()=>{
@@ -64,4 +66,47 @@ test("native drag rejects a child session whose frame identity changed before di
  await assert.rejects(drops.request(owner,{action:'stage',id:1,type:'dragEnter',frameTargets:[{targetId:'child',frameId:'expected-child'}]}),/frame target changed/);
  assert.equal(events.some(method=>method.startsWith('Input.')),false);
  await drops.cleanup(owner);
+});
+
+
+test("same-URL native frame ownership matches Core identity and releases native handles",async()=>{
+ for(const mode of ['normal','changed','evaluation','invalid']) {
+   const released=[],ownerCalls=new Map();
+   const parent={},selected={parentFrame:()=>parent},other={parentFrame:()=>parent};
+   parent.locator=selector=>({async elementHandles(){return [{async contentFrame(){return selector==='ocu_frame_owner=[1]'?selected:other;},async dispose(){}}];}});
+   const session={async send(method,args){
+     if(method==='Page.createIsolatedWorld') {assert.equal(args.frameId,'root');return {executionContextId:7};}
+     if(method==='DOM.getFrameOwner') {
+       const count=(ownerCalls.get(args.frameId)??0)+1;ownerCalls.set(args.frameId,count);
+       return {backendNodeId:args.frameId==='first'?1:mode==='changed'&&count>1?99:2};
+     }
+     if(method==='DOM.resolveNode') {assert.equal(args.executionContextId,7);return {object:{objectId:String(args.backendNodeId)}};}
+     if(method==='Runtime.callFunctionOn') {
+       if(mode==='evaluation'&&args.objectId==='2') throw Error('Native path read failed');
+       return {result:{value:mode==='invalid'?'["shadow",-1]':args.objectId==='1'?'[0]':'[1]'}};
+     }
+     if(method==='Runtime.releaseObject') {released.push(args.objectId);return {};}
+     throw Error(`Unexpected ${method}`);
+   }};
+   const binding=bindDropFrame(selected,[{id:'root'},{id:'first',parentId:'root',url:'same'},{id:'second',parentId:'root',url:'same'}],new Map([[parent,'root']]),new Map([[parent,session]]));
+   if(mode==='normal') assert.equal(await binding,'second');
+   else await assert.rejects(binding,mode==='changed'?/owner changed/:mode==='invalid'?/Invalid native drop owner path/:/path read failed/);
+   assert.deepEqual(released,mode==='invalid'?['1']:['1','2']);
+ }
+});
+
+test("dialog responses surface resumed action errors even when the watch finishes during the response",async()=>{
+ for(const timing of ['before','during']) {
+   const endpoint='http://dialog-errors/',owner={},dialogs=new BrowserDialogs(()=>endpoint);
+   const entry={key:endpoint+'|tab',targetId:'tab',owners:new Set([owner]),watches:new Set(),dialogWaiters:new Set()};
+   dialogs.targets.set(entry.key,entry);
+   const id=await dialogs.request(owner,{action:'watch',targetId:'tab'});
+   dialogs.waiters.get(id).opened=true;
+   entry.dialog={id:100,type:'prompt',owner};
+   const end=()=>dialogs.request(owner,{action:'end',id,error:'Drop document changed'});
+   if(timing==='before') await end();
+   entry.connection={async send(){if(timing==='during')await end();entry.dialog=undefined;}};
+   await assert.rejects(dialogs.request(owner,{action:'respond',targetId:'tab',id:100,response:'dismiss'}),/Drop document changed/);
+   assert.equal(dialogs.waiters.size,0);
+ }
 });
