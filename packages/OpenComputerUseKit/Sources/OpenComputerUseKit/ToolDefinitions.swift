@@ -154,6 +154,7 @@ public enum ToolDefinitions {
                     "app": stringProperty(description: "App name or bundle identifier"),
                     "key": stringProperty(description: "Key or key combination to press"),
                     "key_method": keyMethodProperty(),
+                    "duration_ms": numberProperty(description: "Finite non-negative milliseconds to hold the whole key chord. Requires key_method auto; owned releases run on cancel/shutdown."),
                 ],
                 required: ["app", "key"]
             )

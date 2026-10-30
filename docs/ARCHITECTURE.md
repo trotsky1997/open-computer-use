@@ -334,9 +334,11 @@ dialog reports those failures. Observation interruptions during initial page
 dialogs are handled within the observation operation, preserving normal startup.
 
 
-Native macOS held-click options select PID-posted input and register releases
-before sending each down. A termination-aware registry reverses held mouse/key
-state on graceful shutdown. App-agent disconnect checks use a separate action
+Native macOS held click/key duration options select PID-posted input and register releases
+before sending each down. The key chord scope and cancellable wait are shared
+between click and key-only sequences; ordinary auto key input also uses owned
+releases. A termination-aware registry reverses held mouse/key state on graceful
+shutdown. Unsupported key methods/fixtures reject explicit duration before input. App-agent disconnect checks use a separate action
 cancellation scope, retaining existing protected authorization and capture
 requirements. Native transport replacement waits for old-process exit, including
 lazy startup and source-level sessions. See [native held clicks](native-held-clicks.md)

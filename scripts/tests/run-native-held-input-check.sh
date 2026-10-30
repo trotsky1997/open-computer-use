@@ -27,6 +27,8 @@ for(const [signal,expected] of [["SIGTERM",143],["SIGINT",130]]) {
     await peer.initialize();
     const fields=(await peer.request("tools/list")).tools.find(tool=>tool.name==="click").inputSchema.properties;
     assert.ok(fields.key && fields.duration_ms);
+    const keys=(await peer.request("tools/list")).tools.find(tool=>tool.name==="press_key").inputSchema.properties;
+    assert.ok(keys.duration_ms);
     const exited=new Promise(resolve=>peer.child.once("exit",resolve));
     const timer=setTimeout(()=>peer.child.kill("SIGKILL"),2000);
     peer.child.kill(signal);

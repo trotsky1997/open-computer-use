@@ -83,7 +83,7 @@ public final class ComputerUseToolDispatcher {
                 mouseButton: optionalString("mouse_button", in: arguments) ?? "left",
                 clickMethod: try parseClickMethod(optionalString("click_method", in: arguments)),
                 heldKey: try validatedQueryString(arguments["key"], key: "key"),
-                durationMs: try validatedClickDuration(arguments["duration_ms"])
+                durationMs: try validatedInputDuration(arguments["duration_ms"])
             )
         case "perform_secondary_action":
             return try service.performSecondaryAction(
@@ -116,7 +116,8 @@ public final class ComputerUseToolDispatcher {
             return try service.pressKey(
                 app: requireString("app", in: arguments),
                 key: requireString("key", in: arguments),
-                keyMethod: try parseKeyMethod(optionalString("key_method", in: arguments))
+                keyMethod: try parseKeyMethod(optionalString("key_method", in: arguments)),
+                durationMs: try validatedInputDuration(arguments["duration_ms"])
             )
         case "set_value":
             return try service.setValue(
@@ -507,7 +508,7 @@ func validatedQueryExact(_ value: Any?) throws -> Bool {
     return number.boolValue
 }
 
-func validatedClickDuration(_ value: Any?) throws -> Double? {
+func validatedInputDuration(_ value: Any?) throws -> Double? {
     guard let value else { return nil }
     guard let number = value as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID(), number.doubleValue.isFinite, number.doubleValue >= 0 else {
         throw ComputerUseError.invalidArguments("duration_ms must be finite and non-negative")

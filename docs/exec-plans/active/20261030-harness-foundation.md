@@ -54,8 +54,9 @@ failure propagation from the resumed action. See
 The live API reference confirms key/durationMs click options. macOS targeted
 implementation, schema gating, graceful release and native replacement barriers
 are implemented; an assert-based Swift check emits no GUI input. Real AppKit
-verification is pending normal Mac unlock. Continue that check, remaining native
-input/paste/scroll operations, other platforms and the broader browser/host audit.
+verification is pending normal Mac unlock. Native press-key duration now shares
+the same registry and no-GUI checks. Continue real held-key/click checks and
+remaining native paste/scroll operations, other platforms and the broader browser/host audit.
 See [native held clicks](../../native-held-clicks.md). The full goal stays active.
 
 

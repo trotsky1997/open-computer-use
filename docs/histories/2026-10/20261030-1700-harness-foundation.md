@@ -571,3 +571,45 @@ terminate arbitrary user Node.js timers/promises. Worker isolation remains the
 production preemption boundary. User takeover/exclusive claims, crash recovery,
 other browser transports, native desktop and broader platform verification
 remain open. Full harness alignment remains active.
+
+
+### Native macOS held key duration
+
+Added pressKey durationMs in the JS app facade and press_key.duration_ms in the
+macOS MCP schema/dispatcher/service. Duration must be finite and non-negative;
+unsupported key routes and fixture bridges reject explicit duration before app
+input. The SDK validates keys/options and checks advertised schema support before
+forwarding held fields. Raw Linux/Windows calls also reject duration_ms before
+platform input instead of silently ignoring it. Their timed delivery remains open.
+
+Native click and key-only paths now share the same chord scope, private event
+source, release-before-down registration and cancellation-aware wait. Whole chords
+release in reverse order, including modifier-only keys. Ordinary auto key presses
+use the same registry with zero added dwell and retain their normal settle delay.
+Graceful shutdown uses the existing signal handlers and native replacement
+barrier. No synthetic repeat is generated.
+
+The macOS product builds and the no-GUI Swift check links the actual debug
+objects. It checks key duration timestamps, modifier-only/default delivery,
+partial cancellation after a modifier or primary down, reverse release, invalid
+duration, and service rejection before resolving an app. Existing click and
+shutdown/cancellation checks passed. Real stdio probes confirm the extended
+press-key schema and SIGTERM/SIGINT exits. All 97 Node checks passed, including
+both session classes, option rejection, schema gating and native timeout routing.
+Windows Go protocol/model checks passed (41); Linux's two held-option guard checks
+passed on macOS. The full Linux platform suite and native Windows desktop were
+not run. The full Swift XCTest suite remains outside this Command Line Tools
+setup; the assert-based native check is the evidence here.
+
+The live smoke now includes chord/modifier timing and key reset release. An
+initial attempt could not resolve the unbundled fixture and sent no input. It now
+creates a unique bundled app and binds by bundle ID. Its old nonexistent-app
+lookup was also replaced with read-only locked-use status diagnostics before
+fixture startup. Current diagnostics report a locked session with AX/capture
+permissions present, so the corrected preflight stops before starting a fixture
+or input. No unlock or permission settings were changed.
+
+Real native key/click delivery, background focus/keyboard isolation, persistent
+app-agent cancellation acknowledgement, more native key layouts, Linux/Windows
+held input and broader parity work remain open. Full harness alignment remains
+active.

@@ -599,3 +599,29 @@ test("native replacement waits for graceful SIGTERM cleanup to exit",async()=>{
    assert.equal(exited,true);assert.notEqual(next.pid,original.pid);
  } finally {await peer.close();}
 });
+
+
+for(const Session of [PersistentJavaScriptSession,WorkerJavaScriptSession]) {
+ test(`${Session.name}: native key duration validates and requires advertised support`,async()=>{
+   const native=mockNative();let supported=true,schemas=0,timeout;
+   const request=native.request;
+   native.request=async(method,params,budget)=>{
+     if(method==='tools/list') {schemas++;return {tools:[{name:'press_key',inputSchema:{properties:supported?{duration_ms:{type:'number'}}:{}}}]};}
+     timeout=budget;return request(method,params);
+   };
+   const session=new Session({native});
+   try {
+     assert.equal((await session.run('var app=await cua.getApp("Text",{initialState:false});')).isError,false);
+     for(const options of ['null','[]','{durationMs:-1}','{durationMs:Infinity}','{durationMs:"10"}','{keyMethod:1}','{typo:true}']) assert.equal((await session.run(`await app.pressKey('a',${options});`)).isError,true);
+     assert.equal((await session.run(`await app.pressKey('');`)).isError,true);
+     assert.equal(schemas,0);assert.equal(native.calls.length,0);
+     assert.equal((await session.run(`await app.pressKey('shift+Return',{durationMs:40});`)).isError,false);
+     assert.deepEqual(native.calls.at(-1).arguments,{app:'Text',key:'shift+Return',duration_ms:40});assert.equal(timeout,0);
+     supported=false;
+     assert.equal((await session.run(`await app.pressKey('shift',{durationMs:0});`)).isError,true);
+     assert.equal(native.calls.length,1);
+     assert.equal((await session.run(`await app.pressKey('Return');`)).isError,false);
+     assert.equal(native.calls.length,2);
+   } finally {await session.close();}
+ });
+}

@@ -60,6 +60,15 @@ final class HeldInput: @unchecked Sendable {
         try validate()
     }
 
+    func wait(durationMs: Double) throws {
+        let deadline = ProcessInfo.processInfo.systemUptime + durationMs / 1000
+        while ProcessInfo.processInfo.systemUptime < deadline {
+            try check()
+            Thread.sleep(forTimeInterval: min(0.01, max(0, deadline - ProcessInfo.processInfo.systemUptime)))
+        }
+        try check()
+    }
+
     func release(_ id: Int) {
         lock.lock(); defer { lock.unlock() }
         guard let index = releases.firstIndex(where: { $0.0 == id }) else { return }
@@ -76,10 +85,42 @@ final class HeldInput: @unchecked Sendable {
 extension InputSimulation {
     static func clickTargetedHeld(at point: CGPoint, button: MouseButtonKind, clickCount: Int,
                                   key: String?, durationMs: Double?, pid: pid_t, input: HeldInput = .shared) throws {
-        let keys = try key.map(KeyPressParser.heldKeys) ?? []
         guard (1...3).contains(clickCount), durationMs.map({ $0.isFinite && $0 >= 0 }) ?? true else {
             throw ComputerUseError.invalidArguments("click requires click_count 1...3 and finite non-negative duration_ms")
         }
+        try withTargetedHeldKeys(key, pid: pid, input: input) { source, flags in
+            for count in 1...clickCount {
+                guard let move = CGEvent(mouseEventSource: source, mouseType: .mouseMoved, mouseCursorPosition: point, mouseButton: button.cgButton),
+                      let down = CGEvent(mouseEventSource: source, mouseType: button.downEvent, mouseCursorPosition: point, mouseButton: button.cgButton),
+                      let up = CGEvent(mouseEventSource: source, mouseType: button.upEvent, mouseCursorPosition: point, mouseButton: button.cgButton) else {
+                    throw ComputerUseError.message("Failed to create held mouse events")
+                }
+                for event in [move, down, up] {
+                    event.flags = flags
+                    event.setIntegerValueField(.mouseEventClickState, value: Int64(count))
+                }
+                let token = try input.begin(down: down, up: up, pid: pid, move: move)
+                do {
+                    defer { input.release(token) }
+                    try input.wait(durationMs: durationMs ?? 30)
+                }
+                Thread.sleep(forTimeInterval: 0.03)
+            }
+        }
+    }
+
+    static func pressKeyTargetedHeld(_ specification: String, durationMs: Double, pid: pid_t, input: HeldInput = .shared) throws {
+        guard durationMs.isFinite && durationMs >= 0 else {
+            throw ComputerUseError.invalidArguments("duration_ms must be finite and non-negative")
+        }
+        try withTargetedHeldKeys(specification, pid: pid, input: input) { _, _ in
+            try input.wait(durationMs: durationMs)
+        }
+    }
+
+    private static func withTargetedHeldKeys(_ key: String?, pid: pid_t, input: HeldInput,
+                                             body: (CGEventSource, CGEventFlags) throws -> Void) throws {
+        let keys = try key.map(KeyPressParser.heldKeys) ?? []
         guard let source = CGEventSource(stateID: .privateState) else {
             throw ComputerUseError.message("Failed to create held input source")
         }
@@ -97,28 +138,7 @@ extension InputSimulation {
             if !key.flag.isEmpty { down.type = .flagsChanged; up.type = .flagsChanged }
             held.append(try input.begin(down: down, up: up, pid: pid))
         }
-        for count in 1...clickCount {
-            guard let move = CGEvent(mouseEventSource: source, mouseType: .mouseMoved, mouseCursorPosition: point, mouseButton: button.cgButton),
-                  let down = CGEvent(mouseEventSource: source, mouseType: button.downEvent, mouseCursorPosition: point, mouseButton: button.cgButton),
-                  let up = CGEvent(mouseEventSource: source, mouseType: button.upEvent, mouseCursorPosition: point, mouseButton: button.cgButton) else {
-                throw ComputerUseError.message("Failed to create held mouse events")
-            }
-            for event in [move, down, up] {
-                event.flags = flags
-                event.setIntegerValueField(.mouseEventClickState, value: Int64(count))
-            }
-            let token = try input.begin(down: down, up: up, pid: pid, move: move)
-            do {
-                defer { input.release(token) }
-                let deadline = ProcessInfo.processInfo.systemUptime + (durationMs ?? 30) / 1000
-                while ProcessInfo.processInfo.systemUptime < deadline {
-                    try input.check()
-                    Thread.sleep(forTimeInterval: min(0.01, max(0, deadline - ProcessInfo.processInfo.systemUptime)))
-                }
-                try input.check()
-            }
-            Thread.sleep(forTimeInterval: 0.03)
-        }
+        try body(source, flags)
     }
 }
 

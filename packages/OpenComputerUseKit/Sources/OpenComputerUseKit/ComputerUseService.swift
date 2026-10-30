@@ -952,9 +952,13 @@ public final class ComputerUseService {
         return try actionResult(for: query)
     }
 
-    public func pressKey(app query: String, key: String, keyMethod: KeyMethod = .auto) throws -> ToolCallResult {
+    public func pressKey(app query: String, key: String, keyMethod: KeyMethod = .auto, durationMs: Double? = nil) throws -> ToolCallResult {
+        _ = try KeyPressParser.heldKeys(key)
+        if let durationMs, !durationMs.isFinite || durationMs < 0 { throw ComputerUseError.invalidArguments("duration_ms must be finite and non-negative") }
+        if durationMs != nil && keyMethod != .auto { throw ComputerUseError.invalidArguments("Held keys require key_method auto") }
         let snapshot = try currentSnapshot(for: query)
         if snapshot.mode == .fixture {
+            if durationMs != nil { throw ComputerUseError.invalidArguments("Held keys are not supported by fixture apps") }
             try requireAutoKeyMethodForFixture(keyMethod)
             try FixtureBridge.post(FixtureCommand(kind: "press_key", identifier: "fixture-key-capture", value: key))
             Thread.sleep(forTimeInterval: 0.15)
@@ -970,7 +974,11 @@ public final class ComputerUseService {
             )
         }
 
-        try InputSimulation.pressKey(key, pid: snapshot.app.pid)
+        if let durationMs {
+            try InputSimulation.pressKeyTargetedHeld(key, durationMs: durationMs, pid: snapshot.app.pid)
+        } else {
+            try InputSimulation.pressKey(key, pid: snapshot.app.pid)
+        }
         return try actionResult(for: query)
     }
 

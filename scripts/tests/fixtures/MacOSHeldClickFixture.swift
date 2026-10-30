@@ -6,7 +6,7 @@ final class EventView: NSView {
     override var acceptsFirstResponder: Bool { true }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     func record(_ event: NSEvent, _ kind: String) {
-        events.append(["kind":kind,"time":ProcessInfo.processInfo.systemUptime,"flags":event.modifierFlags.rawValue,"clicks":event.cgEvent?.getIntegerValueField(.mouseEventClickState) ?? 0])
+        events.append(["kind":kind,"time":ProcessInfo.processInfo.systemUptime,"flags":event.modifierFlags.rawValue,"keyCode":event.cgEvent?.getIntegerValueField(.keyboardEventKeycode) ?? 0,"clicks":event.cgEvent?.getIntegerValueField(.mouseEventClickState) ?? 0])
         try? JSONSerialization.data(withJSONObject:events).write(to:URL(fileURLWithPath:CommandLine.arguments[1]),options:.atomic)
         setAccessibilityValue("Events \(events.count)")
     }

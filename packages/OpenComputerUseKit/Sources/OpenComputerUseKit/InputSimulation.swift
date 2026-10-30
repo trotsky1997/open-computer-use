@@ -229,40 +229,8 @@ enum InputSimulation {
         return chunks
     }
 
-    static func pressKey(_ specification: String, pid: pid_t) throws {
-        try requireUsableComputerUseSession()
-        let parsed = try KeyPressParser.parse(specification)
-        var activeFlags: CGEventFlags = []
-
-        for modifier in parsed.modifiers {
-            guard let event = CGEvent(keyboardEventSource: nil, virtualKey: modifier.keyCode, keyDown: true) else {
-                throw ComputerUseError.message("Failed to create modifier key down event.")
-            }
-
-            activeFlags.insert(modifier.flag)
-            event.flags = activeFlags
-            event.postToPid(pid)
-        }
-
-        guard let keyDown = CGEvent(keyboardEventSource: nil, virtualKey: parsed.keyCode, keyDown: true),
-              let keyUp = CGEvent(keyboardEventSource: nil, virtualKey: parsed.keyCode, keyDown: false) else {
-            throw ComputerUseError.message("Failed to create key event.")
-        }
-
-        keyDown.flags = activeFlags
-        keyUp.flags = activeFlags
-        keyDown.postToPid(pid)
-        keyUp.postToPid(pid)
-
-        for modifier in parsed.modifiers.reversed() {
-            guard let event = CGEvent(keyboardEventSource: nil, virtualKey: modifier.keyCode, keyDown: false) else {
-                throw ComputerUseError.message("Failed to create modifier key up event.")
-            }
-
-            event.flags = activeFlags
-            event.postToPid(pid)
-            activeFlags.remove(modifier.flag)
-        }
+    static func pressKey(_ specification: String, pid: pid_t, input: HeldInput = .shared) throws {
+        try pressKeyTargetedHeld(specification, durationMs: 0, pid: pid, input: input)
 
         if InputTiming.pressKeySettle > 0 {
             Thread.sleep(forTimeInterval: InputTiming.pressKeySettle)

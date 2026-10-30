@@ -345,6 +345,9 @@ func (s *service) callTool(name string, args map[string]any) toolCallResult {
 		}
 		return s.typeText(requiredString(args, "app"), requiredString(args, "text"), keyMethod)
 	case "press_key":
+		if _, ok := args["duration_ms"]; ok {
+			return textResult("Held key duration_ms is not supported by this platform", true)
+		}
 		keyMethod, err := parsePressKeyMethod(optionalString(args, "key_method"))
 		if err != nil {
 			return textResult(err.Error(), true)

@@ -514,3 +514,12 @@ func TestHeldClickOptionsFailBeforePlatformInput(t *testing.T) {
 		}
 	}
 }
+
+func TestHeldKeyDurationFailsBeforePlatformInput(t *testing.T) {
+	for _, value := range []any{float64(0), float64(10), "bad", nil} {
+		result := newService().callTool("press_key", map[string]any{"duration_ms": value})
+		if !result.IsError {
+			t.Fatal("Unsupported held key duration was accepted")
+		}
+	}
+}

@@ -46,7 +46,7 @@ getScreenshot({ emit?, windowPlacement? })
 getAXStateAndScreenshot({ emit?, disableDiffing?, textLimit?, maxTreeNodes?, maxTreeDepth?, windowPlacement? })
 click(elementIndexOrPoint, options?)
 drag([fromX, fromY], [toX, toY])
-pressKey(key, options?)
+pressKey(key, { keyMethod?, durationMs? })
 scroll(elementIndex, direction, pages?)
 setValue(elementIndex, value)
 selectText(elementIndex, text, { prefix?, suffix?, selectionType? })  // macOS
@@ -262,3 +262,9 @@ Cleanup failures keep the session stopped until a retry succeeds. Source timeout
 results also wait for reset cleanup. CPU-bound preemption requires the Worker
 class because an in-process loop blocks the event loop needed to cancel it.
 See [tabs and turn boundaries](../browser-tabs.md) for ownership and limits.
+
+Native macOS app `pressKey(key, {durationMs})` holds the whole key/chord and
+registers reverse releases before dispatch. The SDK verifies native schema
+support before forwarding `duration_ms`. Linux/Windows reject explicit duration
+until timed native key delivery is implemented. See
+[native held input](../native-held-clicks.md) for supported routes and validation.

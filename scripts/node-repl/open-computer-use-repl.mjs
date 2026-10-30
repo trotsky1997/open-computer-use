@@ -112,11 +112,12 @@ The runtime exposes an asynchronous app-bound API:
 - \`await app.getAXStateAndScreenshot(options?)\`
 - Optional observation on macOS, Windows and Linux: \`app.getScreenshot({ includeAX: false })\` skips AX/focus/selection and invalidates prior element indexes; refresh AX before element actions. \`app.getAXState({ includeScreenshot: false })\` skips capture; screenshot-coordinate actions require a fresh screenshot. Omitted options retain full native observation.
 - \`await app.click(elementIndexOrPoint, { mouseButton?, clickCount?, clickMethod?, key?, durationMs? })\`
+- Held key duration requires a backend advertising press_key.duration_ms (currently macOS auto). It holds the whole chord and owns reverse releases on cancellation/shutdown. Unsupported methods/platforms reject before input.
 - Held click options require a backend advertising key/duration_ms (currently macOS). key holds a native key/chord across the sequence; durationMs holds each mouse press. auto selects targeted app_post. Click counts are 1...3. Unsupported backends and explicit non-event methods throw before input.
 - \`await app.scroll(elementIndex, direction, pages?)\`
 - \`await app.drag([fromX, fromY], [toX, toY])\`
 - \`await app.typeText(text, { keyMethod? })\`
-- \`await app.pressKey(key, { keyMethod? })\`
+- \`await app.pressKey(key, { keyMethod?, durationMs? })\`
 - \`await app.setValue(elementIndex, value)\`
 - \`await app.selectText(elementIndex, text, { prefix?, suffix?, selectionType? })\`: macOS-only; selectionType is text (default), cursor_before or cursor_after. Ambiguous text and unverified selections throw.
 - \`await app.performSecondaryAction(elementIndex, action)\`
@@ -446,8 +447,15 @@ function optionsToClickArgs(options = {}) {
   return args;
 }
 
-function optionsToKeyArgs(options = {}) {
+function optionsToKeyArgs(options = {},held=false) {
+  const allowed=held ? ["keyMethod","durationMs"] : ["keyMethod"];
+  if(!isPlainObject(options) || Object.keys(options).some(key=>!allowed.includes(key))) throw new Error("Invalid native key options");
+  if(options.keyMethod!==undefined && (typeof options.keyMethod!=="string" || !options.keyMethod.trim())) throw new Error("Invalid native keyMethod");
   const args = {};
+  if(options.durationMs!==undefined) {
+    if(!Number.isFinite(options.durationMs) || options.durationMs<0) throw new Error("Native key durationMs must be finite and non-negative");
+    args.duration_ms=options.durationMs;
+  }
   if (options.keyMethod !== undefined) args.key_method = options.keyMethod;
   return args;
 }
@@ -560,7 +568,15 @@ export function createCuaApi(native, activeOutput, onDispose, {tabRequest}={}) {
         await call("click", { app, ...targetArgs, ...args }, extended.length ? 0 : undefined);
       },
       async drag(from, to) { await call("drag", { app, from_x: from[0], from_y: from[1], to_x: to[0], to_y: to[1] }); },
-      async pressKey(key, options = {}) { await call("press_key", { app, key, ...optionsToKeyArgs(options) }); },
+      async pressKey(key, options = {}) {
+        if(typeof key!=="string" || !key.trim()) throw new Error("Native pressKey requires a non-empty key");
+        const args=optionsToKeyArgs(options,true);
+        if(args.duration_ms!==undefined) {
+          const schema=(await native.request("tools/list",{}))?.tools?.find(tool=>tool.name==="press_key")?.inputSchema?.properties;
+          if(!schema || !Object.hasOwn(schema,"duration_ms")) throw new Error("Native runtime does not advertise held key support");
+        }
+        await call("press_key", { app, key, ...args }, args.duration_ms!==undefined ? 0 : undefined);
+      },
       async scroll(target, direction, pages = 1) {
         if (Array.isArray(target)) throw new Error("coordinate scroll is not supported by this Open Computer Use runtime");
         await call("scroll", { app, element_index: target, direction, pages });

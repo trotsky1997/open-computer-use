@@ -1,4 +1,4 @@
-# Native held clicks
+# Native held input
 
 The current reference API exposes click options `key` and `durationMs`. The key
 stays held across the full click sequence; each mouse press lasts durationMs.
@@ -7,6 +7,7 @@ This contract was read from the live computer-use API documentation on 2026-10-3
 ```javascript
 const app = await cua.getApp(appName);
 await app.click(elementIndex, {key:"shift", clickCount:2, durationMs:100});
+await app.pressKey("shift+Return", {durationMs:100});
 await app.getAXState();
 ```
 
@@ -25,6 +26,19 @@ normalizes l/r/m mouse aliases and rejects malformed/unknown options. It checks
 the native click schema before sending held options: stale backends and current
 Linux/Windows backends fail explicitly. Raw Linux/Windows tool calls also reject
 these options before platform input. Extending those platforms remains open.
+
+Native macOS pressKey also accepts durationMs through the JS facade and
+press_key.duration_ms through raw MCP. It holds the full chord for that duration,
+then releases in reverse order. Modifier-only keys are supported. The auto route
+uses targeted private-source events; sky_key and the synthetic fixture bridge
+reject explicit duration before input. Ordinary auto key presses use the same
+release registry with zero added dwell and retain their existing settle behavior.
+No synthetic repeat is generated. The native key map defines supported names and
+layout behavior still requires broader verification.
+
+The SDK validates the native key options and checks press_key's duration schema.
+Raw Linux/Windows key calls reject duration_ms before platform work; those
+backends do not advertise it. Their timed key delivery remains open.
 
 Mouse release and reverse-order key release are registered before each down
 is sent. Release bypasses normal action authorization so cancellation or a
@@ -61,8 +75,11 @@ The installed Command Line Tools lack XCTest, so the repository Swift XCTest
 suite could not run here. Node checks cover both session types, unsupported
 schema rejection and native replacement waiting for graceful termination.
 
-The live smoke builds an independent AppKit fixture, checks real mouse events,
-modifier release and timing, then resets during a held press. It exercises direct
+The live smoke builds an independent bundled AppKit fixture with a unique bundle
+ID, checks real mouse/key events, modifier-only/chord timing and resets during
+held input. A read-only locked-use status probe now validates GUI-session and AX
+readiness before starting the fixture; resolving a nonexistent app is not a
+session-readiness probe. It exercises direct
 stdio mode; signed app-agent/proxy mode needs its own follow-up verification. Its preflight
 currently stops because the Mac is locked, despite existing AX/capture
 permissions. It changes no lock or permission settings. Run it after normal
