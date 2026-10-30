@@ -346,3 +346,35 @@ VM work files were cleaned up; no dependency or CI added.
 Wider keymaps/IME/compositors and physical focus races remain limitations. Paste,
 native window images/pointer, Windows and the full harness goal remain open.
 See [Linux text input](../../linux-text-input.md).
+
+
+## Linux verified selection
+
+Implement the existing `app.selectText` reference API on Linux through an
+advertised native `select_text` tool. Preserve exact observed object identity,
+literal contextual matching including overlaps, Unicode offsets, selection and
+both cursor modes. Verify native range and unchanged content before returning.
+Use owned GTK flows for repeated/multiline/astral text and stale rejection.
+Native paste still needs clipboard ownership, MIME transfer and cleanup work;
+keep it and all remaining platform/image/physical requirements in the active goal.
+
+
+## Linux verified text selection
+
+Added the existing `app.selectText(index, text, options)` API to Linux through
+capability discovery, schema validation and exact AT-SPI field identity. Literal
+prefix/suffix context disambiguates every occurrence, including overlaps. Native
+Unicode code-point ranges support selection and before/after caret modes;
+unchanged text and native ranges are verified around writes. Missing/ambiguous,
+protected, stale and unsupported fields fail without global-key fallback.
+
+Passed 143 Node checks, 46 Python checks and Linux Go's 41 top-level checks plus
+8 subchecks on arm64 Ubuntu. Both REPLs passed real GTK contextual repeated-text,
+astral/multiline selection, replacement, both cursor modes and stale rejection,
+alongside existing text/key, window identity and launch/lifecycle regressions.
+Provider refusal, wrong ranges and concurrent text changes have focused checks.
+Private test processes and VM work files were removed. No dependency or CI added.
+
+Clipboard paste still needs native ownership/MIME/lifecycle implementation.
+Wider text providers, Wayland/headful, window images, physical routing and Windows
+remain open under the full active goal. See [Linux text input](../../linux-text-input.md).

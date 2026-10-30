@@ -48,3 +48,11 @@ test('Linux printable keys validate input, capability and native emission counts
  fail=true;await assert.rejects(app.typeCharacters('ab'),/1 characters confirmed sent/);fail=false;advertised=false;await assert.rejects(app.typeCharacters('ab'),/does not advertise/);
  const mac=createCuaApi(native,()=>({write(){}}),undefined,{platform:'darwin'});assert.equal((await mac.getApp('Editor',{initialState:false})).typeCharacters,undefined);
 });
+test('Linux native selection requires advertised support and preserves exact context',async()=>{
+ const calls=[];let advertised=true;
+ const native={async request(method,params){calls.push({method,params});return method==='tools/list'?{tools:advertised?[{name:'select_text'}]:[]}:result('ok');}};
+ const cua=createCuaApi(native,()=>({write(){}}),undefined,{platform:'linux'}),app=await cua.getApp('Editor',{initialState:false});
+ await app.selectText(2,'你🙂',{prefix:'before ',suffix:' after',selectionType:'cursor_after'});
+ assert.deepEqual(calls.at(-1).params.arguments,{app:'Editor',element_index:2,text:'你🙂',prefix:'before ',suffix:' after',selection:'cursor_after'});
+ advertised=false;const prior=calls.length;await assert.rejects(app.selectText(2,'must-not-select'),/does not advertise/);assert.equal(calls.length,prior+1);
+});

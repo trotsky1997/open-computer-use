@@ -887,6 +887,50 @@ def insert_text(root, text, node=None):
     return True
 
 
+def select_text(node, text, prefix="", suffix="", selection="text"):
+    if any(not isinstance(value, str) or "\0" in value for value in (text, prefix, suffix)) or not text:
+        raise RuntimeError("select_text requires non-empty text and string context without NUL")
+    if selection not in ("text", "cursor_before", "cursor_after"):
+        raise RuntimeError("Invalid text selection mode")
+    if node is None or not supports_interface(node, "Text") or node_role(node).lower() == "password text":
+        raise RuntimeError("Target has no readable selectable text")
+    interface = node.get_text_iface()
+    original = Atspi.Text.get_text(interface, 0, -1)
+    if not isinstance(original, str) or len(original) != Atspi.Text.get_character_count(interface):
+        raise RuntimeError("Provider text offsets are inconsistent")
+    needle = prefix + text + suffix
+    match = original.find(needle)
+    if match < 0:
+        raise RuntimeError("Selection text not found")
+    if original.find(needle, match + 1) >= 0:
+        raise RuntimeError("Selection text is ambiguous; supply prefix/suffix")
+    start, end = match + len(prefix), match + len(prefix) + len(text)
+    count = Atspi.Text.get_n_selections(interface)
+    if count not in (0, 1):
+        raise RuntimeError("Multiple existing selections are unsupported")
+    if Atspi.Text.get_text(interface, 0, -1) != original:
+        raise RuntimeError("Text changed before selection; refresh app state")
+    if selection == "text":
+        applied = Atspi.Text.set_selection(interface, 0, start, end) if count else Atspi.Text.add_selection(interface, start, end)
+        if not applied or Atspi.Text.get_n_selections(interface) != 1:
+            raise RuntimeError("Could not verify text selection; inspect before retrying")
+        actual = Atspi.Text.get_selection(interface, 0)
+        verified = (actual.start_offset, actual.end_offset) == (start, end)
+    else:
+        position = start if selection == "cursor_before" else end
+        applied = Atspi.Text.set_caret_offset(interface, position)
+        remaining = Atspi.Text.get_n_selections(interface)
+        collapsed = remaining == 0
+        if remaining == 1:
+            actual = Atspi.Text.get_selection(interface, 0)
+            collapsed = (actual.start_offset, actual.end_offset) == (position, position)
+        verified = applied and collapsed and Atspi.Text.get_caret_offset(interface) == position
+    if not verified:
+        raise RuntimeError("Could not verify text selection; inspect before retrying")
+    if Atspi.Text.get_text(interface, 0, -1) != original:
+        raise RuntimeError("Text changed during selection; inspect before retrying")
+
+
 def set_element_value(node, value):
     if node is not None and supports_interface(node, "EditableText"):
         editable = safe(node.get_editable_text_iface)
@@ -966,7 +1010,7 @@ def perform_operation(operation):
     bound = query.startswith(WINDOW_PREFIX)
     bounds = operation.get("windowBounds") or extents(window)
     element_record = operation.get("element")
-    element = find_element(app, element_record, window=window, strict=bound or (tool == "type_text" and element_record is not None))
+    element = find_element(app, element_record, window=window, strict=bound or (tool in ("type_text", "select_text") and element_record is not None))
 
     def physical(pointer=False, force=False):
         if not bound and not force:
@@ -1038,6 +1082,8 @@ def perform_operation(operation):
         )
         to_x, to_y = screen_point(bounds, None, operation.get("to_x"), operation.get("to_y"))
         send_drag(from_x, from_y, to_x, to_y)
+    elif tool == "select_text":
+        select_text(element, operation.get("text"), operation.get("prefix", ""), operation.get("suffix", ""), operation.get("selection", "text"))
     elif tool == "type_characters":
         return {"ok": True, "charactersSent": send_characters(operation.get("text", ""), lambda: physical(force=True))}
     elif tool == "type_text":

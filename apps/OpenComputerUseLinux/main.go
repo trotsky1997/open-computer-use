@@ -33,7 +33,7 @@ var windowPlacementValues = []string{"keep", "agent_display", "restore"}
 //go:embed runtime.py
 var linuxRuntimeScript string
 
-const serverInstructions = "Computer Use tools let you interact with Linux desktop apps by performing UI actions.\n\nUse launch_app only for an explicitly requested application start; it accepts one literal executable name/path without arguments. The started application outlives this native session. Verify its readiness with get_app_state.\n\nBegin by calling `get_app_state` every turn you want to use Computer Use to get the latest state before acting. The available tools are list_windows, bind_window, launch_app, list_apps, get_app_state, click, perform_secondary_action, scroll, drag, type_text, type_characters, press_key, and set_value.\n\nPrefer element-targeted interactions over coordinate clicks when an index for the targeted element is available. Linux actions use AT-SPI2 semantic actions and editable text APIs first. Coordinate mouse and key synthesis are best-effort fallbacks and are not a universal Wayland background input model."
+const serverInstructions = "Computer Use tools let you interact with Linux desktop apps by performing UI actions.\n\nUse launch_app only for an explicitly requested application start; it accepts one literal executable name/path without arguments. The started application outlives this native session. Verify its readiness with get_app_state.\n\nBegin by calling `get_app_state` every turn you want to use Computer Use to get the latest state before acting. The available tools are list_windows, bind_window, launch_app, list_apps, get_app_state, click, perform_secondary_action, scroll, drag, type_text, type_characters, select_text, press_key, and set_value.\n\nPrefer element-targeted interactions over coordinate clicks when an index for the targeted element is available. Linux actions use AT-SPI2 semantic actions and editable text APIs first. Coordinate mouse and key synthesis are best-effort fallbacks and are not a universal Wayland background input model."
 
 type toolDefinition struct {
 	Name        string         `json:"name"`
@@ -146,9 +146,12 @@ func (s *appSnapshot) result() toolCallResult {
 }
 
 type linuxRequest struct {
-	WindowID          int64 `json:"window_id,omitempty"`
-	IncludeAX         *bool `json:"include_ax,omitempty"`
-	IncludeScreenshot *bool `json:"include_screenshot,omitempty"`
+	Prefix            string `json:"prefix,omitempty"`
+	Suffix            string `json:"suffix,omitempty"`
+	Selection         string `json:"selection,omitempty"`
+	WindowID          int64  `json:"window_id,omitempty"`
+	IncludeAX         *bool  `json:"include_ax,omitempty"`
+	IncludeScreenshot *bool  `json:"include_screenshot,omitempty"`
 
 	Tool         string         `json:"tool"`
 	App          string         `json:"app,omitempty"`
@@ -284,6 +287,37 @@ func (s *service) callTool(name string, args map[string]any) toolCallResult {
 			requiredFloat(args, "to_x"),
 			requiredFloat(args, "to_y"),
 		)
+	case "select_text":
+		index := optionalElementIndex(args)
+		if index == "" {
+			return textResult("select_text requires element_index", true)
+		}
+		values := map[string]string{}
+		for _, key := range []string{"text", "prefix", "suffix", "selection"} {
+			if raw, present := args[key]; present {
+				value, ok := raw.(string)
+				if !ok || !utf8.ValidString(value) || strings.ContainsRune(value, 0) {
+					return textResult("select_text requires valid Unicode strings without NUL", true)
+				}
+				values[key] = value
+			}
+		}
+		if values["text"] == "" {
+			return textResult("select_text requires non-empty text", true)
+		}
+		mode := values["selection"]
+		if _, present := args["selection"]; !present {
+			mode = "text"
+		}
+		if mode != "text" && mode != "cursor_before" && mode != "cursor_after" {
+			return textResult("Invalid text selection mode", true)
+		}
+		app := requiredString(args, "app")
+		record, err := lookupElement(s.currentSnapshot(app), index)
+		if err != nil {
+			return textResult(err.Error(), true)
+		}
+		return s.actionResult(app, linuxRequest{Tool: "select_text", App: app, Element: record, Text: values["text"], Prefix: values["prefix"], Suffix: values["suffix"], Selection: mode})
 	case "type_characters":
 		text, ok := args["text"].(string)
 		if !ok {
@@ -1343,6 +1377,7 @@ func globalPointerFallbacksEnabled() bool {
 
 func toolDefinitions() []toolDefinition {
 	return []toolDefinition{
+		{Name: "select_text", Description: "Select unique readable text in an exact observed Linux field, or place its caret before/after the match. Immediate prefix/suffix disambiguate repeated text. Verifies unchanged text and native range; inspect after errors before retrying.", Annotations: defaultAnnotations(), InputSchema: objectSchema(map[string]any{"app": stringProperty("App or bound window selector"), "element_index": integerProperty("Exact observed field index"), "text": stringProperty("Non-empty text to match"), "prefix": stringProperty("Immediate context before text"), "suffix": stringProperty("Immediate context after text"), "selection": enumStringProperty("Selection mode", []string{"text", "cursor_before", "cursor_after"})}, []string{"app", "element_index", "text"})},
 		{Name: "type_characters", Description: "Send printable keys to the selected window current focus without finding an editable field or pasting. Returns charactersSent (native synthesis acknowledgments, Unicode code points). Inspect after errors before retrying.", Annotations: defaultAnnotations(), InputSchema: objectSchema(map[string]any{"app": stringProperty("App or bound window selector"), "text": stringProperty("Printable Unicode characters; controls/newlines are rejected")}, []string{"app", "text"})},
 		{Name: "list_windows", Description: "List native Linux top-level windows with opaque numeric IDs, app and title. IDs identify native objects rather than title or order.", Annotations: readOnlyAnnotations(), InputSchema: objectSchema(map[string]any{}, nil)},
 		{Name: "bind_window", Description: "Bind an exact native Linux window from a fresh list_windows ID. Returns an opaque app selector for observations/actions; closed or replaced windows fail.", Annotations: readOnlyAnnotations(), InputSchema: objectSchema(map[string]any{"window_id": integerProperty("Positive safe-integer window ID from list_windows")}, []string{"window_id"})},

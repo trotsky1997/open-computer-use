@@ -146,7 +146,7 @@ The runtime exposes an asynchronous app-bound API:
 - \`await app.typeText(text, elementIndex?)\` on Linux: insert at the exact observed editable field caret/selection, or current focus when omitted. Other platforms use \`app.typeText(text, { keyMethod? })\`. Refresh AX indexes after UI changes; inspect after an attempted-edit error before retrying.
 - \`await app.pressKey(key, { keyMethod?, durationMs? })\`
 - \`await app.setValue(elementIndex, value)\`
-- \`await app.selectText(elementIndex, text, { prefix?, suffix?, selectionType? })\`: macOS-only; selectionType is text (default), cursor_before or cursor_after. Ambiguous text and unverified selections throw.
+- \`await app.selectText(elementIndex, text, { prefix?, suffix?, selectionType? })\`: macOS/Linux; selectionType is text (default), cursor_before or cursor_after. Ambiguous text and unverified selections throw.
 - \`await app.performSecondaryAction(elementIndex, action)\`
 
 AX observations emit a compact line replacement diff by default when it is smaller than the full state. Pass { disableDiffing: true } for full output. JavaScript return values always contain the full current state. Screenshot observations and native failures clear diff history.
@@ -623,6 +623,7 @@ export function createCuaApi(native, activeOutput, onDispose, {tabRequest,platfo
         if (options.selectionType !== undefined && !["text", "cursor_before", "cursor_after"].includes(options.selectionType)) {
           throw new Error("selectionType must be text, cursor_before or cursor_after");
         }
+        if(platform==='linux'&&!(await native.request('tools/list',{}))?.tools?.some(tool=>tool.name==='select_text'))throw Error('Native runtime does not advertise select_text; update it before use');
         await call("select_text", { app, element_index: elementIndex, text,
           prefix: options.prefix, suffix: options.suffix, selection: options.selectionType });
       },

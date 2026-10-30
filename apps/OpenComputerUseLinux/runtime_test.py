@@ -35,6 +35,17 @@ class FakeText:
         return True
 
 
+    @staticmethod
+    def add_selection(node, start, end):
+        node.selection = (start, end)
+        return True
+
+    @staticmethod
+    def set_selection(node, _index, start, end):
+        node.selection = (start, end)
+        return True
+
+
 class FakeEditableText:
     @staticmethod
     def insert_text(_interface, _offset, _text, _length):
@@ -542,6 +553,52 @@ class WindowBindingTests(unittest.TestCase):
                 runtime.find_element(object(), {"objectPath": "/old", "runtimeId": [0]}, window=object(), strict=True)
         with mock.patch.object(runtime, "iter_all", return_value=[old]):
             self.assertIs(runtime.find_element(object(), {"objectPath": "/old"}, window=object(), strict=True), old)
+
+
+class TextSelectionTests(unittest.TestCase):
+    def test_context_unicode_modes_and_existing_selection(self):
+        runtime = load_runtime()
+        node = InterfaceOnlyAccessible(["Text", "EditableText"])
+        node.text = "前🙂 repeat 中 repeat 后"
+        with self.assertRaisesRegex(RuntimeError, "ambiguous"):
+            runtime.select_text(node, "repeat")
+        self.assertIsNone(node.selection)
+        runtime.select_text(node, "repeat", "中 ", " 后")
+        self.assertEqual(node.selection, (12, 18))
+        runtime.select_text(node, "🙂")
+        self.assertEqual(node.selection, (1, 2))
+        runtime.select_text(node, "🙂", selection="cursor_before")
+        self.assertEqual(node.caret, 1)
+        self.assertIsNone(node.selection)
+        runtime.select_text(node, "🙂", selection="cursor_after")
+        self.assertEqual(node.caret, 2)
+        node.text = "aaa"
+        with self.assertRaisesRegex(RuntimeError, "ambiguous"):
+            runtime.select_text(node, "aa")
+
+    def test_unreadable_missing_refused_and_changed_text_fail(self):
+        runtime = load_runtime()
+        node = InterfaceOnlyAccessible(["Text"])
+        with self.assertRaisesRegex(RuntimeError, "not found"):
+            runtime.select_text(node, "missing")
+        with mock.patch.object(runtime.Atspi.Text, "add_selection", return_value=False):
+            with self.assertRaisesRegex(RuntimeError, "Could not verify"):
+                runtime.select_text(node, "ell")
+        with mock.patch.object(runtime.Atspi.Text, "get_text", side_effect=["hello", "hello", "changed"]):
+            with self.assertRaisesRegex(RuntimeError, "Text changed during"):
+                runtime.select_text(node, "ell")
+        node.selection = None
+        with mock.patch.object(runtime.Atspi.Text, "get_text", side_effect=["hello", "changed"]), mock.patch.object(runtime.Atspi.Text, "add_selection") as add:
+            with self.assertRaisesRegex(RuntimeError, "Text changed before"):
+                runtime.select_text(node, "ell")
+            add.assert_not_called()
+        with mock.patch.object(runtime.Atspi.Text, "get_selection", return_value=types.SimpleNamespace(start_offset=0, end_offset=1)):
+            with self.assertRaisesRegex(RuntimeError, "Could not verify"):
+                runtime.select_text(node, "ell")
+        node.role = "password text"
+        with mock.patch.object(runtime.Atspi.Text, "get_text", side_effect=AssertionError("secret read")):
+            with self.assertRaisesRegex(RuntimeError, "no readable"):
+                runtime.select_text(node, "ell")
 
 
 class PrintableKeyTests(unittest.TestCase):

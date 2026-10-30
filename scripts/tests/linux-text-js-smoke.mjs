@@ -38,10 +38,17 @@ for(const Session of [PersistentJavaScriptSession,WorkerJavaScriptSession]){
   assert.equal((await state()).values.B,'i替🙂ial-B焦点');
   assert.deepEqual(await run(session,`nodeRepl.write(JSON.stringify(await b.typeCharacters('')));`),{charactersSent:0});
   const inactiveKeys=await session.run(`await a.typeCharacters('wrong');`);assert.equal(inactiveKeys.isError,true);assert.match(inactiveKeys.content.at(-1).text,/0 characters confirmed sent/);assert.deepEqual((await state()).keys.A,{press:[],release:[]});
+  await run(session,`await a.setValue(${aEntry},'前🙂 repeat 中 repeat 后');nodeRepl.write(JSON.stringify(true));`);
+  const ambiguous=await session.run(`await a.selectText(${aEntry},'repeat');`);assert.equal(ambiguous.isError,true);assert.match(ambiguous.content.at(-1).text,/ambiguous/);
+  assert.equal((await state()).values.A,'前🙂 repeat 中 repeat 后');
+  await run(session,`await a.selectText(${aEntry},'repeat',{prefix:'中 ',suffix:' 后'});nodeRepl.write(JSON.stringify(true));`);assert.deepEqual((await state()).selections.A,[12,18]);
+  await run(session,`await a.typeText('替🙂',${aEntry});await a.selectText(${aEntry},'替🙂',{selectionType:'cursor_before'});await a.typeText('<',${aEntry});await a.selectText(${aEntry},'替🙂',{suffix:' 后',selectionType:'cursor_after'});await a.typeText('>',${aEntry});nodeRepl.write(JSON.stringify(true));`);assert.equal((await state()).values.A,'前🙂 repeat 中 <替🙂> 后');
+  await run(session,`await b.selectText(${bNotes},'\\n🙂',{prefix:'替换',suffix:'后'});await b.typeText('选\\n🙂',${bNotes});nodeRepl.write(JSON.stringify(true));`);assert.equal((await state()).notes.B,'li替换选\n🙂后ne2');
   await run(session,`await b.click(${index(b,'Read only')},{clickMethod:'accessibility'});nodeRepl.write(JSON.stringify(true));`);
   const readonly=await session.run(`await b.typeText('must-not-write',${bEntry});`);assert.equal(readonly.isError,true);assert.match(readonly.content.at(-1).text,/not editable/);assert.equal((await state()).values.B,'i替🙂ial-B焦点');
   await run(session,`await a.click(${index(a,'Replace entry')},{clickMethod:'accessibility'});nodeRepl.write(JSON.stringify(true));`);
   const stale=await session.run(`await a.typeText('must-not-write',${aEntry});`);assert.equal(stale.isError,true);assert.match(stale.content.at(-1).text,/removed or replaced/);assert.equal((await state()).values.A,'replacement-entry');
-  console.log(`${Session.name} PASS printable key press/release without an editable field, indexed fields, Unicode bytes, caret/selection/multiline, focused omission, inactive/read-only/stale rejection and window isolation`);
+  const staleSelection=await session.run(`await a.selectText(${aEntry},'replacement');`);assert.equal(staleSelection.isError,true);assert.match(staleSelection.content.at(-1).text,/removed or replaced/);assert.equal((await state()).values.A,'replacement-entry');
+  console.log(`${Session.name} PASS verified context/Unicode selection and cursor modes, printable key press/release without an editable field, indexed fields, Unicode bytes, caret/selection/multiline, focused omission, inactive/read-only/stale rejection and window isolation`);
  }finally{await session.close();await native.close();if(!pid)try{pid=(await state()).pid;}catch{}if(pid)try{process.kill(pid,'SIGTERM');}catch(error){if(error.code!=='ESRCH')throw error;}await rm(root,{recursive:true,force:true});}
 }

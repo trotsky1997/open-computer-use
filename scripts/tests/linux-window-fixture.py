@@ -16,6 +16,7 @@ def state(*_args):
     with open(root + '/state.tmp', 'w', encoding='utf-8') as output:
         json.dump({'pid': os.getpid(), 'windows': list(windows), 'keys': keys,
                    'values': {key: entry.get_text() for key, entry in entries.items()},
+                   'selections': {key: entry.get_selection_bounds() for key, entry in entries.items()},
                    'carets': {key: entry.get_position() for key, entry in entries.items()},
                    'focused': {key: entry.has_focus() for key, entry in entries.items()},
                    'notes': {key: view.get_buffer().get_text(view.get_buffer().get_start_iter(), view.get_buffer().get_end_iter(), True) for key, view in notes.items()}}, output)

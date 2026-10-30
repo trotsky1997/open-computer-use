@@ -70,3 +70,32 @@ while emitting no events. The test checks the receiving widget, beyond the
 native acknowledgment. Production desktop sessions need a correctly configured
 accessibility bus and display. See [AT-SPI keyboard synthesis](https://gnome.pages.gitlab.gnome.org/at-spi2-core/libatspi/func.generate_keyboard_event.html)
 and [key synthesis types](https://gnome.pages.gitlab.gnome.org/at-spi2-core/libatspi/enum.KeySynthType.html).
+
+
+## Text selection
+
+Linux `await app.selectText(index, text, {prefix?, suffix?, selectionType?})`
+uses the exact observed native object and the current readable Text interface.
+The default mode selects the match; `cursor_before` / `cursor_after` collapse
+the selection at its respective boundary. Immediate prefix and suffix context
+are literal, with no normalization. All overlapping occurrences count; missing
+or ambiguous matches fail before changing the selection. AT-SPI offsets use
+Unicode code points. Protected text and providers with multiple selections are
+rejected before writes.
+
+The runtime checks unchanged content before selection and verifies both native
+range/caret and unchanged content afterward, even with action read-back disabled.
+An error after a provider call can leave a changed selection; inspect before
+retrying. Native object replacement fails through exact identity lookup, with
+no name/position or global-key fallback. External edits can still race these
+sequential checks. Providers that refuse or transform selection return errors.
+
+The GTK controller verifies repeated text with context, an astral character
+before the target, replacement after selection, both cursor modes, multiline
+selection and stale-widget rejection in both REPL modes. Python checks cover
+overlapping matches, changed text, provider refusal/wrong range and protected
+fields without reading their contents. Clipboard paste and its ownership /
+lifecycle remain separate pending work.
+
+AT-SPI contracts: [add selection](https://gnome.pages.gitlab.gnome.org/at-spi2-core/libatspi/method.Text.add_selection.html)
+and [set selection](https://gnome.pages.gitlab.gnome.org/at-spi2-core/libatspi/method.Text.set_selection.html).
