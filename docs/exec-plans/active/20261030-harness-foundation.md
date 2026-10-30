@@ -206,3 +206,30 @@ transport/claims/WebMCP/native/provider work remain open. Keep the full goal act
 
 Native management regressions also passed windows/tabs/groups/bookmarks/audit,
 worker restart and 32-second worker idle survival in the shared protocol-3 bridge.
+
+## WebMCP
+
+Implemented the inspected tab capability fetchTools()/description()/call(name,input)
+contract with turn-owned, exact native RegisteredTool handles. Native isolated
+worlds keep fixed agent code separate from page-owned JavaScript; use the current
+Chrome document.modelContext API and reject unavailable browsers explicitly.
+Cover top-level and native child-frame identities, fresh tool listings, stale
+registration/document/turn rejection, bounded inputs/results and acknowledged
+AbortSignal cancellation. Keep metadata/results untrusted and require the host's
+normal user-intent/confirmation policy before consequential calls. Ship through
+both source/Worker hosts and installer/npm support lists. Verified owned local fixtures in Chrome for Testing 158, with the native minimum
+raised after Chrome 156 admitted a replacement registration through an old handle.
+The installed normal profile and its settings remain untouched. Retain the wider
+transport/claims/native/platform scope.
+
+Both session modes passed native frame discovery (same-URL/in-process and OOP),
+main-world API spoofing, registration replacement, provider errors, guessed names,
+old-turn/navigation rejection, cancellation signals and a declarative form's
+submission/navigation. Chrome 156 rejects the capability explicitly. The new
+testing browser blocked on a native keychain read; stack sampling localized it,
+and a fresh test-keychain fixture completed real HTTP workflows. See
+[WebMCP](../../browser-webmcp.md). Automatic notifications, real interaction/consent,
+headful/platform/crash/external workflows and the wider goal remain open.
+
+All 137 Node checks passed. Native-free CLI/MCP and both session modes' read-only
+evaluation regression (including renderer-crash cleanup) passed on Chrome 158.

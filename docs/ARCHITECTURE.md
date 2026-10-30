@@ -473,3 +473,16 @@ the extension options user gesture. Fixed native Chrome history search/getVisits
 queries return bounded, URL-deduplicated rows; no result journal is added. Shared
 normalization validates host/REPL/worker inputs, including cross-realm Dates.
 Packaging includes the worker helper and options assets. See [browser history](browser-history.md).
+
+
+## Native page-defined tools
+
+BrowserWebMcp owns fetched collections, isolated native registration objects and
+per-call abort controllers across source/Worker sessions. Exact native frame
+identities reuse the locator/evaluator helper. Chrome 158+ executes registrations
+by native tool ID, protecting a fetched handle from a same-name replacement.
+Turn cleanup joins abort acknowledgements before disconnecting and retains failed
+cleanup for retry. Browser navigation/context destruction invalidates collections.
+The public tab capability prints untrusted metadata and preserves native result
+strings; the ordinary host action/confirmation policy still applies. Installer,
+CLI readiness and npm copy lists include the host module. See [WebMCP](browser-webmcp.md).

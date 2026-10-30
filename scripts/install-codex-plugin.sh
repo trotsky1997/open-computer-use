@@ -196,7 +196,7 @@ fi
 if [[ ! -f "${repl_source_root}/open-computer-use-repl.mjs" ]]; then
   repl_source_root="${plugin_source_root}/scripts"
 fi
-for repl_file in open-computer-use-repl.mjs open-computer-use-kernel.mjs ocu-config.mjs browser-cdp.mjs browser-playwright.mjs browser-downloads.mjs browser-clipboard.mjs browser-viewport.mjs browser-drop.mjs browser-input.mjs browser-tabs.mjs browser-debugger.mjs browser-assets.mjs browser-content.mjs browser-chrome.mjs browser-evaluate.mjs browser-evaluate-dom.mjs browser-evaluate-worker.mjs runtime-dependencies.mjs; do
+for repl_file in open-computer-use-repl.mjs open-computer-use-kernel.mjs ocu-config.mjs browser-cdp.mjs browser-playwright.mjs browser-downloads.mjs browser-clipboard.mjs browser-viewport.mjs browser-drop.mjs browser-input.mjs browser-tabs.mjs browser-debugger.mjs browser-assets.mjs browser-webmcp.mjs browser-content.mjs browser-chrome.mjs browser-evaluate.mjs browser-evaluate-dom.mjs browser-evaluate-worker.mjs runtime-dependencies.mjs; do
   if [[ ! -f "${repl_source_root}/${repl_file}" ]]; then
     echo "Missing JS REPL runtime at ${repl_source_root}/${repl_file}" >&2
     exit 1
@@ -240,6 +240,7 @@ cp "${repl_source_root}/browser-chrome.mjs" "${plugin_install_root}/scripts/brow
 for evaluate_module in browser-evaluate.mjs browser-evaluate-dom.mjs browser-evaluate-worker.mjs runtime-dependencies.mjs; do
   cp "${repl_source_root}/${evaluate_module}" "${plugin_install_root}/scripts/${evaluate_module}"
 done
+cp "${repl_source_root}/browser-webmcp.mjs" "${plugin_install_root}/scripts/browser-webmcp.mjs"
 cp "${repl_source_root}/browser-content.mjs" "${plugin_install_root}/scripts/browser-content.mjs"
 cp "${repl_source_root}/browser-assets.mjs" "${plugin_install_root}/scripts/browser-assets.mjs"
 cp "${repl_source_root}/browser-debugger.mjs" "${plugin_install_root}/scripts/browser-debugger.mjs"

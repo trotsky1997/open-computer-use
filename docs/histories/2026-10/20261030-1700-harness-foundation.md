@@ -930,3 +930,38 @@ tabs, groups, bookmarks, audit retention, worker restart and idle survival.
 Real user-profile optional grant/revoke,
 reference-provider visit cardinality, headful/platform and broader harness work
 remain open. The full goal stays active.
+
+
+## Native WebMCP capability
+
+Added tab.capabilities.get('webmcp') with fetchTools(), description() and
+call(name,input). Native registration objects live in a private isolated world
+reused per host/frame, with fresh opaque call names for each listing. Exact native
+frame identity supports same-URL child frames and cross-origin OOP frames; denied
+child policy is skipped, while top-level denial fails. Main-world API replacement
+cannot redirect native discovery. JSON transport limits, native error propagation,
+document/turn/endpoint/owner checks and acknowledged cancellation share both REPL
+hosts. Navigation returns a null sentinel only after native context destruction
+is confirmed; stale bindings require a fresh listing. No automatic replay or
+provider-input-schema engine was added. Normal user-intent/confirmation rules
+apply to untrusted tools and metadata. Installer, CLI fixtures/readiness and npm
+support-module copies include the new host. No dependency or CI was added.
+
+Chrome 156 admitted a same-name replacement through an old native object. The
+capability therefore requires Chrome 158+, whose native implementation uses tool
+registration IDs; 156 fails explicitly. Official Chrome for Testing 158.0.8127.2
+source/Worker fixtures passed raw Unicode/string results, same-URL/OOP discovery,
+main-world spoofing, denied child policy, guessed names, provider validation
+errors, replacement/old-turn/navigation rejection, native abort signals, empty
+listings and a declarative form's synthetic submission/navigation. New-browser
+HTTP startup initially waited on a real macOS keychain read; stack sampling
+identified that wait, and a fresh test-keychain profile completed real HTTP
+workflows. Normal browser/keychain settings were left unchanged.
+
+All 137 Node checks passed. Existing native-free CLI/MCP and source/Worker
+read-only evaluation regressions passed on Chrome 158, including mutation/escape
+rejection, CPU deadlines, renderer crash and turn/reset cleanup. Reference
+read-only echo probes verified description/opaque-name/raw-string shape, and
+temporary reference tabs were closed. Automatic tool notifications, real consent
+interaction, headful/platform/crash/external-site WebMCP coverage, transport,
+claims/takeover and native desktop work remain open. Keep the full goal active.
