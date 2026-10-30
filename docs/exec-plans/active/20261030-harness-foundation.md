@@ -63,6 +63,7 @@ See [native held clicks](../../native-held-clicks.md). The full goal stays activ
 
 Raw CDP click key/durationMs now uses host-owned connections and release state.
 Managed pointer leases are shared with data drops and checked by raw input and
-locator action entry points. Continue press-key duration, legacy/native transport
+locator action entry points. Press-key duration now shares host-owned releases and lease-protected focus.
+Continue full keyboard/layout coverage, legacy/native transport
 ownership, focus-loss/headful/platform checks and the broader feature audit.
 See [browser held clicks](../../browser-held-input.md). The full goal remains active.

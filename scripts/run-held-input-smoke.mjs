@@ -7,10 +7,12 @@ const endpoint=process.env.OPEN_COMPUTER_USE_CDP_URL;
 if(!endpoint) throw new Error("Set OPEN_COMPUTER_USE_CDP_URL to disposable Chrome");
 const server=createServer((req,res)=>{
  res.setHeader('Content-Type','text/html');
- res.end(`<!doctype html><style>body{margin:0;height:1000px}button{position:fixed;left:80px;top:70px;width:200px;height:70px}input{position:fixed;left:80px;top:180px}output{position:fixed;left:10px;top:240px;width:600px;height:150px;overflow:auto;white-space:pre-wrap}</style><button ${req.url.includes("draggable")?'draggable="true"':''}>Held target</button><input aria-label="Typing"><output id="log">[]</output><script>
- const events=[];for(const type of ['keydown','keyup','mousedown','mouseup','click','dblclick']) document.addEventListener(type,e=>{
- events.push({type:e.type,target:e.target.tagName,x:e.clientX,y:e.clientY,key:e.key,shift:e.shiftKey,ctrl:e.ctrlKey,alt:e.altKey,meta:e.metaKey,buttons:e.buttons,detail:e.detail,trusted:e.isTrusted,time:e.timeStamp});log.textContent=JSON.stringify(events);
+ res.end(`<!doctype html><style>body{margin:0;height:${req.url.includes('key-scroll')?'4000':'1000'}px}button{position:fixed;left:80px;top:70px;width:200px;height:70px}input{position:fixed;left:80px;top:180px}output{position:fixed;left:10px;top:240px;width:600px;height:150px;overflow:auto;white-space:pre-wrap}</style><button ${req.url.includes("draggable")?'draggable="true"':''}>Held target</button><input aria-label="Typing"><output id="log">[]</output><script>
+ const events=location.search==='?arrived'?JSON.parse(sessionStorage.getItem('navigationEvents')||'[]'):[];log.textContent=JSON.stringify(events);for(const type of ['keydown','keyup','mousedown','mouseup','click','dblclick']) document.addEventListener(type,e=>{
+ events.push({type:e.type,target:e.target.tagName,x:e.clientX,y:e.clientY,key:e.key,shift:e.shiftKey,ctrl:e.ctrlKey,alt:e.altKey,meta:e.metaKey,buttons:e.buttons,detail:e.detail,scrollY,repeat:e.repeat,trusted:e.isTrusted,time:e.timeStamp});log.textContent=JSON.stringify(events);
  if(e.type==='mousedown' && location.search==='?dialog') {history.replaceState({},'',location.pathname);prompt('Held pause');}
+ if(e.type==='keydown' && e.key==='ArrowDown' && location.search==='?key-dialog') {history.replaceState({},'',location.pathname);prompt('Key pause');}
+ if(e.type==='keydown' && e.key==='Enter' && location.search==='?key-nav') {sessionStorage.setItem('navigationEvents',JSON.stringify(events));location.href='/?arrived';}
  if(e.type==='keyup' && location.search==='?release-dialog') {history.replaceState({},'',location.pathname);alert('Release pause');}
  });</script>`);
 });
@@ -38,6 +40,64 @@ try{
  target=await index('typed');await run(`await typed.click(${JSON.stringify(target)},{key:'a',durationMs:20});nodeRepl.write(JSON.stringify(true));`);
  assert.equal(await run(`nodeRepl.write(JSON.stringify(await typed.playwright.getByLabel('Typing').inputValue()));`),'a');
  assert.ok((await events(typed)).every(e=>e.trusted));
+ const keyboard=await setup('', 'keyboard');
+ const field=(await state('keyboard')).match(/\[(\d+)\] textbox "Typing"/)[1];
+ await run(`await keyboard.pressKey(${JSON.stringify(field)},'shift+a',{durationMs:80});nodeRepl.write(JSON.stringify(true));`);
+ let keylog=(await events(keyboard)).filter(e=>e.type==='keydown'||e.type==='keyup');
+ assert.deepEqual(keylog.map(e=>[e.type,e.key]),[['keydown','Shift'],['keydown','A'],['keyup','A'],['keyup','Shift']]);
+ assert.ok(keylog.every(e=>e.target==='INPUT' && e.trusted && !e.repeat));assert.ok(keylog[2].time-keylog[1].time>=75);
+ assert.equal(await run(`nodeRepl.write(JSON.stringify(await keyboard.playwright.getByLabel('Typing').inputValue()));`),'A');
+ await run(`await keyboard.pressKey(null,'shift_r',{durationMs:20});nodeRepl.write(JSON.stringify(true));`);
+ assert.equal((await events(keyboard)).at(-1).shift,false);
+ const keymodal=await setup('?key-dialog','keymodal');
+ assert.equal(await run(`await keymodal.pressKey(null,'shift+Down',{durationMs:80});nodeRepl.write(JSON.stringify((await keymodal.getJsDialog()).type));`),'prompt');
+ await new Promise(resolve=>setTimeout(resolve,10_200));
+ await run(`await (await keymodal.getJsDialog()).dismiss();nodeRepl.write(JSON.stringify(true));`);
+ assert.deepEqual((await events(keymodal)).filter(e=>e.type==='keyup').map(e=>e.key),['ArrowDown','Shift']);
+ const navigated=await setup('?key-nav','navigated');
+ await run(`await navigated.pressKey(null,'shift+Return',{durationMs:150});nodeRepl.write(JSON.stringify(true));`);
+ await run(`await navigated.playwright.waitForURL('**/?arrived');nodeRepl.write(JSON.stringify(true));`);
+ assert.equal((await events(navigated)).filter(e=>e.type==='keydown' && e.key==='Enter').length,1);
+ assert.equal((await events(navigated)).filter(e=>e.type==='keyup').at(-1).shift,false);
+ const keyscroll=await setup('?key-scroll', 'keyscroll');
+ await run(`await keyscroll.pressKey(null,'Down',{durationMs:200});nodeRepl.write(JSON.stringify(true));`);
+ assert.ok((await events(keyscroll)).filter(e=>e.type==='keyup').at(-1).scrollY>0);
+ const keyowner=await setup('', 'keyowner');
+ const keyheld=session.run(`await keyowner.pressKey(null,'shift',{durationMs:5000});`);
+ await waitFor(async()=> (await events(keyowner)).some(e=>e.type==='keydown'));
+ await setup('', 'keycompetitor',other);
+ const keydenied=await other.run(`await keycompetitor.playwright.getByLabel('Typing').fill('blocked');`);
+ assert.equal(keydenied.isError,true);assert.match(keydenied.content.at(-1).text,/already owns/);
+ await session.reset();assert.equal((await keyheld).isError,true);
+ assert.equal((await events(keyowner)).filter(e=>e.type==='keyup').at(-1).shift,false);
+ for(const mode of ['timeout','close','release-dialog']) {
+   const keycanceled=await setup(mode==='release-dialog'?'?release-dialog':'','keycanceled');
+   const pending=session.run(`await keycanceled.pressKey(null,'shift+Down',{durationMs:5000});`,mode==='timeout'?1500:30000);
+   await waitFor(async()=> (await events(keycanceled)).filter(e=>e.type==='keydown').length===2);
+   if(mode==='close') await session.close();else if(mode==='release-dialog') await session.reset();
+   assert.equal((await pending).isError,true);
+   const canceledEvents=await events(keycanceled);
+   assert.equal(canceledEvents.filter(e=>e.type==='keydown').length,2);
+   assert.deepEqual(canceledEvents.filter(e=>e.type==='keyup').map(e=>e.key),['ArrowDown','Shift']);
+   if(mode==='close') {await session.reset();}
+ }
+ const keyfailure=await setup('', 'keyfailure');
+ const beforeKeyFailure=(await events(keyfailure)).filter(e=>e.type==='keydown').length;
+ const keyOpen=session.browserInputs.open;
+ try {
+   session.browserInputs.open=async(...args)=>{
+     const connection=await keyOpen(...args),send=connection.send;
+     connection.send=(method,params,...rest)=>method==='Input.dispatchKeyEvent' && params.type==='keyUp'?Promise.reject(Error('Injected key release outage')):send(method,params,...rest);
+     return connection;
+   };
+   const failed=await session.run(`await keyfailure.pressKey(null,'shift',{durationMs:20});`);
+   assert.equal(failed.isError,true);assert.match(failed.content.at(-1).text,/key release outage/);
+   const denied=await other.run(`await keycompetitor.pressKey(null,'a');`);
+   assert.equal(denied.isError,true);assert.match(denied.content.at(-1).text,/already owns/);
+ } finally {session.browserInputs.open=keyOpen;}
+ await session.reset();
+ assert.equal((await events(keyfailure)).filter(e=>e.type==='keydown').length,beforeKeyFailure+1);
+ assert.equal((await events(keyfailure)).filter(e=>e.type==='keyup').at(-1).shift,false);
  const paused=await setup('?dialog','paused');target=await index('paused');
  await run(`await paused.click(${JSON.stringify(target)},{key:'shift',durationMs:50});nodeRepl.write(JSON.stringify((await paused.getJsDialog()).type));`).then(type=>assert.equal(type,'prompt'));
  await new Promise(resolve=>setTimeout(resolve,10_200));
@@ -101,10 +161,10 @@ try{
  assert.equal((await events(closing)).filter(e=>e.type==='keyup').at(-1).shift,false);
  const source=new PersistentJavaScriptSession({native});
  try {
-   const result=await source.run(String.raw`var tab=await cua.getTab(${JSON.stringify(canceled)});var state=await tab.getAXState({emit:false});var index=state.match(/\[(\d+)\] button "Held target"/)[1];await tab.click(index,{key:'shift',durationMs:20});`);
+   const result=await source.run(String.raw`var tab=await cua.getTab(${JSON.stringify(canceled)});var state=await tab.getAXState({emit:false});var index=state.match(/\[(\d+)\] button "Held target"/)[1];await tab.click(index,{key:'shift',durationMs:20});await tab.pressKey(null,'shift',{durationMs:20});`);
    assert.equal(result.isError,false,result.content.at(-1).text);
  } finally {await source.close();}
- console.log(`PASS trusted held clicks, duration, ordinary keys, >10s prompts, cleanup dialogs, pointer exclusivity, reset/timeout/close, failure retry, cropped-pixel viewport input at scale ${scale} and source sessions`);
+ console.log(`PASS trusted held clicks/keys, duration, targeted typing, key navigation, >10s prompts, cleanup dialogs, pointer exclusivity, reset/timeout/close, failure retry, cropped-pixel viewport input at scale ${scale} and source sessions`);
 }finally{
  await Promise.allSettled([session.close(),other.close()]);
  const version=await(await fetch(new URL('/json/version',endpoint))).json();for(const targetId of ids)await withConnection(version.webSocketDebuggerUrl,send=>send('Target.closeTarget',{targetId}));

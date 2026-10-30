@@ -50,7 +50,7 @@ export class BrowserDrops {
       const endpoint = this.endpoint();
       if (!endpoint) throw new Error("No CDP browser configured");
       if (this.closedOwners.has(owner)) throw new Error("Native drop session closed");
-      if (active.has(endpoint)) throw new Error("A native pointer action already owns this browser");
+      if (active.has(endpoint)) throw new Error("A native input action already owns this browser");
       const lease = {id:++this.nextId,owner,endpoint,targetId:args.targetId,data,stage:0,started:false,canceled:false,sessions:new Map()};
       this.leases.set(lease.id,lease);
       active.set(endpoint,lease);

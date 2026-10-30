@@ -1,9 +1,20 @@
-# Browser held clicks
+# Browser held input
 
 ```javascript
 await tab.click(elementIndex, {key:"shift", durationMs:100, clickCount:2});
+await tab.pressKey(null, "shift+Down", {durationMs:100});
 await tab.getAXState();
 ```
+
+The raw CDP tab pressKey wrapper accepts durationMs, including for modifier-only
+keys. All pressKey calls use host ownership, even when duration is omitted.
+The optional element index is resolved against fresh AX identity, then focused
+after the host acquires the input lease; null uses the current focus. The entire
+chord stays down for the duration, with one primary down and no synthesized
+auto-repeat. Keys release in reverse order. Navigation or scroll admitted by
+the primary key can complete before release; document changes before another
+key down abort the remaining sequence. Platform auto-repeat and broad keyboard
+layout behavior require further verification.
 
 The raw CDP tab click wrapper accepts key/durationMs alongside mouseButton and
 clickCount. Key stays down across the entire sequence; each press lasts at least
@@ -21,7 +32,7 @@ presses and before normal release. Explicit viewport revisions and screenshot
 crop/DPR mapping remain enforced. Input uses trusted CDP events, with reverse key
 release and no text/editor commands on key-up.
 
-Managed held clicks and HTML/file drops share a configured-origin pointer lease.
+Managed key presses, held clicks and HTML/file drops share a configured-origin input lease.
 New raw tab input and locator actions fail while that lease is active; read-only
 observations from existing bindings remain available. The lease coordinates one host process. External
 clients, pre-existing legacy gestures, native-app input and clipboard management
@@ -50,7 +61,7 @@ OPEN_COMPUTER_USE_CDP_URL=http://127.0.0.1:9222 node scripts/run-held-input-smok
 ```
 
 Use disposable Chrome. The live smoke checks trusted events, modifier/key-up
-order, per-press duration, ordinary-key typing, prompts held beyond ten seconds,
+order, per-press duration, targeted and ordinary-key typing, key-triggered navigation/scroll, prompts held beyond ten seconds,
 release-triggered dialogs, cancellation over draggable targets, pointer/drop exclusivity, reset/timeout/close release,
 failed cleanup with blocked reuse and retry, explicit viewport/cropped-pixel
 coordinates and in-process sessions. Mac headless Chrome evidence is recorded

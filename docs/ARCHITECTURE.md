@@ -350,3 +350,9 @@ cancellation. Raw input and locator action entry points consult this lease.
 Cleanup drains release dialogs and retains failed pointer/focus ownership for
 retry. Source-level sessions use the same manager with local focus cleanup.
 See [browser held clicks](browser-held-input.md).
+
+Raw tab pressKey shares BrowserInputs ownership even without an explicit duration.
+The host focuses validated backend-node IDs after acquiring the origin lease,
+checks the loader before each new down, holds the whole chord and releases in
+reverse. Key-triggered scroll/navigation is allowed after the last down; key-up
+cleanup does not depend on the original geometry or loader.

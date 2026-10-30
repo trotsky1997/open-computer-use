@@ -34,7 +34,7 @@ Browser AX node IDs are supplied by Chromium. Supported input operations are:
 ```js
 await tab.click(elementIndex, {mouseButton: "left", clickCount: 1});
 await tab.typeText(elementIndex, "Hello 中文🙂");
-await tab.pressKey(elementIndex, "Return");
+await tab.pressKey(elementIndex, "Return", {durationMs:100});
 await tab.paste(elementIndex, "line one\nline two", {format: "text"});
 await tab.scroll(elementIndex, "down", 1);
 await tab.setValue(elementIndex, "first target second target end");
@@ -478,3 +478,10 @@ The tab click wrapper now accepts key/durationMs with host-owned press/release
 state, duration waits, dialog continuation and cleanup recovery. See
 [browser held clicks](browser-held-input.md) for semantics, verified flows and
 remaining ownership/platform boundaries.
+
+All raw tab pressKey calls now share host-owned input state with held clicks and
+data drops. durationMs is optional, finite and non-negative. Chords and modifier-
+only keys use real down/up events; the whole chord stays down for the duration.
+No repeat is synthesized. Element focus happens under the input lease, and
+reset/timeout/close releases held keys with retained ownership on cleanup failure.
+See [held input](browser-held-input.md) for navigation, dialogs and limits.

@@ -6,11 +6,11 @@ const modifiers={alt:[1,"Alt",18],option:[1,"Alt",18],ctrl:[2,"Control",17],cont
 
 export function heldKeys(key) {
   if(key===undefined) return [];
-  if(typeof key!=="string" || !key.trim()) throw new Error("Click key requires a non-empty key or chord");
+  if(typeof key!=="string" || !key.trim()) throw new Error("Input key requires a non-empty key or chord");
   const tokens=key.split("+").map(token=>token.trim());
   const events=[],seen=new Set();let flags=0;
   for(const [index,token] of tokens.entries()) {
-    if(!token) throw new Error("Empty click key token");
+    if(!token) throw new Error("Empty input key token");
     const name=token.toLowerCase(),modifier=modifiers[name.replace(/_[lr]$/u,"")];
     if(modifier) {
       const right=name.endsWith("_r"),code=modifier[1]+(right?"Right":"Left");
@@ -37,6 +37,12 @@ export function validateClick(options={}) {
   return {button,count,durationMs:options.durationMs ?? 0,keys:heldKeys(options.key)};
 }
 
+export function validatePressKey(key,options={}) {
+  if(!options || typeof options!=="object" || Array.isArray(options) || Object.keys(options).some(name=>name!=="durationMs")) throw new Error("Invalid pressKey options");
+  if(key===undefined) throw new Error("pressKey requires a key");
+  return {...validateClick({key,durationMs:options.durationMs}),count:0};
+}
+
 export class BrowserInputs {
   constructor(endpoint,open,revision=()=>0,focus,dialog=()=>undefined) {
     this.endpoint=endpoint;this.open=open;this.revision=revision;this.focus=focus;this.dialog=dialog;
@@ -45,9 +51,10 @@ export class BrowserInputs {
   request(owner,args) {
     if(this.closedOwners.has(owner)) throw new Error("Browser input session closed");
     if(args?.action==="check") {
-      if(active.has(this.endpoint())) throw new Error("A native pointer action already owns this browser");
+      if(active.has(this.endpoint())) throw new Error("A native input action already owns this browser");
       return;
     }
+    if(args?.action==="key") return this.pressKey(owner,args);
     if(args?.action!==undefined && args.action!=="click") throw new Error("Unknown browser input action");
     return this.click(owner,args);
   }
@@ -57,10 +64,11 @@ export class BrowserInputs {
     return response.json();
   }
   async target(endpoint,id) {return (await this.json(endpoint,"/json/list")).find(target=>target.id===id && target.type==="page");}
-  async supported(endpoint) {
+  async supported(endpoint,keyboard=false) {
     const protocol=await this.json(endpoint,"/json/protocol");
     const required={Input:["dispatchKeyEvent","dispatchMouseEvent","cancelDragging"],Page:["enable","getFrameTree","getLayoutMetrics","handleJavaScriptDialog"],Emulation:["setFocusEmulationEnabled"]};
-    if(!Object.entries(required).every(([domain,names])=>names.every(name=>protocol.domains?.find(item=>item.domain===domain)?.commands?.some(command=>command.name===name)))) throw new Error("Held clicks require CDP input, cancellation, dialog and focus support");
+    if(keyboard) required.DOM=["focus"];
+    if(!Object.entries(required).every(([domain,names])=>names.every(name=>protocol.domains?.find(item=>item.domain===domain)?.commands?.some(command=>command.name===name)))) throw new Error("Managed inputs require CDP input, cancellation, dialog and focus support");
   }
   check(record) {if(record.canceled) throw new Error("Browser input canceled");}
   async idle(record) {
@@ -71,22 +79,34 @@ export class BrowserInputs {
     await this.idle(record);
     const send=record.connection.send;
     const loaderId=(await send("Page.getFrameTree",{},0)).frameTree.frame.loaderId;
+    if(record.keyboard) {
+      this.check(record);
+      if(loaderId!==record.geometry?.loaderId) throw new Error("Browser input document changed");
+      return;
+    }
     const metrics=await send("Page.getLayoutMetrics",{},0);
     const actual={loaderId,viewport:metrics.cssVisualViewport,contentSize:metrics.cssContentSize,viewportRevision:await this.revision()};
     this.check(record);
     if(JSON.stringify(actual)!==JSON.stringify(record.geometry)) throw new Error("Browser input document or geometry changed");
   }
-  async click(owner,args) {
-    const options=validateClick(args.options),endpoint=this.endpoint();
+  click(owner,args) {return this.perform(owner,args,validateClick(args.options));}
+  pressKey(owner,args) {return this.perform(owner,args,validatePressKey(args.key,args.options),true);}
+  async dwell(record,durationMs) {
+    let remaining=durationMs;
+    while(remaining>0) {const start=performance.now();await delay(Math.min(remaining,1000),undefined,{signal:record.abort.signal});remaining-=performance.now()-start;this.check(record);}
+  }
+  async perform(owner,args,options,keyboard=false) {
+    const endpoint=this.endpoint();
     if(!endpoint || typeof args.targetId!=="string" || !args.targetId) throw new Error("Browser input target unavailable");
     if(this.closedOwners.has(owner)) throw new Error("Browser input session closed");
-    if(active.has(endpoint)) throw new Error("A native pointer action already owns this browser");
+    if(active.has(endpoint)) throw new Error("A native input action already owns this browser");
     const {x,y}=args.position ?? {},viewport=args.geometry?.viewport;
-    if(![x,y].every(Number.isFinite) || x<0 || y<0 || x>=viewport?.clientWidth || y>=viewport?.clientHeight || !viewport) throw new Error("Invalid browser input position");
-    const record={owner,endpoint,targetId:args.targetId,position:{x,y},geometry:args.geometry,keys:[],modifiers:0,abort:new AbortController()};
+    if(!keyboard && (![x,y].every(Number.isFinite) || x<0 || y<0 || x>=viewport?.clientWidth || y>=viewport?.clientHeight || !viewport)) throw new Error("Invalid browser input position");
+    if(keyboard && (!args.geometry?.loaderId || (args.backendNodeId!==undefined && (!Number.isInteger(args.backendNodeId) || args.backendNodeId<=0)))) throw new Error("Invalid browser key target");
+    const record={keyboard,owner,endpoint,targetId:args.targetId,position:{x,y},geometry:args.geometry,keys:[],modifiers:0,abort:new AbortController()};
     active.set(endpoint,record);this.leases.set(endpoint,record);
     record.work=(async()=>{
-      await this.supported(endpoint);this.check(record);
+      await this.supported(endpoint,keyboard);this.check(record);
       const target=await this.target(endpoint,args.targetId);this.check(record);
       if(!target) throw new Error("Browser input tab closed");
       if(this.focus) {
@@ -97,19 +117,20 @@ export class BrowserInputs {
       record.connection=await this.open(target.webSocketDebuggerUrl);this.check(record);
       const send=record.connection.send;
       if(!this.focus) {record.emulated=true;await send("Emulation.setFocusEmulationEnabled",{enabled:true});}
+      if(keyboard && args.backendNodeId!==undefined) {await this.guard(record);await send("DOM.focus",{backendNodeId:args.backendNodeId},0);}
       for(const key of options.keys) {
         await this.guard(record);
         record.keys.push(key.up);record.modifiers=key.down.modifiers;
         await send("Input.dispatchKeyEvent",key.down,0);
       }
+      if(keyboard) await this.dwell(record,options.durationMs);
       for(let count=1;count<=options.count;count++) {
         await this.guard(record);
         const mouse={...record.position,button:options.button,clickCount:count,modifiers:record.modifiers};
         await send("Input.dispatchMouseEvent",{type:"mouseMoved",...mouse,buttons:0},0);this.check(record);
         record.mouse=mouse;
         await send("Input.dispatchMouseEvent",{type:"mousePressed",...mouse,buttons:{left:1,right:2,middle:4}[options.button]},0);
-        let remaining=options.durationMs;
-        while(remaining>0) {const start=performance.now();await delay(Math.min(remaining,1000),undefined,{signal:record.abort.signal});remaining-=performance.now()-start;this.check(record);}
+        await this.dwell(record,options.durationMs);
         await this.guard(record);
         await send("Input.dispatchMouseEvent",{type:"mouseReleased",...mouse,buttons:0},0);record.mouse=undefined;
       }

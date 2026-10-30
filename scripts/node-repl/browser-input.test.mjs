@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {BrowserFocusLeases} from "./browser-playwright.mjs";
-import {BrowserInputs,heldKeys,validateClick,browserPointerLeases} from "./browser-input.mjs";
+import {BrowserInputs,heldKeys,validateClick,validatePressKey,browserPointerLeases} from "./browser-input.mjs";
 
 test("held click options validate chords, aliases and balanced modifier releases",()=>{
  const parsed=validateClick({mouseButton:'r',key:'shift+ctrl+shift',durationMs:0,clickCount:2});
@@ -58,4 +58,30 @@ test("ambiguous focus acquisition cleanup keeps the pointer lease until focus is
  assert.equal(input.leases.size,1);assert.equal(focus.entries.size,1);
  failed=false;await input.cleanup(owner);
  assert.equal(input.leases.size,0);assert.equal(focus.entries.size,0);
+});
+
+
+test("pressKey validates duration and releases after an admitted navigation without replay",async()=>{
+ for(const options of [null,[],{durationMs:-1},{durationMs:NaN},{typo:true}]) assert.throws(()=>validatePressKey('a',options));
+ for(const key of [undefined,null,'']) assert.throws(()=>validatePressKey(key));
+ assert.equal(validatePressKey('shift_r',{durationMs:20}).durationMs,20);
+ const calls=[],owner={},endpoint='http://held-key-test/';let navigated=false,failed=true;
+ const input=new BrowserInputs(()=>endpoint,async()=>({async send(method,args){
+   if(method==='Page.getFrameTree') return {frameTree:{frame:{loaderId:navigated?'new':'old'}}};
+   if(method==='DOM.focus') calls.push('focus');
+   if(method==='Input.dispatchKeyEvent') {
+     calls.push(args.type+':'+args.key);
+     if(args.key==='Enter' && args.type==='rawKeyDown') navigated=true;
+     if(args.type==='keyUp' && failed) throw Error('Key release outage');
+   }
+   return {};
+ },close(){}}),()=>0,{async acquire(){return 1;},async release(){calls.push('focus-off');}});
+ input.supported=async()=>{};input.target=async()=>({webSocketDebuggerUrl:'page'});
+ await assert.rejects(input.request(owner,{action:'key',targetId:'tab',backendNodeId:7,key:'shift+Return',options:{durationMs:1},geometry:{loaderId:'old'}}),/Key release outage/);
+ assert.equal(input.leases.size,1);
+ assert.throws(()=>input.request({}, {action:'check'}),/already owns/);
+ failed=false;await input.cleanup(owner);
+ assert.equal(input.leases.size,0);assert.equal(calls[0],'focus');
+ assert.deepEqual(calls.filter(call=>call.startsWith('rawKeyDown')),['rawKeyDown:Shift','rawKeyDown:Enter']);
+ assert.deepEqual(calls.slice(-3),['keyUp:Enter','keyUp:Shift','focus-off']);
 });

@@ -451,3 +451,39 @@ and hardware keyboard/focus behavior, browser/host crash recovery, press-key
 duration and full keyboard/layout coverage remain open. Native desktop live
 verification is still pending normal unlock. The full harness alignment goal
 remains active.
+
+
+### Browser press-key duration
+
+Refreshed the current reference API: tab pressKey accepts optional durationMs,
+including modifier-only keys. All raw tab pressKey calls now run through the
+existing BrowserInputs host manager, with actual modifier/primary down events,
+one chord dwell and reverse key-up. Finite, non-negative duration and the option
+shape are validated before dispatch. The generic ownership error now names input
+actions because keyboard holds share the origin lease with held clicks and drops.
+
+An optional AX target resolves a validated backend-node ID; DOM.focus occurs
+under the host lease before any down. The host checks document identity before
+each new key down. Keyboard releases can proceed after a primary key navigates
+or scrolls, without imposing the click coordinate geometry guard on keys.
+Reset/timeout/close uses the existing release controller; ambiguous key-up
+failures retain ownership until reset retry, without replaying new downs. The
+public inline API, held-input guide, architecture and parity plan are updated.
+
+All 87 Node checks passed. The focused new check covers option validation,
+modifier-only parsing, target focus before downs, navigation during an admitted
+primary press, key-up outage, competing input rejection and retry order. Real
+disposable macOS headless Chrome checks at verified 1x and forced 2x cover
+trusted targeted Shift+A typing
+with one character and measured duration, right Shift alone, key-triggered
+scroll/navigation, a prompt held beyond ten seconds, release-triggered dialogs,
+competing locator input, reset/timeout/close, failed key-up with blocked reuse and
+retry, both session types and retained held-click/cropped-raster checks. Generic
+browser, clipboard and dialog regressions passed, including default pressKey
+calls and trusted copy/cut/paste shortcuts.
+
+No synthetic auto-repeat is generated. Platform auto-repeat, broad xdotool key
+names/layouts, headful/hardware focus state, native app press-key duration and
+transport/crash ownership remain open in the full parity audit. Native desktop
+live work is still waiting for normal manual unlock; that blocker does not stop
+independent browser work. Full harness alignment remains active.
