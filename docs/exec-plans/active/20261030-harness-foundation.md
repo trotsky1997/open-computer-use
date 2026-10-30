@@ -143,3 +143,22 @@ shared groups, audit persistence failure/retention, native failure journaling an
 accepted-write cancellation/uncertainty. See [browser management](../../browser-management.md).
 Shared-account/headful and crash recovery, transport/provider coverage, native
 desktop, history and content export remain open. Keep the full harness goal active.
+
+## Content export phase
+
+The inspected `tab.content.exportGsuite(type)` and `exportYouTubeTranscript()`
+interfaces are implemented through a host-owned source/Worker service. Workspace
+exports validate document/type/account/sheet routing and native file signatures;
+transcripts validate matching video metadata and first-party caption URLs or use
+the current visible transcript. Successful private files survive reset; canceled
+or failed outputs are removed. Main-document/source changes invalidate exports,
+while unrelated iframe changes are permitted. Cancellation disconnects pending
+reads before awaiting cleanup.
+
+Owned Chromium fixture flows verify every format route, byte/Unicode fidelity,
+cookie inclusion, file privacy, transcript paths, login/signature failures,
+child-frame tolerance, navigation and turn/reset cleanup. Real public Google
+Sheets CSV/XLSX/PDF exports passed. An anonymous YouTube response required login;
+authenticated real-provider exports, Docs/Slides, provider internals, media
+locators, delivery/retention, crash/transport and native desktop coverage stay
+open. See [content exports](../../browser-content.md). Keep the full goal active.

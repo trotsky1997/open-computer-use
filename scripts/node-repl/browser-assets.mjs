@@ -152,7 +152,7 @@ export class BrowserAssets {
     stream=resource.stream;contentType=Object.entries(resource.headers??{}).find(([name])=>name.toLowerCase()==='content-type')?.[1]??null;
     if(!resource.success||!stream)throw Error(`Resource fetch failed: ${resource.httpStatusCode??resource.netErrorName??'no body'}`);
    }
-   const file=await open(filePath,'wx');
+   const file=await open(filePath,'wx',0o600);
    try {for(;;){guard();const chunk=await session.send('IO.read',{handle:stream,size:64*1024});await file.writeFile(chunk.base64Encoded?Buffer.from(chunk.data,'base64'):chunk.data);if(chunk.eof)break;}}finally{await file.close();}
    return contentType;
   } finally {
@@ -175,4 +175,4 @@ function frameIdentity(tree){return [tree.frame.id,tree.frame.loaderId,tree.fram
 function flattenFrames(tree){return [tree,...(tree.childFrames??[]).flatMap(flattenFrames)];}
 function hasSvgAncestor(index,parents,names){for(let parent=parents[index];parent>=0;parent=parents[parent])if(names[parent].toLowerCase()==='svg')return true;return false;}
 
-async function bounded(promise,label){let timer;try{return await Promise.race([promise,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error(`${label} timed out after 10000 ms`)),10000);})]);}finally{clearTimeout(timer);}}
+export async function bounded(promise,label){let timer;try{return await Promise.race([promise,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error(`${label} timed out after 10000 ms`)),10000);})]);}finally{clearTimeout(timer);}}

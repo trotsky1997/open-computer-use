@@ -821,3 +821,46 @@ headful/incognito, browser/host crashes, full native release packaging and
 Linux/Windows remain unverified. Complete extension/in-app transports, claims,
 history, content exports and remaining native/provider work stay open. The full
 harness goal remains active.
+
+## Browser content exports
+
+Implemented the inspected `tab.content.exportGsuite(type)` and
+`exportYouTubeTranscript()` interfaces in a shared source/Worker host service.
+Workspace routing supports Docs PDF/Markdown/DOCX, Sheets PDF/XLSX/CSV and Slides
+PDF/PPTX, preserving document/account/resource-key identity and the current sheet
+gid. The hash gid takes precedence over a stale query gid. Native authenticated
+Chrome streams preserve file bytes; MIME/signature checks reject login/error
+and incorrect or empty binary responses, while accepting valid empty CSV/Markdown. YouTube export uses a current visible
+transcript or matching-video watch/caption metadata with strictly first-party
+caption URLs and timestamped UTF-8 output. Access restrictions surface explicitly.
+
+BrowserContent reuses the asset stream reader and cleanup ownership while
+tracking the main document separately. This fixes real exports interrupted by
+unrelated child-frame navigation. Each export uses private temporary files;
+completed files survive reset, while failure/cancellation removes partial data
+and transcript intermediates. A stopped-promise barrier wraps protocol/DOM waits,
+including their deadline timers, so disconnecting a held network read cancels the
+host operation promptly. The regression originally exposed a ten-second wait;
+after the fix Worker/source reads ended in 4/3 ms in the owned fixture before the
+held response ended. Connection cleanup remains acknowledged and retryable.
+Shared asset files now also use mode 0600. CLI readiness, installer and both npm
+copy paths include the new module. No dependency or CI was added.
+
+All 124 Node checks passed. Source/Worker Chromium fixture smokes passed every
+Workspace route, exact payload bytes, native cookie inclusion, file permissions,
+JSON3/rendered transcript Unicode, login/signature failures, unrelated child-frame
+navigation, main navigation and turn/reset cleanup with retained artifacts.
+Fixture provider URLs and native stream transport are routed separately to owned
+pages/HTTP frames; this supplies no real-account/provider-auth evidence. Existing
+source/Worker assets, source/Worker turn-lifecycle and native-free CLI/MCP browser
+smokes passed; installer/build syntax and whitespace checks passed.
+
+Real anonymous macOS headless Chromium 141 exported Google's public Sheets
+quickstart sample as CSV (1408 bytes), XLSX (5654 bytes) and PDF (53269 bytes).
+The YouTube watch response reported `LOGIN_REQUIRED` and no caption tracks. A
+reference API call on a newly created public watch tab returned a transcript file;
+that establishes reference behavior, while this implementation's authenticated
+YouTube path still needs real-provider verification. The temporary reference tab
+and transcript were removed. The user's existing tabs and browser settings were left unchanged. Signed-in Docs/Slides/YouTube, provider-schema fidelity, media locators,
+remote delivery/retention, crashes, headful/native desktop, Linux/Windows and the
+remaining transports/capabilities stay open. The full goal remains active.

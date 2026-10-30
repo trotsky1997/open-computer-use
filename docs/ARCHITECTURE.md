@@ -434,3 +434,16 @@ Before-state and outcomes are kept in a bounded browser-session journal through
 `chrome.storage.session`, surviving worker restart and JS reset. Before-state
 storage failure stops dispatch; failed native calls are also journaled. There is
 no automatic rollback. See [browser management](browser-management.md).
+
+
+## Browser content exports
+
+Tab content exports share BrowserAssets' credentialed Chrome stream reader and
+owner cleanup through BrowserContent. Export connections track the exact target,
+main-frame navigation and source URL, allowing unrelated child-frame changes.
+Workspace URL/format mapping, matching-video caption metadata and file
+MIME/signature checks fence provider data. Private per-export directories keep
+successful artifacts and remove failed/canceled outputs. Cancellation disconnects
+reads immediately; native Chrome cookie handling stays inside the browser.
+The source/Worker host service, installer and npm module lists use the same path.
+See [browser content](browser-content.md) for API, provider evidence and gaps.

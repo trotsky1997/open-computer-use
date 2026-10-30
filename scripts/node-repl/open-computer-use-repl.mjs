@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import {BrowserContent} from "./browser-content.mjs";
 import {BrowserChrome} from "./browser-chrome.mjs";
 import {BrowserEvaluator} from "./browser-evaluate.mjs";
 import {BrowserAssets} from "./browser-assets.mjs";
@@ -47,9 +48,10 @@ const HOST_BROWSER_TABS = new BrowserTabs(()=>browserEndpoint(process.env)?.href
 const HOST_BROWSER_INPUTS = new BrowserInputs(()=>browserEndpoint(process.env)?.href,openConnection,()=>HOST_BROWSER_VIEWPORT.request(null,{action:"state"}),HOST_BROWSER_FOCUS,(owner,targetId)=>HOST_BROWSER_DIALOGS.request(owner,{action:"state",targetId}));
 
 const HOST_BROWSER_CDP=new BrowserDebugger(()=>browserEndpoint(process.env)?.href,openConnection);
+const HOST_BROWSER_CONTENT=new BrowserContent(()=>browserEndpoint(process.env)?.href);
 const HOST_BROWSER_ASSETS=new BrowserAssets(()=>browserEndpoint(process.env)?.href);
 const HOST_BROWSER_EVALUATOR=new BrowserEvaluator(()=>browserEndpoint(process.env)?.href);
-const HOST_BROWSER_SERVICES={browserChrome:HOST_BROWSER_CHROME,browserEvaluator:HOST_BROWSER_EVALUATOR,browserAssets:HOST_BROWSER_ASSETS,browserCdp:HOST_BROWSER_CDP,browserTabs:HOST_BROWSER_TABS,browserFocusLeases:HOST_BROWSER_FOCUS,browserDownloads:HOST_BROWSER_DOWNLOADS,browserLogs:HOST_BROWSER_LOGS,browserDialogs:HOST_BROWSER_DIALOGS,browserClipboard:HOST_BROWSER_CLIPBOARD,browserViewport:HOST_BROWSER_VIEWPORT,browserDrops:HOST_BROWSER_DROPS,browserInputs:HOST_BROWSER_INPUTS};
+const HOST_BROWSER_SERVICES={browserContent:HOST_BROWSER_CONTENT,browserChrome:HOST_BROWSER_CHROME,browserEvaluator:HOST_BROWSER_EVALUATOR,browserAssets:HOST_BROWSER_ASSETS,browserCdp:HOST_BROWSER_CDP,browserTabs:HOST_BROWSER_TABS,browserFocusLeases:HOST_BROWSER_FOCUS,browserDownloads:HOST_BROWSER_DOWNLOADS,browserLogs:HOST_BROWSER_LOGS,browserDialogs:HOST_BROWSER_DIALOGS,browserClipboard:HOST_BROWSER_CLIPBOARD,browserViewport:HOST_BROWSER_VIEWPORT,browserDrops:HOST_BROWSER_DROPS,browserInputs:HOST_BROWSER_INPUTS};
 
 async function hostRequest(services,owner,tabOwner,method,params,timeoutMs) {
   let result;
@@ -79,6 +81,7 @@ async function hostRequest(services,owner,tabOwner,method,params,timeoutMs) {
   }
   else if(method === "browser/chrome") result=await services.browserChrome.request(owner,params);
   else if(method === "browser/evaluate") result=await services.browserEvaluator.request(owner,params);
+  else if(method === "browser/content") result=await services.browserContent.request(owner,params);
   else if(method === "browser/assets") result=await services.browserAssets.request(owner,params);
   else if(method === "browser/cdp") result=await services.browserCdp.request(owner,params);
   else if(method === "browser/clipboard") result = await services.browserClipboard.request(owner,params);
@@ -91,6 +94,7 @@ async function hostRequest(services,owner,tabOwner,method,params,timeoutMs) {
 }
 
 async function releaseResources(services,owner,stopped=Promise.resolve()) {
+  services.browserContent.cancel(owner);
   services.browserChrome.cancel(owner);
   services.browserEvaluator.cancel(owner);
   services.browserAssets.cancel(owner);
@@ -101,7 +105,7 @@ async function releaseResources(services,owner,stopped=Promise.resolve()) {
   await stopped;await nativeStopped;
   await services.browserDialogs.cleanup(owner);
   await services.browserDrops.cleanup(owner);await services.browserInputs.cleanup(owner);
-  const cleaned=await Promise.allSettled([services.browserChrome.cleanup(owner),services.browserEvaluator.cleanup(owner),services.browserAssets.cleanup(owner),services.browserCdp.cleanup(owner),services.browserFocusLeases.cleanup(owner),services.browserDownloads.cleanup(owner),services.browserLogs.cleanup(owner),services.browserClipboard.cleanup(owner),services.browserViewport.cleanup(owner)]);
+  const cleaned=await Promise.allSettled([services.browserContent.cleanup(owner),services.browserChrome.cleanup(owner),services.browserEvaluator.cleanup(owner),services.browserAssets.cleanup(owner),services.browserCdp.cleanup(owner),services.browserFocusLeases.cleanup(owner),services.browserDownloads.cleanup(owner),services.browserLogs.cleanup(owner),services.browserClipboard.cleanup(owner),services.browserViewport.cleanup(owner)]);
   const failed=cleaned.find(result=>result.status==='rejected');if(failed) throw failed.reason;
   BROWSER_FAILURE_HANDLERS.delete(owner);
 }
@@ -627,6 +631,7 @@ export function createCuaApi(native, activeOutput, onDispose, {tabRequest}={}) {
     clipboardRequest: native.browserHost ? args => native.request("browser/clipboard",args) : undefined,
     chromeRequest: native.browserHost ? args=>native.request("browser/chrome",args,0) : undefined,
     evaluateRequest: native.browserHost ? args=>native.request("browser/evaluate",args,0) : undefined,
+    contentRequest: native.browserHost ? args=>native.request("browser/content",args,0) : undefined,
     assetsRequest: native.browserHost ? args=>native.request("browser/assets",args,0) : undefined,
     cdpRequest: native.browserHost ? args=>native.request("browser/cdp",args,0) : undefined,
     tabRequest: native.browserHost ? args=>native.request("browser/tabs",args,0) : tabRequest,
@@ -903,6 +908,7 @@ export class WorkerJavaScriptSession {
     this.browserInputs = HOST_BROWSER_INPUTS;
     this.browserChrome=HOST_BROWSER_CHROME;
     this.browserEvaluator=HOST_BROWSER_EVALUATOR;
+    this.browserContent=HOST_BROWSER_CONTENT;
     this.browserAssets=HOST_BROWSER_ASSETS;
     this.browserCdp=HOST_BROWSER_CDP;
     this.browserViewport = HOST_BROWSER_VIEWPORT;
