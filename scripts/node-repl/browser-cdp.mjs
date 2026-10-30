@@ -19,6 +19,68 @@ export function keyEvent(key) {
   return result;
 }
 
+// Runs in the page realm; keep all dependencies inside the function.
+function editText(operation, text, options) {
+  const control = this instanceof HTMLInputElement || this instanceof HTMLTextAreaElement;
+  if (!this.isConnected || (!control && !this.isContentEditable)) throw new Error("Target is not an attached editable element");
+  if (this.matches(":disabled") || (operation === "set" && (this.readOnly || this.getAttribute("aria-readonly") === "true"))) throw new Error("Target is disabled or read-only");
+  if (this instanceof HTMLInputElement && !["text", "search", "url", "tel", "email", "password"].includes(this.type)) throw new Error("Unsupported input type for text editing");
+  if (control && operation === "select" && this.selectionStart === null) throw new Error("Input type does not support selection");
+  this.focus();
+  if (!this.isConnected) throw new Error("Target changed while focusing");
+  if (operation === "set") {
+    if (control) {
+      const prototype = this instanceof HTMLInputElement ? HTMLInputElement.prototype : HTMLTextAreaElement.prototype;
+      Object.getOwnPropertyDescriptor(prototype, "value").set.call(this, text);
+    } else this.textContent = text;
+    this.dispatchEvent(new InputEvent("input", {bubbles:true, inputType:"insertReplacementText", data:text}));
+    this.dispatchEvent(new Event("change", {bubbles:true}));
+    if (!this.isConnected || (control ? this.value : this.textContent) !== text) throw new Error("Value verification failed");
+    return;
+  }
+  const value = control ? this.value : this.textContent;
+  const matches = [];
+  for (let position = value.indexOf(text); position !== -1; position = value.indexOf(text, position + 1)) {
+    if (options.prefix !== undefined && !value.slice(0, position).endsWith(options.prefix)) continue;
+    if (options.suffix !== undefined && !value.slice(position + text.length).startsWith(options.suffix)) continue;
+    matches.push(position);
+    if (matches.length > 1) break;
+  }
+  if (matches.length !== 1) throw new Error(matches.length ? "Ambiguous selection text; supply prefix or suffix" : "Selection text not found");
+  let start = matches[0], end = start + text.length;
+  if (options.selectionType === "cursor_before") end = start;
+  if (options.selectionType === "cursor_after") start = end;
+  if (control) {
+    this.setSelectionRange(start, end);
+    if (!this.isConnected || this.value !== value || this.selectionStart !== start || this.selectionEnd !== end) throw new Error("Selection verification failed");
+  } else {
+    const walker = this.ownerDocument.createTreeWalker(this, NodeFilter.SHOW_TEXT);
+    const nodes = [];
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) nodes.push(node);
+    const locate = offset => {
+      for (const node of nodes) {
+        if (offset <= node.length) return [node, offset];
+        offset -= node.length;
+      }
+      throw new Error("Text changed during selection");
+    };
+    const range = this.ownerDocument.createRange();
+    range.setStart(...locate(start));
+    range.setEnd(...locate(end));
+    const selection = this.ownerDocument.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+    const applied = selection.rangeCount === 1 ? selection.getRangeAt(0) : null;
+    const offsetOf = (node, offset) => {
+      const prefix = this.ownerDocument.createRange();
+      prefix.selectNodeContents(this);
+      prefix.setEnd(node, offset);
+      return prefix.toString().length;
+    };
+    if (!this.isConnected || this.textContent !== value || !applied || offsetOf(applied.startContainer, applied.startOffset) !== start || offsetOf(applied.endContainer, applied.endOffset) !== end) throw new Error("Selection verification failed");
+  }
+}
+
 const TIMEOUT = 10_000;
 
 async function withConnection(url, operation) {
@@ -76,6 +138,7 @@ Tab input: click(elementIndex, {mouseButton?, clickCount?}), typeText(elementInd
 pressKey(elementIndexOrNull, key), paste(elementIndexOrNull, text, {format:"text"}),
 and scroll(elementIndex, direction, pages). Read fresh AX state after actions.
 Screenshot-only reads invalidate element indices. Navigation invalidates all indices.
+setValue(elementIndex, value) replaces editable text; selectText(elementIndex, text, {prefix?,suffix?,selectionType?}) selects exact text or positions the cursor.
 Playwright locators, formatted paste and coordinate actions remain unsupported.`;
 
 export function createBrowserApi(activeOutput, environment = process.env) {
@@ -167,6 +230,15 @@ export function createBrowserApi(activeOutput, environment = process.env) {
       if (result.exceptionDetails) throw new Error("Element is covered or not visible; read state again");
       return result.result.value;
     }
+    async function edit(index, operation, text, options = {}) {
+      await operate(async send => {
+        const backendNodeId = await element(send, index);
+        const {object} = await send("DOM.resolveNode", {backendNodeId});
+        const result = await send("Runtime.callFunctionOn", {objectId:object.objectId,
+          functionDeclaration:editText.toString(), arguments:[{value:operation},{value:text},{value:options}]});
+        if (result.exceptionDetails) throw new Error(result.exceptionDetails.exception?.description ?? result.exceptionDetails.text ?? "Text operation failed");
+      });
+    }
     return Object.freeze({
       ...info(target),
       getAXState: ax,
@@ -187,6 +259,20 @@ export function createBrowserApi(activeOutput, environment = process.env) {
             await send("Input.dispatchMouseEvent", {type:"mouseReleased", ...position, button, clickCount:count});
           }
         });
+      },
+      async setValue(index, value) {
+        if (typeof value !== "string") throw new Error("setValue requires a string");
+        await edit(index, "set", value);
+      },
+      async selectText(index, text, options = {}) {
+        if (typeof text !== "string" || !text) throw new Error("selectText requires non-empty text");
+        if (!options || typeof options !== "object" || Array.isArray(options)) throw new Error("selectText expects an options object");
+        for (const key of Object.keys(options)) {
+          if (!["prefix", "suffix", "selectionType"].includes(key)) throw new Error(`Unknown selectText option: ${key}`);
+        }
+        for (const key of ["prefix", "suffix"]) if (options[key] !== undefined && typeof options[key] !== "string") throw new Error(`${key} must be a string`);
+        if (options.selectionType !== undefined && !["text", "cursor_before", "cursor_after"].includes(options.selectionType)) throw new Error("Invalid selectionType");
+        await edit(index, "select", text, options);
       },
       async typeText(index, text) {
         if (typeof text !== "string") throw new Error("typeText requires text");

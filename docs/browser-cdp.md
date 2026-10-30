@@ -35,6 +35,9 @@ await tab.typeText(elementIndex, "Hello 中文🙂");
 await tab.pressKey(elementIndex, "Return");
 await tab.paste(elementIndex, "line one\nline two", {format: "text"});
 await tab.scroll(elementIndex, "down", 1);
+await tab.setValue(elementIndex, "first target second target end");
+await tab.selectText(elementIndex, "target", {prefix:"second ", suffix:" end"});
+await tab.typeText(null, "replacement");
 ```
 
 For `typeText`, `paste` and `pressKey`, pass `null` as the first argument to use
@@ -53,7 +56,21 @@ Read AX after input and verify the visible result. Asynchronous page handlers ma
 need another observation; the smoke uses a combined screenshot/AX observation to
 allow headless rendering of scroll feedback.
 
-Playwright locators, drag, selection, formatted paste, coordinate actions,
+`setValue` supports text inputs, textareas and contenteditable elements. It invokes
+the browser's native value setter for controls, or replaces contenteditable text,
+then emits input/change events and verifies the resulting value. Disabled,
+read-only, detached and unsupported input types fail explicitly. Application
+handlers can reject a value; verification reports that failure.
+
+`selectText` matches exact text with optional immediately adjacent `prefix` and
+`suffix`. Missing or ambiguous matches fail without changing text. `selectionType`
+accepts `text` (default), `cursor_before` and `cursor_after`. Input and textarea
+ranges use UTF-16 offsets; contenteditable ranges can span text nodes. The applied
+range and unchanged text are verified before success. Read fresh AX state after
+an error before reusing element indices. Contenteditable text matching follows
+DOM textContent; structural line breaks require matching the actual DOM text.
+
+Playwright locators, drag, formatted paste, coordinate actions,
 extension transports and in-app browser integration remain open work. Native app bindings retain their existing input methods.
 
 `cua.getState()` returns `{apps, browsers, errors?}`; browsers contain their tabs.
@@ -75,7 +92,9 @@ OPEN_COMPUTER_USE_CDP_URL=http://127.0.0.1:9222 node scripts/run-browser-smoke.m
 
 The smoke runner serves a local HTML fixture, creates and closes its own tab,
 checks AX and PNG output, exercises click/type/key/paste/scroll and history/reload,
-rejects covered or stale elements, and verifies browser inventory and input
+checks exact selection, repeated-text disambiguation, cursor placement, multiline
+Unicode replacement and cross-node contenteditable selection, rejects covered,
+stale or read-only targets, and verifies browser inventory and input
 through a Worker while native app discovery fails. It leaves existing
 tabs intact. This was exercised with headless Chrome on macOS; other platforms
 and headful browser focus behavior remain unverified.

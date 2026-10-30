@@ -214,3 +214,8 @@ observation and PNG screenshots use Node's built-in fetch/WebSocket support.
 clicks check visibility and occlusion. Browser locators, coordinate input and
 extension/in-app transports remain open. See [CDP browser](browser-cdp.md)
 for the supported contract, packaging and repeatable real-browser validation.
+
+CDP text editing supports native control value setters and DOM ranges for
+contenteditable elements. Text selection uses exact matching and optional
+adjacent context, then verifies range offsets and unchanged text. See the
+browser provider contract for Unicode, cursor placement and supported controls.

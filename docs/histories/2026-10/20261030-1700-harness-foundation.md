@@ -42,3 +42,18 @@ Real headless Chrome verified Unicode, select-all replacement, multiline input,
 click results, scroll feedback, stale/covered-element refusal and Worker input.
 The smoke was extended in place. Browser key mapping has a small focused check;
 all 56 Node checks passed. Windows/Linux and headful focus behavior remain open.
+
+CDP tabs now expose setValue and selectText for text controls and contenteditable
+regions. Value updates use native control setters, dispatch input/change events
+and verify the applied value. Selection rejects missing/ambiguous matches,
+supports prefix/suffix and cursor-before/after modes, and verifies the applied
+range and unchanged text. Contenteditable ranges span DOM text nodes. Disabled,
+read-only writes, detached and unsupported text controls are rejected.
+
+Real Chrome smoke now covers repeated-text disambiguation, missing-text content
+preservation, Unicode and multiline selection/replacement, both cursor modes,
+cross-node contenteditable selection and read-only rejection. Worker validation
+also exercises setValue and selectText. All 56 Node checks and the extended real
+browser smoke passed. Structural contenteditable line breaks and untrusted
+application event behavior remain documented limits; no cross-platform claim is
+made from this macOS run.
