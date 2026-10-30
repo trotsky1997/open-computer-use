@@ -210,6 +210,7 @@ The JavaScript REPL exposes an opt-in CDP browser provider alongside native apps
 `OPEN_COMPUTER_USE_CDP_URL` selects one Chromium debugging origin; no browser is
 launched or discovered implicitly. Discovery, tab binding and lifecycle, AX
 observation and PNG screenshots use Node's built-in fetch/WebSocket support.
-`getState` reports app and browser inventory failures independently. Browser input
-and extension/in-app transports remain open. See [CDP browser](browser-cdp.md)
+`getState` reports app and browser inventory failures independently. Element-targeted browser input validates the observed document and node identity;
+clicks check visibility and occlusion. Browser locators, coordinate input and
+extension/in-app transports remain open. See [CDP browser](browser-cdp.md)
 for the supported contract, packaging and repeatable real-browser validation.

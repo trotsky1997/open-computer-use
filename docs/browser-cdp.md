@@ -27,9 +27,34 @@ AX state. URL matching is exact and ambiguous matches fail explicitly. Tabs expo
 `id`, `providerTabId`, `browserId`, `title` and `url`; metadata describes the binding
 at creation time. Refresh the tab inventory to obtain current titles and URLs.
 Observation methods support `{emit:false}` and return full state / PNG bytes.
-Browser AX node IDs are supplied by Chromium. Input actions, Playwright locators,
-formatted paste, extension transports and in-app browser integration are still
-open work. Native app bindings retain their existing input methods.
+Browser AX node IDs are supplied by Chromium. Supported input operations are:
+
+```js
+await tab.click(elementIndex, {mouseButton: "left", clickCount: 1});
+await tab.typeText(elementIndex, "Hello 中文🙂");
+await tab.pressKey(elementIndex, "Return");
+await tab.paste(elementIndex, "line one\nline two", {format: "text"});
+await tab.scroll(elementIndex, "down", 1);
+```
+
+For `typeText`, `paste` and `pressKey`, pass `null` as the first argument to use
+current focus. Input operations validate the latest observed document loader,
+backend node, role and name before using an AX index. Changed or removed elements,
+navigation and screenshot-only reads require a new AX observation. Element clicks
+scroll into view and check that the center is visible and unobstructed before
+sending browser mouse events. Scroll uses the closest scrollable DOM ancestor and
+its client dimensions, so it works without making the browser foreground.
+Keyboard input supports printable characters, standard navigation keys and
+`ctrl`, `alt`, `shift`, `meta`, `super`, `cmd` modifiers; on macOS, `meta+a` sends
+the required select-all editor command. Text insertion uses CDP `Input.insertText`
+and preserves Unicode without touching the system clipboard. Paste currently
+has plain text insertion semantics, with no clipboard or paste event emulation.
+Read AX after input and verify the visible result. Asynchronous page handlers may
+need another observation; the smoke uses a combined screenshot/AX observation to
+allow headless rendering of scroll feedback.
+
+Playwright locators, drag, selection, formatted paste, coordinate actions,
+extension transports and in-app browser integration remain open work. Native app bindings retain their existing input methods.
 
 `cua.getState()` returns `{apps, browsers, errors?}`; browsers contain their tabs.
 Each inventory can fail independently. `cua.listApps()` only queries native apps.
@@ -49,7 +74,8 @@ OPEN_COMPUTER_USE_CDP_URL=http://127.0.0.1:9222 node scripts/run-browser-smoke.m
 ```
 
 The smoke runner serves a local HTML fixture, creates and closes its own tab,
-checks AX and PNG output, exercises history and reload, and verifies browser
-inventory through a Worker while native app discovery fails. It leaves existing
+checks AX and PNG output, exercises click/type/key/paste/scroll and history/reload,
+rejects covered or stale elements, and verifies browser inventory and input
+through a Worker while native app discovery fails. It leaves existing
 tabs intact. This was exercised with headless Chrome on macOS; other platforms
 and headful browser focus behavior remain unverified.

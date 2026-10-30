@@ -30,3 +30,15 @@ real disposable macOS headless Chrome completed the local-fixture smoke for the
 browser surface, including Worker inventory error isolation. The repeatable
 runner is `scripts/run-browser-smoke.mjs`; usage and boundaries are recorded in
 `docs/browser-cdp.md`.
+
+CDP tab bindings now support element clicks, typeText, pressKey, plain-text paste
+and DOM scroll. Inputs revalidate document loader and AX identity. Clicks verify
+visibility/occlusion. Screenshot-only observations and navigation discard element
+history; combined observation captures the screenshot before refreshing AX.
+macOS select-all explicitly sends the Chromium editor command. Unsupported click
+options and paste formats fail before dispatch.
+
+Real headless Chrome verified Unicode, select-all replacement, multiline input,
+click results, scroll feedback, stale/covered-element refusal and Worker input.
+The smoke was extended in place. Browser key mapping has a small focused check;
+all 56 Node checks passed. Windows/Linux and headful focus behavior remain open.

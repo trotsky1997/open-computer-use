@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createBrowserApi } from "./browser-cdp.mjs";
+import { createBrowserApi, keyEvent } from "./browser-cdp.mjs";
 import { createCuaApi } from "./open-computer-use-repl.mjs";
 const output = () => ({ write() {}, async emitImage() {} });
 
@@ -30,4 +30,17 @@ test("inventory retains browser results when native inventory fails", async () =
   assert.deepEqual(state.apps, []);
   assert.equal(Array.isArray(state.browsers), true);
   assert.match(state.errors[0], /apps: native failed/);
+});
+
+
+test("keyboard events preserve modifiers, text, Unicode and reject unknown chords", () => {
+  assert.equal(keyEvent("ctrl+a").modifiers, 2);
+  assert.equal(keyEvent("ctrl+a").text, undefined);
+  assert.equal(keyEvent("a").text, "a");
+  assert.equal(keyEvent("shift+a").text, "A");
+  assert.equal(keyEvent("🙂").windowsVirtualKeyCode, 0);
+  assert.equal(keyEvent("Return").key, "Enter");
+  assert.throws(() => keyEvent("hyper+a"), /Unsupported key modifier/);
+  assert.throws(() => keyEvent("Unknown"), /Unsupported key/);
+  if (process.platform === "darwin") assert.deepEqual(keyEvent("meta+a").commands, ["selectAll"]);
 });

@@ -3,7 +3,7 @@ import { createServer } from 'node:http';
 import { createBrowserApi } from './node-repl/browser-cdp.mjs';
 import { WorkerJavaScriptSession } from './node-repl/open-computer-use-repl.mjs';
 if (!process.env.OPEN_COMPUTER_USE_CDP_URL) throw new Error('Set OPEN_COMPUTER_USE_CDP_URL to a disposable browser debugging origin');
-const server = createServer((req, res) => {res.setHeader('Content-Type', 'text/html'); res.end(`<html><title>OCU ${req.url}</title><body><h1>Browser harness ${req.url}</h1><button>Test button</button></body></html>`);});
+const server = createServer((req, res) => {res.setHeader('Content-Type', 'text/html'); res.end(`<html><title>OCU ${req.url}</title><body><h1>Browser harness ${req.url}</h1><label>Name<input aria-label="Name"></label><textarea aria-label="Notes"></textarea><button onclick="this.textContent='Clicked'">Test button</button><div role="region" aria-label="Scroll area" tabindex="0" style="height:100px;overflow:auto" onscroll="document.getElementById('scroll-state').textContent='Scrolled'"><p style="height:1800px">Long content</p></div><p id="scroll-state">Not scrolled</p><div style="position:relative;width:100px;height:40px"><button>Covered button</button><div style="position:absolute;inset:0"></div></div></body></html>`);});
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const api = createBrowserApi(() => ({write() {}, async emitImage() {}}));
 let tab;
@@ -14,9 +14,38 @@ try {
   tab = await api.createBrowserTab('cdp', url, {visible:false});
   assert.match(await tab.getAXState({emit:false}), /Browser harness \/first/);
   assert.equal((await api.getTab({url})).id, tab.id);
+  const find = (state, role, name) => {
+    const line = state.split('\n').find(line => line.includes(` ${role} "${name}"`));
+    assert.ok(line, `Missing ${role} ${name} in ${state}`);
+    return line.match(/^\[([^\]]+)\]/)[1];
+  };
+  let state = await tab.getAXState({emit:false});
+  await assert.rejects(tab.click(find(state, 'button', 'Covered button')), /covered or not visible/);
+  state = await tab.getAXState({emit:false});
+  const field = find(state, 'textbox', 'Name');
+  await tab.typeText(field, 'Original');
+  await tab.pressKey(field, process.platform === 'darwin' ? 'meta+a' : 'ctrl+a');
+  await tab.typeText(null, '中文🙂 updated');
+  assert.match(await tab.getAXState({emit:false}), /value="中文🙂 updated"/);
+  await tab.paste(find(await tab.getAXState({emit:false}), 'textbox', 'Notes'), 'line one\nline two', {format:'text'});
+  assert.match(await tab.getAXState({emit:false}), /line one\\nline two/);
+  const button = find(await tab.getAXState({emit:false}), 'button', 'Test button');
+  await tab.click(button);
+  await assert.rejects(tab.click(button), /Element changed/);
+  assert.match(await tab.getAXState({emit:false}), /button "Clicked"/);
+  state = await tab.getAXState({emit:false});
+  await tab.scroll(find(state, 'region', 'Scroll area'), 'down', 1);
+  for (let i=0; i<20; i++) {
+    state = (await tab.getAXStateAndScreenshot({emit:false})).state;
+    if (state.includes('"Scrolled"')) break;
+  }
+  assert.match(state, /"Scrolled"/);
   const png = await tab.getScreenshot({emit:false});
   assert.equal(png.subarray(1,4).toString(), 'PNG');
+  await assert.rejects(tab.typeText(field, 'wrong'), /stale element index/);
+  await tab.getAXState({emit:false});
   await tab.goto(url.replace('/first','/second'));
+  await assert.rejects(tab.typeText(field, 'wrong'), /stale element index/);
   assert.match(await tab.getAXState({emit:false}), /Browser harness \/second/);
   await tab.back();
   assert.match(await tab.getAXState({emit:false}), /Browser harness \/first/);
@@ -30,10 +59,13 @@ try {
     const state = JSON.parse(result.content.at(-1).text);
     assert.equal(state.browsers[0].tabs.some(item => item.id === tab.id), true);
     assert.match(state.errors[0], /native inventory unavailable/);
+    const typed = await session.run(`var workerTab = await cua.getTab(${JSON.stringify(tab.id)}); var ax = await workerTab.getAXState({emit:false}); var field = ax.split("\\n").find(line => line.includes(' textbox "Name"')).match(/^\\[([^\\]]+)\\]/)[1]; await workerTab.typeText(field, "Worker input verified"); await workerTab.getAXState();`);
+    assert.equal(typed.isError, false, JSON.stringify(typed.content));
+    assert.ok(typed.content.some(item => item.text?.includes('value="Worker input verified"')));
   } finally {await session.close();}
   await tab.close();
   await assert.rejects(tab.getAXState(), /no longer available/);
-  console.log('PASS browser inventory, create/bind, AX, PNG, navigation/history/reload, close, worker inventory failure isolation');
+  console.log('PASS browser inventory, create/bind, AX, PNG, click/type/key/paste/scroll, stale-index rejection, navigation/history/reload, close, worker inventory failure isolation');
 } finally {
   if (tab && (await api.listTabs({emit:false})).some(item=>item.id===tab.id)) await tab.close();
   await new Promise(resolve => server.close(resolve));

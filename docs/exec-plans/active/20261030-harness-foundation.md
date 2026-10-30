@@ -8,17 +8,17 @@ Build an independent, open computer-use harness on the upstream runtime, using t
 
 - Based on upstream `a7fdec1`. The existing fork's main branch is older and is left intact.
 - Native app binding and persistent JavaScript execution already exist. `selectText` now accepts `selectionType` at the JavaScript boundary and maps it to the native `selection` argument.
-- Current Codex exposes browser discovery, tab binding, browser-specific interaction and navigation alongside native apps. An opt-in CDP provider now supports browser/tab discovery, binding, lifecycle, AX and PNG observations; browser input and extension/in-app transports remain open.
+- Current Codex exposes browser discovery, tab binding, browser-specific interaction and navigation alongside native apps. An opt-in CDP provider now supports browser/tab discovery, binding, lifecycle, AX and PNG observations; element-targeted click/type/key/plain-text paste/DOM scroll are implemented; locators and extension/in-app transports remain open.
 - Current Codex exposes accessibility state diffs and a full-state option. The REPL now emits bounded line-replacement diffs while returning full native snapshots to JavaScript. Screenshot observations and failed native calls discard history; option changes force full output. Native index generation remains unchanged.
 - The current Codex API includes app paste, click modifiers and duration, coordinate scrolling and other platform-specific details. These require capability-by-capability investigation and runtime validation.
 
 ## Next steps
 
 1. Establish repeatable, privacy-safe native app scenarios for observation, input, stale indices, failures and session reset; measure behavior with the existing fixture before expanding the surface.
-2. Build browser input and locator support on the CDP discovery/lifecycle provider. Validate stale target handling, focus and native-vs-DOM interaction independently; extend to extension and in-app transports.
+2. Extend the CDP element-input provider with locators, drag, selection and coordinate operations. Validate stale target handling, focus and native-vs-DOM interaction independently; extend to extension and in-app transports.
 3. Validate the new output diffs on real multi-window applications, especially native index changes and screenshot-only observations. Full output is available with `disableDiffing: true`.
 4. Add remaining input operations according to observed platform capabilities and test on real desktops. Document unsupported behavior clearly.
 
 ## Validation boundaries
 
-The first change has REPL mock coverage only. Browser discovery/lifecycle/observations were validated on a disposable macOS headless Chrome with a local HTML fixture, including Worker inventory failure isolation. Browser input, real native desktop behavior, Windows and Linux parity remain open. Do not infer capabilities from API shape alone.
+The first change has REPL mock coverage only. Browser discovery/lifecycle/observations were validated on a disposable macOS headless Chrome with a local HTML fixture, including Worker inventory failure isolation. Browser input was exercised on the same headless Chrome: Unicode, select-all replacement, multiline insertion, visible clicks, scroll feedback, and covered/stale index rejection; Worker input also passed. Real native desktop behavior, headful browser focus, Windows and Linux parity remain open. Do not infer capabilities from API shape alone.
