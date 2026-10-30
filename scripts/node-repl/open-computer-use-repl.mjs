@@ -58,7 +58,8 @@ The runtime exposes an asynchronous app-bound API:
 - \`await app.getScreenshot({ emit? })\`
 - \`await app.getAXStateAndScreenshot(options?)\`
 - Optional observation on macOS, Windows and Linux: \`app.getScreenshot({ includeAX: false })\` skips AX/focus/selection and invalidates prior element indexes; refresh AX before element actions. \`app.getAXState({ includeScreenshot: false })\` skips capture; screenshot-coordinate actions require a fresh screenshot. Omitted options retain full native observation.
-- \`await app.click(elementIndexOrPoint, { mouseButton?, clickCount?, clickMethod? })\`
+- \`await app.click(elementIndexOrPoint, { mouseButton?, clickCount?, clickMethod?, key?, durationMs? })\`
+- Held click options require a backend advertising key/duration_ms (currently macOS). key holds a native key/chord across the sequence; durationMs holds each mouse press. auto selects targeted app_post. Click counts are 1...3. Unsupported backends and explicit non-event methods throw before input.
 - \`await app.scroll(elementIndex, direction, pages?)\`
 - \`await app.drag([fromX, fromY], [toX, toY])\`
 - \`await app.typeText(text, { keyMethod? })\`
@@ -139,6 +140,7 @@ export class JsonLinePeer extends EventEmitter {
 
   #start(child) {
     this.child = child;
+    this.ending = null;
     this.nextId = 1;
     this.pending = new Map();
     this.buffer = "";
@@ -157,6 +159,7 @@ export class JsonLinePeer extends EventEmitter {
   #reopen() {
     if (!this.reopening) {
       this.reopening = (async () => {
+        await this.endSession();
         const { command, args, cwd, env } = this.options;
         this.#start(spawn(command, args, { cwd, env, stdio: ["pipe", "pipe", "pipe"] }));
         await this.initialize();
@@ -234,18 +237,26 @@ export class JsonLinePeer extends EventEmitter {
   }
 
   endSession() {
-    if (this.closed) return;
+    if (this.ending) return this.ending;
     const child = this.child;
+    let timer;
+    this.ending = new Promise(resolve=>{
+      if(child.exitCode!=null || child.signalCode!=null || child.pid===undefined) resolve();
+      else child.once("exit",()=>{clearTimeout(timer);resolve();});
+    });
     this.#close(new Error("native Computer Use session ended"));
     child.stdin.end();
-    const timer = setTimeout(() => child.kill("SIGKILL"), 1_000);
-    timer.unref();
-    child.kill("SIGTERM");
+    if(child.exitCode==null && child.signalCode==null) {
+      timer = setTimeout(() => child.kill("SIGKILL"), 1_000);
+      timer.unref();
+      child.kill("SIGTERM");
+    }
+    return this.ending;
   }
 
   close() {
     this.disposed = true;
-    this.endSession();
+    return this.endSession();
   }
 
 }
@@ -261,10 +272,16 @@ export class LazyNativePeer {
     if (this.disposed) throw new Error("Native runtime is closed");
     if (!this.connection) {
       if (!this.options.command) throw new Error("Native runtime unavailable: no executable configured for this platform");
-      const peer = new JsonLinePeer(this.options);
-      this.peer = peer;
-      const connection = peer.initialize().then(() => peer).catch(error => {
-        peer.close();
+      let peer;
+      const connection = (async()=>{
+        await this.ending;
+        if(this.connection!==connection || this.disposed) throw new Error("Native session ended before startup");
+        peer = new JsonLinePeer(this.options);
+        this.peer = peer;
+        await peer.initialize();
+        return peer;
+      })().catch(error => {
+        if(peer) this.ending=Promise.all([this.ending,peer.close()]);
         if (this.connection === connection) {this.connection = null;this.peer = null;}
         throw new Error(`Native runtime unavailable: ${asError(error).message}`);
       });
@@ -282,9 +299,10 @@ export class LazyNativePeer {
     const peer = this.peer;
     this.peer = null;
     this.connection = null;
-    peer?.close();
+    this.ending=Promise.all([this.ending,peer?.close()]);
+    return this.ending;
   }
-  close() {this.disposed = true;this.endSession();}
+  close() {this.disposed = true;return this.endSession();}
 }
 
 function toolResultText(result) {
@@ -349,10 +367,29 @@ function optionsToSnapshotArgs(options = {}) {
 }
 
 function optionsToClickArgs(options = {}) {
+  if(!isPlainObject(options) || Object.keys(options).some(key=>!["mouseButton","clickCount","clickMethod","key","durationMs"].includes(key))) throw new Error("Invalid native click options");
   const args = {};
-  if (options.mouseButton !== undefined) args.mouse_button = options.mouseButton;
-  if (options.clickCount !== undefined) args.click_count = options.clickCount;
-  if (options.clickMethod !== undefined) args.click_method = options.clickMethod;
+  if(options.mouseButton!==undefined) {
+    const button=({l:"left",r:"right",m:"middle"})[options.mouseButton] ?? options.mouseButton;
+    if(!["left","right","middle"].includes(button)) throw new Error("Invalid native click mouseButton");
+    args.mouse_button=button;
+  }
+  if(options.clickCount!==undefined) {
+    if(!Number.isInteger(options.clickCount) || options.clickCount<1 || options.clickCount>3) throw new Error("Native clickCount must be 1...3");
+    args.click_count=options.clickCount;
+  }
+  if (options.clickMethod !== undefined) {
+    if(!["auto","accessibility","app_post","sky_click","global"].includes(options.clickMethod)) throw new Error("Invalid native clickMethod");
+    args.click_method = options.clickMethod;
+  }
+  if(options.key!==undefined) {
+    if(typeof options.key!=="string" || !options.key.trim()) throw new Error("Native click key requires a non-empty string");
+    args.key=options.key;
+  }
+  if(options.durationMs!==undefined) {
+    if(!Number.isFinite(options.durationMs) || options.durationMs<0) throw new Error("Native click durationMs must be finite and non-negative");
+    args.duration_ms=options.durationMs;
+  }
   return args;
 }
 
@@ -365,9 +402,10 @@ function optionsToKeyArgs(options = {}) {
 export function createCuaApi(native, activeOutput, onDispose) {
   let docsEmitted = false;
   const observations = new Map();
-  async function call(tool, args = {}) {
+  if(native.endSession) onDispose?.(()=>native.endSession());
+  async function call(tool, args = {}, timeoutMs) {
     try {
-      const result = await native.request("tools/call", { name: tool, arguments: args });
+      const result = await native.request("tools/call", { name: tool, arguments: args }, timeoutMs);
       if (result?.isError) throw new Error(toolResultText(result) || `${tool} failed`);
       return result;
     } catch (error) {
@@ -460,7 +498,13 @@ export function createCuaApi(native, activeOutput, onDispose) {
       },
       async click(target, options = {}) {
         const targetArgs = Array.isArray(target) ? { x: target[0], y: target[1] } : { element_index: target };
-        await call("click", { app, ...targetArgs, ...optionsToClickArgs(options) });
+        const args=optionsToClickArgs(options);
+        const extended=["key","duration_ms"].filter(key=>args[key]!==undefined);
+        if(extended.length) {
+          const schema=(await native.request("tools/list",{}))?.tools?.find(tool=>tool.name==="click")?.inputSchema?.properties;
+          if(!extended.every(key=>schema && Object.hasOwn(schema,key))) throw new Error("Native runtime does not advertise held click support");
+        }
+        await call("click", { app, ...targetArgs, ...args }, extended.length ? 0 : undefined);
       },
       async drag(from, to) { await call("drag", { app, from_x: from[0], from_y: from[1], to_x: to[0], to_y: to[1] }); },
       async pressKey(key, options = {}) { await call("press_key", { app, key, ...optionsToKeyArgs(options) }); },
@@ -726,9 +770,10 @@ export class WorkerJavaScriptSession {
       this.browserViewport.cancel(worker);
       this.browserDrops.cancel(worker);
       for (const pending of this.pending.values()) if (pending.worker === worker) clearTimeout(pending.timer);
-      this.native.endSession?.();
+      const nativeStopped=this.native.endSession?.();
       this.stoppingWorkers.set(worker, (async () => {
         await worker.terminate();
+        await nativeStopped;
         await this.browserDialogs.cleanup(worker);
         await this.browserDrops.cleanup(worker);
         const cleaned = await Promise.allSettled([this.browserFocusLeases.cleanup(worker),this.browserDownloads.cleanup(worker),this.browserLogs.cleanup(worker),this.browserClipboard.cleanup(worker),this.browserViewport.cleanup(worker)]);
@@ -930,6 +975,6 @@ export function toolDefinitions() {
   ];
 }
 
-if (process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))) {
+if (process.argv[1] && existsSync(process.argv[1]) && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))) {
   runServer(resolveNativeCommand(process.argv.slice(2))).catch(error => { console.error(`open-computer-use-repl: ${asError(error).message}`); process.exit(1); });
 }

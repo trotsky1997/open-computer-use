@@ -685,3 +685,12 @@ func TestDoctorJSONRejectsUnsupportedPermissionDiagnostics(t *testing.T) {
 		t.Fatal("unsupported JSON mode must not emit text on stdout")
 	}
 }
+
+func TestHeldClickOptionsFailBeforePlatformInput(t *testing.T) {
+	for _, args := range []map[string]any{{"key": "shift"}, {"duration_ms": float64(10)}} {
+		result := newService().callTool("click", args)
+		if !result.IsError {
+			t.Fatal("Unsupported held click was accepted")
+		}
+	}
+}

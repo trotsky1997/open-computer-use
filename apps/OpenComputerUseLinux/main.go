@@ -235,6 +235,12 @@ func (s *service) callTool(name string, args map[string]any) toolCallResult {
 		}
 		return s.getAppState(requiredString(args, "app"), textLimit, maxTreeNodes, maxTreeDepth, includeAX, includeScreenshot)
 	case "click":
+		if _, ok := args["key"]; ok {
+			return textResult("Held click key is not supported by this platform", true)
+		}
+		if _, ok := args["duration_ms"]; ok {
+			return textResult("Held click duration_ms is not supported by this platform", true)
+		}
 		clickMethod, err := parseClickMethod(optionalString(args, "click_method"))
 		if err != nil {
 			return textResult(err.Error(), true)

@@ -79,9 +79,11 @@ public final class ComputerUseToolDispatcher {
                 elementIndex: optionalElementIndex(in: arguments),
                 x: optionalDouble("x", in: arguments),
                 y: optionalDouble("y", in: arguments),
-                clickCount: Int(optionalDouble("click_count", in: arguments) ?? 1),
+                clickCount: try validatedClickCount(arguments["click_count"]),
                 mouseButton: optionalString("mouse_button", in: arguments) ?? "left",
-                clickMethod: try parseClickMethod(optionalString("click_method", in: arguments))
+                clickMethod: try parseClickMethod(optionalString("click_method", in: arguments)),
+                heldKey: try validatedQueryString(arguments["key"], key: "key"),
+                durationMs: try validatedClickDuration(arguments["duration_ms"])
             )
         case "perform_secondary_action":
             return try service.performSecondaryAction(
@@ -503,4 +505,21 @@ func validatedQueryExact(_ value: Any?) throws -> Bool {
         throw ComputerUseError.invalidArguments("exact must be true or false")
     }
     return number.boolValue
+}
+
+func validatedClickDuration(_ value: Any?) throws -> Double? {
+    guard let value else { return nil }
+    guard let number = value as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID(), number.doubleValue.isFinite, number.doubleValue >= 0 else {
+        throw ComputerUseError.invalidArguments("duration_ms must be finite and non-negative")
+    }
+    return number.doubleValue
+}
+
+func validatedClickCount(_ value: Any?) throws -> Int {
+    guard let value else { return 1 }
+    guard let number = value as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID(), number.doubleValue.isFinite,
+          number.doubleValue.rounded(.towardZero) == number.doubleValue, (1...3).contains(number.doubleValue) else {
+        throw ComputerUseError.invalidArguments("click_count must be an integer in 1...3")
+    }
+    return number.intValue
 }

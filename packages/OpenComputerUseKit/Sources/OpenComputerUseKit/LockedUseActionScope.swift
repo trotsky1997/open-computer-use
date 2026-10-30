@@ -7,6 +7,7 @@ import Foundation
 public enum LockedUseActionScope {
     private final class Storage: @unchecked Sendable {
         let lock = NSLock()
+        var cancellation: (@Sendable () throws -> Void)?
         var validator: (@Sendable () throws -> Void)?
     }
     private static let storage = Storage()
@@ -23,6 +24,16 @@ public enum LockedUseActionScope {
         return try body()
     }
 
+    public static func withCancellation<T>(_ check: @escaping @Sendable () throws -> Void,
+                                           body: () throws -> T) rethrows -> T {
+        storage.lock.lock()
+        precondition(storage.cancellation == nil, "GUI request dispatch must be serialized")
+        storage.cancellation = check
+        storage.lock.unlock()
+        defer { storage.lock.lock(); storage.cancellation = nil; storage.lock.unlock() }
+        return try body()
+    }
+
     /// Leased captures must use the ScreenCaptureKit path verified by the
     /// protected validation flow, rather than the optional hardware shortcut.
     static var requiresScreenCaptureKit: Bool {
@@ -31,7 +42,8 @@ public enum LockedUseActionScope {
     }
 
     static func validate() throws {
-        storage.lock.lock(); let validator = storage.validator; storage.lock.unlock()
+        storage.lock.lock(); let validator = storage.validator; let cancellation = storage.cancellation; storage.lock.unlock()
+        try cancellation?()
         if let validator { try validator() }
         else if FileManager.default.fileExists(atPath: LockedUseIPCEndpoint.observer.path) {
             // An unscoped caller must not use a desktop temporarily unlocked

@@ -26,6 +26,7 @@ public final class StdioMCPServer {
         service: ComputerUseService = ComputerUseService(),
         backgroundStateReset: @escaping () -> Void = resetOpenComputerUseBackgroundWindowState
     ) {
+        _ = HeldInput.shared
         self.service = service
         self.dispatcher = ComputerUseToolDispatcher(service: service)
         self.backgroundStateReset = backgroundStateReset

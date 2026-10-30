@@ -36,6 +36,20 @@ public enum KeyPressParser {
         )
     }
 
+    static func heldKeys(_ specification: String) throws -> [ParsedKeyPress.Modifier] {
+        let tokens = specification.split(separator: "+", omittingEmptySubsequences: false).map { normalize(String($0)) }
+        guard !tokens.isEmpty, !tokens.contains("") else { throw ComputerUseError.invalidArguments("Held key is empty") }
+        let keys: [ParsedKeyPress.Modifier]
+        if (try? parseModifier(tokens.last!)) != nil {
+            keys = try tokens.map(parseModifier)
+        } else {
+            let parsed = try parse(specification)
+            keys = parsed.modifiers + [.init(flag: [], keyCode: parsed.keyCode)]
+        }
+        var seen = Set<CGKeyCode>()
+        return keys.filter { seen.insert($0.keyCode).inserted }
+    }
+
     private static func parseModifier(_ token: String) throws -> ParsedKeyPress.Modifier {
         switch token {
         case "cmd", "command", "super", "meta":

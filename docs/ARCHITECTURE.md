@@ -332,3 +332,12 @@ Dialog watchers retain resumed-action failures through response cleanup, includi
 watch completion while Page.handleJavaScriptDialog is in flight. Responding to the
 dialog reports those failures. Observation interruptions during initial page
 dialogs are handled within the observation operation, preserving normal startup.
+
+
+Native macOS held-click options select PID-posted input and register releases
+before sending each down. A termination-aware registry reverses held mouse/key
+state on graceful shutdown. App-agent disconnect checks use a separate action
+cancellation scope, retaining existing protected authorization and capture
+requirements. Native transport replacement waits for old-process exit, including
+lazy startup and source-level sessions. See [native held clicks](native-held-clicks.md)
+for schema gating, exact verification and current lock/platform boundaries.

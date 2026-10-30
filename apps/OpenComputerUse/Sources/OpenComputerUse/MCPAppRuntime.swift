@@ -40,6 +40,7 @@ final class MCPAppRuntime: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        shutdownOpenComputerUseHeldInput()
         resetOpenComputerUseBackgroundWindowState()
         if let turnEndedObserver {
             DistributedNotificationCenter.default().removeObserver(turnEndedObserver)

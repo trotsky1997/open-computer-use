@@ -47,3 +47,13 @@ now bind native DOM/shadow owner identities and verify the actual Core frame.
 Reordering and prompt-triggered document replacement have real checks, including
 failure propagation from the resumed action. See
 [native drag-and-drop](../../browser-drop.md). The full goal stays active.
+
+
+## Native held-click phase
+
+The live API reference confirms key/durationMs click options. macOS targeted
+implementation, schema gating, graceful release and native replacement barriers
+are implemented; an assert-based Swift check emits no GUI input. Real AppKit
+verification is pending normal Mac unlock. Continue that check, remaining native
+input/paste/scroll operations, other platforms and the broader browser/host audit.
+See [native held clicks](../../native-held-clicks.md). The full goal stays active.

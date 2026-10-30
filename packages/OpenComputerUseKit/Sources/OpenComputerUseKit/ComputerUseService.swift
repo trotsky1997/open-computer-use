@@ -630,8 +630,16 @@ public final class ComputerUseService {
         y: Double?,
         clickCount: Int,
         mouseButton: String,
-        clickMethod: ClickMethod = .auto
+        clickMethod: ClickMethod = .auto,
+        heldKey: String? = nil,
+        durationMs: Double? = nil
     ) throws -> ToolCallResult {
+        let extended = heldKey != nil || durationMs != nil
+        if let heldKey { _ = try KeyPressParser.heldKeys(heldKey) }
+        if let durationMs, !durationMs.isFinite || durationMs < 0 { throw ComputerUseError.invalidArguments("duration_ms must be finite and non-negative") }
+        if extended && ![ClickMethod.auto, .appPost].contains(clickMethod) { throw ComputerUseError.invalidArguments("Held clicks require click_method auto or app_post") }
+        if extended && !(1...3).contains(clickCount) { throw ComputerUseError.invalidArguments("Held click_count must be 1...3") }
+        let clickMethod = extended && clickMethod == .auto ? ClickMethod.appPost : clickMethod
         try validateClickMethod(
             clickMethod,
             hasElementIndex: elementIndex != nil,
@@ -644,11 +652,12 @@ public final class ComputerUseService {
         )
 
         let snapshot = try snapshotForAction(app: query, elementIndex: elementIndex)
-        let button = MouseButtonKind(rawValue: mouseButton.lowercased()) ?? .left
+        guard let button = MouseButtonKind(rawValue: mouseButton.lowercased()) else { throw ComputerUseError.invalidArguments("Unsupported mouse_button") }
         if elementIndex == nil, !snapshot.observation.includeScreenshot {
             throw ComputerUseError.stateUnavailable(SnapshotObservationOptions.screenshotOmittedNote + "; request a screenshot before screenshot-coordinate actions")
         }
         if snapshot.mode == .fixture {
+            if extended { throw ComputerUseError.invalidArguments("Held clicks require a native app observation, not the fixture bridge") }
             guard clickMethod == .auto else {
                 throw ComputerUseError.message(
                     "click_method '\(clickMethod.rawValue)' is not supported for fixture apps"
@@ -728,6 +737,8 @@ public final class ComputerUseService {
                 case .appPost, .skyClick, .global:
                     try performExplicitMouseClick(
                         method: clickMethod,
+                        heldKey: heldKey,
+                        durationMs: durationMs,
                         at: targetPoint,
                         windowPoint: windowPoint,
                         button: button,
@@ -788,6 +799,8 @@ public final class ComputerUseService {
                 case .appPost, .skyClick, .global:
                     try performExplicitMouseClick(
                         method: clickMethod,
+                        heldKey: heldKey,
+                        durationMs: durationMs,
                         at: targetPoint,
                         windowPoint: point,
                         button: button,
@@ -2287,6 +2300,8 @@ public final class ComputerUseService {
 
     private func performExplicitMouseClick(
         method: ClickMethod,
+        heldKey: String? = nil,
+        durationMs: Double? = nil,
         at point: CGPoint,
         windowPoint: CGPoint,
         button: MouseButtonKind,
@@ -2299,6 +2314,10 @@ public final class ComputerUseService {
         switch method {
         case .appPost:
             debugClickDecision("requested=app_post executed=pid_post target=\(targetDescription)")
+            if heldKey != nil || durationMs != nil {
+                try InputSimulation.clickTargetedHeld(at: eventPoint, button: button, clickCount: clickCount, key: heldKey, durationMs: durationMs, pid: snapshot.app.pid)
+                return
+            }
             try InputSimulation.clickTargeted(
                 at: eventPoint,
                 button: button,

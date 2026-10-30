@@ -48,10 +48,17 @@ final class LockedUseConnection: @unchecked Sendable {
             mutex.lock(); inFlight = false; let drain = stopped; mutex.unlock()
             if drain { acknowledgeDrain() }
         }
-        if scoped {
-            return try LockedUseActionScope.withValidator({ [self] in try validateAction() }, body: body)
+        return try LockedUseActionScope.withCancellation({ [self] in
+            mutex.lock(); let disconnected = clientDisconnected; mutex.unlock()
+            var byte: UInt8 = 0
+            let count = recv(clientSocket, &byte, 1, MSG_PEEK | MSG_DONTWAIT)
+            if disconnected || count == 0 || count < 0 && ![EAGAIN, EWOULDBLOCK, EINTR].contains(errno) {
+                throw ComputerUseError.stateUnavailable("Computer Use client disconnected")
+            }
+        }) {
+            if scoped { return try LockedUseActionScope.withValidator({ [self] in try validateAction() }, body: body) }
+            return try body()
         }
-        return try body()
     }
 
     private func acquire(session: LockedUseSession, recoveryProbe: Bool = false) throws {

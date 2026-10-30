@@ -370,3 +370,40 @@ with an action error and no file delivery. The expanded drop smoke retains neste
 process, dialogs, cancellation and cleanup retry evidence. Browser, dialog and
 clipboard regression smokes passed. Frame transforms/zoom, headful/native desktop
 and broader platform/host integration remain open in the full harness audit.
+
+
+### Native held-click foundation
+
+Refreshed the live reference contract: native click accepts key and durationMs.
+Added macOS PID-posted held input, modifier/ordinary-key parsing, per-press timing
+and click-state sequencing. Releases register before downs, run in reverse order
+and bypass ordinary action authorization on cleanup. SIGTERM/SIGINT handlers are ready
+before the MCP handshake, and app termination releases active held events.
+Ordinary app-agent requests now include disconnect cancellation while protected
+lease authorization/capture policy stays intact. Normal native AX click behavior
+is retained; extended options select app_post, and other explicit routes/fixture
+bridges reject them.
+
+The SDK validates options/aliases and checks the backend schema before sending
+held fields. Linux/Windows raw endpoints reject unsupported held options before
+input. Native process shutdown and lazy replacement now expose an exit barrier;
+Worker and source-level session cleanup await it. Browser-only operation remains
+independent of native startup. Persistent app-agent drain acknowledgement and
+hard-crash recovery remain open rather than inferred from a proxy's exit.
+
+The macOS product builds. Real stdio probes verify held schema fields and
+SIGTERM/SIGINT handler exits without GUI input. The no-GUI Swift check links the actual debug objects
+and verifies ordinary/modifier key order, click count/timing, reverse release on
+cancel/shutdown, validation, and separate cancellation/capture policy. Command
+Line Tools lack XCTest, so the full Swift XCTest suite was unavailable. All 82
+Node checks passed, including schema rejection, both session types and delayed
+SIGTERM replacement. Windows Go checks passed (40); the new Linux guard check
+passed, while its full suite hits the existing Linux-only bridge guard on macOS.
+The real Chrome native-free CLI/MCP regression also passed.
+
+A compilable independent AppKit fixture and live smoke are included. Preflight
+reports the Mac is locked despite existing AX/capture permissions, and no input
+was emitted. Real direct/proxy events, background focus/keyboard isolation,
+persistent-agent drain, other native platforms and remaining input APIs need
+verification/work. No lock or permission settings were changed. Full harness
+alignment remains active.

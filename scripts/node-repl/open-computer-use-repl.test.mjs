@@ -562,3 +562,40 @@ for (const Session of [PersistentJavaScriptSession, WorkerJavaScriptSession]) {
     assert.equal(result.content.at(-1).text, "state:Text");
   });
 }
+
+for (const Session of [PersistentJavaScriptSession,WorkerJavaScriptSession]) {
+  test(`${Session.name}: native held clicks validate and require advertised backend support`,async()=>{
+    const native=mockNative(),original=native.request.bind(native);
+    let supported=true,schemas=0;
+    native.request=async(method,params)=>{
+      if(method==='tools/list') {schemas++;return {tools:[{name:'click',inputSchema:{properties:supported?{key:{},duration_ms:{}}:{}}}]};}
+      return original(method,params);
+    };
+    const session=new Session({native});
+    try {
+      assert.equal((await session.run('var app=await cua.getApp("Text");')).isError,false);
+      for(const options of [{key:''},{key:1},{durationMs:-1},{durationMs:Infinity},{clickCount:0},{clickMethod:123},{mouseButton:'bad'},{typo:true}]) assert.equal((await session.run(`await app.click(7,${options.durationMs===Infinity?'{durationMs:Infinity}':JSON.stringify(options)});`)).isError,true);
+      assert.equal(schemas,0);assert.equal(native.calls.length,1);
+      assert.equal((await session.run('await app.click([10,20],{mouseButton:"r",clickCount:2,key:"shift",durationMs:40});')).isError,false);
+      assert.deepEqual(native.calls.at(-1).arguments,{app:'Text',x:10,y:20,mouse_button:'right',click_count:2,key:'shift',duration_ms:40});
+      supported=false;
+      const rejected=await session.run('await app.click(7,{durationMs:20});');
+      assert.equal(rejected.isError,true);assert.match(rejected.content.at(-1).text,/does not advertise/);
+      assert.equal(native.calls.filter(call=>call.name==='click').length,1);
+    } finally {await session.close();}
+  });
+}
+
+test("native replacement waits for graceful SIGTERM cleanup to exit",async()=>{
+ const source=`setInterval(()=>{},1000);process.on('SIGTERM',()=>{setTimeout(()=>process.exit(0),150)});let buffer='';process.stdin.setEncoding('utf8');process.stdin.on('data',chunk=>{buffer+=chunk;for(;;){const end=buffer.indexOf('\\n');if(end<0)break;const req=JSON.parse(buffer.slice(0,end));buffer=buffer.slice(end+1);if(req.id!==undefined)process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:req.id,result:{pid:process.pid}})+'\\n');}});`;
+ const peer=new JsonLinePeer({command:process.execPath,args:['--input-type=module','-e',source]});
+ try {
+   const original=await peer.initialize();let exited=false;
+   peer.child.once('exit',()=>{exited=true;});
+   const ending=peer.endSession();
+   const replacement=peer.request('ping',{});
+   await new Promise(resolve=>setTimeout(resolve,30));assert.equal(exited,false);
+   const next=await replacement;await ending;
+   assert.equal(exited,true);assert.notEqual(next.pid,original.pid);
+ } finally {await peer.close();}
+});

@@ -57,6 +57,8 @@ public enum ToolDefinitions {
                     "x": numberProperty(description: "X coordinate in screenshot pixel coordinates"),
                     "y": numberProperty(description: "Y coordinate in screenshot pixel coordinates"),
                     "click_count": integerProperty(description: "Number of clicks. Defaults to 1"),
+                    "key": stringProperty(description: "Key or chord held across the entire click sequence. Uses native app_post input; auto selects app_post."),
+                    "duration_ms": numberProperty(description: "Finite non-negative milliseconds to hold each mouse press. Uses native app_post input."),
                     "mouse_button": stringProperty(
                         description: "Mouse button to click. Defaults to left.",
                         enumValues: ["left", "right", "middle"]
