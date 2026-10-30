@@ -254,3 +254,15 @@ handle retains the attached browser connection, validates absolute paths and
 single/multiple selection, then disables interception and disconnects after its
 one-shot setFiles operation. Worker termination closes retained event connections;
 real smoke includes post-reset use and an independent interception-leak probe.
+
+Download events use a host-owned BrowserDownloads controller. It reserves a
+browser-context policy lease, listens for the target tab's frame downloads and
+writes GUID-named artifacts into a private temporary directory. path() waits for
+a confirmed terminal event, policy restoration and a regular-file check. Completed
+artifacts survive Worker cleanup. Cancellation confirms browser termination before
+restoring default behavior; failed restoration retains ownership and stops the
+Worker, including failures reported by asynchronous completion cleanup.
+
+Native and locator input share per-event readiness barriers. File chooser and
+download preparation can coexist, including setFiles-triggered downloads. Packaging
+includes the download controller in npm and installed Codex plugin runtimes.

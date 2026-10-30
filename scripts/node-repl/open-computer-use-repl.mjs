@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { BrowserDownloads } from "./browser-downloads.mjs";
 
 import { AsyncLocalStorage } from "node:async_hooks";
 import { spawn } from "node:child_process";
@@ -24,6 +25,8 @@ const DEFAULT_TIMEOUT_MS = 30_000;
 const MAX_TIMEOUT_MS = 300_000;
 const MAX_FRAME_BYTES = 32 * 1024 * 1024;
 const HERE = path.dirname(fileURLToPath(import.meta.url));
+const BROWSER_FAILURE_HANDLERS = new WeakMap();
+const HOST_BROWSER_DOWNLOADS = new BrowserDownloads(undefined,(owner,error)=>BROWSER_FAILURE_HANDLERS.get(owner)?.(error));
 const HOST_BROWSER_FOCUS = new BrowserFocusLeases(updateBrowserFocus);
 
 const SERVER_INSTRUCTIONS = `UI automation through a persistent JavaScript REPL using the initialized cua API.
@@ -442,7 +445,7 @@ export function createCuaApi(native, activeOutput) {
       async performSecondaryAction(elementIndex, action) { await call("perform_secondary_action", { app, element_index: elementIndex, action }); },
     });
   }
-  const browserApi = createBrowserApi(activeOutput, process.env, native.browserFocus ? args => native.request("browser/focus", args) : undefined);
+  const browserApi = createBrowserApi(activeOutput, process.env, native.browserHost ? args => native.request("browser/focus", args) : undefined, native.browserHost ? args => native.request("browser/download",args) : undefined);
   const api = {
     ...browserApi,
     async getState(options = {}) {
@@ -611,6 +614,7 @@ export class WorkerJavaScriptSession {
     this.runQueue = Promise.resolve();
     this.invalidatedWorkers = new WeakSet();
     this.browserFocusLeases = HOST_BROWSER_FOCUS;
+    this.browserDownloads = HOST_BROWSER_DOWNLOADS;
     this.stoppingWorkers = new WeakMap();
     this.#start();
   }
@@ -618,6 +622,7 @@ export class WorkerJavaScriptSession {
   #start() {
     const worker = new Worker(new URL("./open-computer-use-kernel.mjs", import.meta.url));
     this.worker = worker;
+    BROWSER_FAILURE_HANDLERS.set(worker,error=>void this.#workerFailed(worker,error));
     worker.on("message", message => void this.#onMessage(worker, message));
     worker.on("error", error => void this.#workerFailed(worker, error));
     worker.on("exit", code => {
@@ -632,7 +637,10 @@ export class WorkerJavaScriptSession {
       this.native.endSession?.();
       this.stoppingWorkers.set(worker, (async () => {
         await worker.terminate();
-        await this.browserFocusLeases.cleanup(worker);
+        const cleaned = await Promise.allSettled([this.browserFocusLeases.cleanup(worker),this.browserDownloads.cleanup(worker)]);
+        const failed = cleaned.find(result=>result.status === "rejected");
+        if(failed) throw failed.reason;
+        BROWSER_FAILURE_HANDLERS.delete(worker);
       })().catch(error => { this.stoppingWorkers.delete(worker); throw error; }));
     }
     return this.stoppingWorkers.get(worker);
@@ -664,9 +672,19 @@ export class WorkerJavaScriptSession {
           if (message.params?.action === "acquire") result = await this.browserFocusLeases.acquire(worker, message.params.targetId);
           else if (message.params?.action === "release") result = await this.browserFocusLeases.release(worker, message.params.lease);
           else throw new Error("Unknown browser focus action");
+        } else if(message.method === "browser/download") {
+          const args = message.params;
+          if(args?.action === "start") result = await this.browserDownloads.start(worker,args.targetId,args.options);
+          else if(args?.action === "wait") result = await this.browserDownloads.wait(worker,args.id);
+          else if(args?.action === "path") result = await this.browserDownloads.path(worker,args.id,args.options);
+          else throw new Error("Unknown download action");
         } else result = await this.native.request(message.method, message.params, message.timeoutMs);
         if (this.worker === worker && !this.invalidatedWorkers.has(worker)) worker.postMessage({ type: "native_response", id: message.id, result });
       } catch (error) {
+        if (error?.browserCleanupFailed && ["browser/focus","browser/download"].includes(message.method)) {
+          await this.#workerFailed(worker,error);
+          return;
+        }
         if (this.worker === worker && !this.invalidatedWorkers.has(worker)) worker.postMessage({ type: "native_response", id: message.id, error: asError(error).message });
       }
     }

@@ -144,3 +144,26 @@ event timeouts, Worker handle persistence, timeout/reset recovery and subsequent
 file selection. An independent CDP observer confirmed interception was absent on
 a later ordinary click after errors/reset. Headful picker presentation and remote
 CDP filesystems remain unverified. Download events remain open work.
+
+Download events now return host-owned handles with path(). A browser-context
+lease prevents competing watchers in one host. The controller listens for the
+selected tab's frames, writes browser GUIDs to private temporary directories,
+verifies completion/regular files, restores default download behavior and preserves
+completed artifacts across Worker reset/close. Server filenames do not determine
+local paths. Cancellation waits for a terminal progress event before restoration;
+failed cleanup retains ownership and stops evaluation. Background cleanup failures
+also notify the owning Worker.
+
+The internal browser-host request route carries start/wait/path calls. npm and
+plugin packaging copy the new controller. Shared page selection was extracted
+from the existing locator implementation. Readiness barriers are scoped by event
+type, and setFiles awaits download preparation for automatic-download workflows.
+
+All 59 Node checks passed. The dedicated real Chrome download smoke covers byte
+contents, untrusted names, repeated path reads, cross-call handles, event timeout,
+active reset/cancellation, close, context exclusivity, cancellation-time/asynchronous policy
+restore failures with retry, chooser-triggered downloads and artifact persistence.
+The existing browser smoke also passed after controller/locator integration.
+Remote filesystems, popup ownership, host crashes and artifact retention management
+remain open. Chromium default policy is restored; preexisting custom client
+policies are not reconstructed.

@@ -3,10 +3,10 @@ import { isAbsolute } from "node:path";
 export const PLAYWRIGHT_VERSION = "1.64.1";
 const eventBarriers = new Map();
 export async function waitForBrowserEventReady(endpoint, targetId) {
-  await eventBarriers.get(`${endpoint}|${targetId}`)?.ready;
+  for (const event of ["filechooser","download"]) await eventBarriers.get(`${endpoint}|${targetId}|${event}`)?.ready;
 }
 
-export function createPlaywrightApi(endpoint, targetId, invalidate, focusLease) {
+export function createPlaywrightApi(endpoint, targetId, invalidate, focusLease, downloadRequest) {
   const recipes = new WeakMap();
   const selectors = ["locator", "getByRole", "getByText", "getByLabel", "getByPlaceholder", "getByTestId", "getByTitle", "getByAltText", "frameLocator"];
   const chains = [...selectors, "filter", "nth", "first", "last", "and", "or"];
@@ -30,19 +30,9 @@ export function createPlaywrightApi(endpoint, targetId, invalidate, focusLease) 
       }
     })();
     try {
-      let page;
-      for (const context of browser.contexts()) {
-        for (const candidate of context.pages()) {
-          const session = await context.newCDPSession(candidate);
-          try {
-            const {targetInfo} = await session.send("Target.getTargetInfo");
-            if (targetInfo.targetId === targetId) { page = candidate; focusSession = session; }
-          } finally { if (session !== focusSession) await session.detach(); }
-          if (page) break;
-        }
-        if (page) break;
-      }
-      if (!page) throw new Error("Tab closed or no longer available");
+      const selected = await findBrowserPage(browser,targetId);
+      const page = selected.page;
+      focusSession = selected.session;
       page.setDefaultTimeout(10_000);
       const convert = value => {
         if (value && recipes.has(value)) return resolve(recipes.get(value));
@@ -86,6 +76,7 @@ export function createPlaywrightApi(endpoint, targetId, invalidate, focusLease) 
               if (!Array.isArray(paths) || paths.some(file => typeof file !== "string" || !isAbsolute(file))) throw new Error("setFiles requires absolute file paths");
               if (!multiple && paths.length > 1) throw new Error("File chooser accepts only one file");
               validateWaitOptions(fileOptions, ["timeoutMs"]);
+              await waitForBrowserEventReady(endpoint(),targetId);
               consumed = true;
               invalidate();
               try { await chooser.setFiles(paths, {timeout:fileOptions.timeoutMs ?? 10_000}); }
@@ -135,17 +126,29 @@ export function createPlaywrightApi(endpoint, targetId, invalidate, focusLease) 
     if (!path.length) {
       api.domSnapshot = () => invoke([], "domSnapshot", []);
       api.waitForEvent = (event, options = {}) => {
-        if (event !== "filechooser") throw new Error(`Unsupported browser event: ${event}`);
+        if (!["filechooser","download"].includes(event)) throw new Error(`Unsupported browser event: ${event}`);
+        if (event === "download" && !downloadRequest) throw new Error("Download backend is unavailable");
         validateWaitOptions(options, ["timeoutMs"]);
-        const key = `${endpoint()}|${targetId}`;
-        if (eventBarriers.has(key)) throw new Error("A file chooser is already pending for this tab");
+        const key = `${endpoint()}|${targetId}|${event}`;
+        if (eventBarriers.has(key)) throw new Error("A browser event is already pending for this tab");
         let resolve, reject;
         const ready = new Promise((yes,no) => {resolve=yes;reject=no;});
         ready.catch(() => {});
         const entry = {ready};
         eventBarriers.set(key,entry);
         const done = () => {if(eventBarriers.get(key) === entry) eventBarriers.delete(key);};
-        const pending = invoke([], "filechooser", [{...options}, resolve, done]).catch(error => {reject(error);done();throw error;});
+        const waiting = event === "filechooser" ? invoke([], "filechooser", [{...options}, resolve, done]) : (async()=>{
+          const id = await downloadRequest({action:"start",targetId,options:{...options}});
+          resolve();
+          await downloadRequest({action:"wait",id});
+          done();
+          return Object.freeze({async path(pathOptions = {}) {
+            validateWaitOptions(pathOptions,["timeoutMs"]);
+            try {return await downloadRequest({action:"path",id,options:{...pathOptions}});}
+            finally {done();}
+          }});
+        })();
+        const pending = waiting.catch(error => {reject(error);done();throw error;});
         pending.catch(() => {});
         return pending;
       };
@@ -198,7 +201,12 @@ export class BrowserFocusLeases {
       await entry.ready.catch(() => {});
       await this.updateFocus(entry.targetId, false);
       this.entries.delete(id);
-    })().catch(error => { entry.releasing = undefined; throw error; });
+    })().catch(error => {
+      entry.releasing = undefined;
+      error = error instanceof Error ? error : new Error(String(error));
+      error.browserCleanupFailed = true;
+      throw error;
+    });
     return entry.releasing;
   }
   async cleanup(owner) {
@@ -218,4 +226,17 @@ function validateWaitOptions(options, allowed) {
   const waitStates = allowed.includes("url") ? loadStates : [...loadStates, "commit"];
   if (options.waitUntil !== undefined && !waitStates.includes(options.waitUntil)) throw new Error("Invalid navigation waitUntil");
   if (options.url !== undefined && typeof options.url !== "string") throw new Error("Navigation URL must be a string");
+}
+
+
+export async function findBrowserPage(browser,targetId) {
+  for(const context of browser.contexts()) for(const page of context.pages()) {
+    const session = await context.newCDPSession(page);
+    let selected = false;
+    try {
+      const {targetInfo} = await session.send("Target.getTargetInfo");
+      if(targetInfo.targetId === targetId) {selected=true;return {page,session};}
+    } finally {if(!selected) await session.detach();}
+  }
+  throw new Error("Tab closed or no longer available");
 }

@@ -431,6 +431,7 @@ function copyInstallerScripts(packageRoot) {
     "open-computer-use-cli.mjs",
     "ocu-config.mjs",
     "browser-cdp.mjs",
+    "browser-downloads.mjs",
     "browser-playwright.mjs",
     "open-computer-use-repl.mjs",
     "open-computer-use-kernel.mjs",
@@ -440,6 +441,10 @@ function copyInstallerScripts(packageRoot) {
       path.join(packageRoot, "scripts", "node-repl", scriptName),
     );
   }
+  cpSync(
+    path.join(repoRoot, "scripts", "node-repl", "browser-downloads.mjs"),
+    path.join(packageRoot, "plugins", "open-computer-use", "scripts", "browser-downloads.mjs")
+  );
   cpSync(
     path.join(repoRoot, "scripts", "node-repl", "browser-playwright.mjs"),
     path.join(packageRoot, "plugins", "open-computer-use", "scripts", "browser-playwright.mjs")

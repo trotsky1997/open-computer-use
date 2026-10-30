@@ -152,8 +152,7 @@ against background-page visibility. Concurrent focus emulation by other CDP clie
 is not coordinated; use one harness for a configured browser.
 
 Playwright actions discard prior native AX and screenshot indices. Read fresh
-state after an action. Read-only evaluation isolation, download event wrappers,
-downloads, file choosers and other browser lifecycle integrations remain open.
+state after an action. Read-only evaluation isolation, artifact export/retention and other browser lifecycle integrations remain open.
 
 Worker locator actions acquire an exclusive focus lease owned by the host before
 starting input. The host keeps its own CDP connection until release, independently
@@ -212,10 +211,10 @@ await chooser.setFiles(["/absolute/path/to/report.txt"], {timeoutMs:5000});
 
 Start the event wait before triggering the chooser. A per-tab readiness barrier
 holds subsequent Playwright and native AX/coordinate input until interception is
-acknowledged. One chooser can be pending in a JavaScript kernel for each tab.
+acknowledged. One waiter of each event type can be pending in a JavaScript kernel for each tab.
 Starting another before consuming the first is rejected. The default event wait
 timeout is 10 seconds; zero disables the local timeout while the Worker budget
-still applies. Unsupported events, including download, fail explicitly.
+still applies. Events other than filechooser and download fail explicitly.
 
 `isMultiple()` returns the captured control's multiple-file flag. `setFiles`
 accepts an absolute path or array of absolute paths; an empty array clears the
@@ -233,3 +232,53 @@ subsequent chooser use and independently checked that interception was absent
 after error/reset. Desktop picker presentation and remote CDP filesystem access
 remain unverified. Paths must refer to files available to the Playwright/browser
 host; remote browsers may require shared paths or an additional transfer layer.
+
+## Downloads
+
+```js
+var pending = tab.playwright.waitForEvent("download", {timeoutMs:10000});
+await tab.playwright.getByRole("link", {name:"Download"}).click();
+var download = await pending;
+nodeRepl.write(await download.path({timeoutMs:30000}));
+```
+
+The host prepares a private temporary directory and enables CDP download events
+before input proceeds. A download is attributed to the selected tab's frames,
+including frames attached during the wait. The host records browser-generated
+GUIDs; response filenames are not used to construct local paths. `path()` waits
+for completion and verifies a regular local file before returning its absolute
+path. It throws for canceled, missing or incomplete artifacts. Completed paths
+can be read repeatedly and files survive Worker reset/close; they remain in the
+OS temporary directory until normal external cleanup. Artifact retention/export
+management is still open work.
+
+Event and completion timeouts default to 10 seconds and accept `timeoutMs:0` for
+an unlimited local wait within the Worker execution budget. Handles can be saved
+across REPL calls. A file chooser and a download watcher may coexist; setFiles
+also waits for download preparation, covering pages that generate a download
+immediately after file selection.
+
+CDP download policy applies to a browser context. One active download watcher in
+a context is allowed per host process; competing watchers fail explicitly. The
+host restores Chromium's **default** download behavior after completion or failure.
+It cannot read/restore another client's previous custom CDP policy. Use a dedicated
+browser profile: unrelated downloads in the same context temporarily share that
+download destination, although their artifacts are not returned to the waiter.
+Separate host processes are not coordinated.
+
+Worker timeout/reset/close cancels active transfers, waits for a browser terminal
+progress event, restores the default policy and then releases ownership. A restoration
+failure retains the context lease while the host stops the owning Worker and
+retries cleanup. A replacement starts only after cleanup succeeds; persistent
+failure keeps the session stopped and reset can retry. Background completion
+cleanup failures notify the owning session
+even when no JavaScript path read is currently awaiting them. Interrupted clicks/transfers are not replayed. Partial downloads
+never produce a path; private partial files/directories may remain for OS cleanup.
+
+`OPEN_COMPUTER_USE_CDP_URL=http://127.0.0.1:9222 node scripts/run-download-smoke.mjs`
+runs a local download fixture. Real macOS headless Chrome checks byte contents,
+untrusted filenames, repeated paths, cross-call Worker handles, active cancellation,
+reset/close, context exclusivity, policy restore failure/retry and file-chooser to
+download sequencing. Host process crashes, remote browser filesystems, popup-owned
+downloads and headful presentation remain unverified. The artifact directory must
+be visible to the browser and host; a remote transfer layer is not implemented.

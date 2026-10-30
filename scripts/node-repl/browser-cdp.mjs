@@ -1,3 +1,4 @@
+import { BrowserDownloads } from "./browser-downloads.mjs";
 import { createPlaywrightApi, waitForBrowserEventReady } from "./browser-playwright.mjs";
 
 export function screenshotPoint(point, image) {
@@ -163,9 +164,17 @@ Chain locator/filter({hasText})/nth/first/last; read count/innerText/textContent
 act with click/dblclick/fill/press/check/uncheck/setChecked/selectOption/hover/scrollIntoViewIfNeeded.
 Playwright resolves fresh elements and waits for actionability; ambiguous matches fail. Default action timeout is 10 seconds.
 Navigation waits: tab.playwright.expectNavigation(async action, {url?,waitUntil?,timeoutMs?}), waitForURL(url, {waitUntil?,timeoutMs?}), waitForLoadState({state?,timeoutMs?}). expectNavigation installs a main-frame watcher before running the action and returns its result after navigation.
-Playwright actions invalidate prior AX and screenshot indices. Read current state afterwards. File chooser events: start tab.playwright.waitForEvent("filechooser", {timeoutMs?}) before clicking, then await the handle and use isMultiple() / setFiles(absolutePaths, {timeoutMs?}). The handle is one-shot; downloads and formatted paste remain unsupported.`;
+Playwright actions invalidate prior AX and screenshot indices. Read current state afterwards. File chooser events: start tab.playwright.waitForEvent("filechooser", {timeoutMs?}) before clicking, then await the handle and use isMultiple() / setFiles(absolutePaths, {timeoutMs?}). The file handle is one-shot. Downloads: start waitForEvent("download") before clicking, then await download.path({timeoutMs?}) for the completed local artifact. Formatted paste remains unsupported.`;
 
-export function createBrowserApi(activeOutput, environment = process.env, focusLease) {
+export function createBrowserApi(activeOutput, environment = process.env, focusLease, downloadRequest) {
+  const downloads = downloadRequest ? undefined : new BrowserDownloads(() => endpoint()?.href);
+  const downloadOwner = {};
+  const requestDownload = downloadRequest ?? (args => {
+    if(args.action === "start") return downloads.start(downloadOwner,args.targetId,args.options);
+    if(args.action === "wait") return downloads.wait(downloadOwner,args.id);
+    if(args.action === "path") return downloads.path(downloadOwner,args.id,args.options);
+    throw new Error("Unknown download action");
+  });
   function endpoint() {
     if (!environment.OPEN_COMPUTER_USE_CDP_URL) return null;
     const url = new URL(environment.OPEN_COMPUTER_USE_CDP_URL);
@@ -293,7 +302,7 @@ export function createBrowserApi(activeOutput, environment = process.env, focusL
     }
     return Object.freeze({
       ...info(target),
-      playwright: createPlaywrightApi(() => { const value = endpoint(); if (!value) throw new Error("No CDP browser configured"); return value.href; }, target.id, invalidate, focusLease),
+      playwright: createPlaywrightApi(() => { const value = endpoint(); if (!value) throw new Error("No CDP browser configured"); return value.href; }, target.id, invalidate, focusLease, requestDownload),
       getAXState: ax,
       getScreenshot: screenshot,
       async getAXStateAndScreenshot(options = {}) {
