@@ -41,18 +41,27 @@ await app.getAXState();
 runtime and emits the initial accessibility state. The returned binding exposes:
 
 ```text
-getAXState({ emit?, textLimit?, maxTreeNodes?, maxTreeDepth?, windowPlacement? })
+getAXState({ emit?, disableDiffing?, textLimit?, maxTreeNodes?, maxTreeDepth?, windowPlacement? })
 getScreenshot({ emit?, windowPlacement? })
-getAXStateAndScreenshot({ emit?, textLimit?, maxTreeNodes?, maxTreeDepth?, windowPlacement? })
+getAXStateAndScreenshot({ emit?, disableDiffing?, textLimit?, maxTreeNodes?, maxTreeDepth?, windowPlacement? })
 click(elementIndexOrPoint, options?)
 drag([fromX, fromY], [toX, toY])
 pressKey(key, options?)
 scroll(elementIndex, direction, pages?)
 setValue(elementIndex, value)
-selectText(elementIndex, text, { prefix?, suffix?, selection? })  // macOS
+selectText(elementIndex, text, { prefix?, suffix?, selectionType? })  // macOS
 typeText(text, options?)
 performSecondaryAction(elementIndex, action)
 ```
+
+AX text output uses a compact line-replacement diff when it is shorter than the
+full current snapshot. Unchanged output is reported explicitly. Pass
+`{ disableDiffing: true }` for full output. The JavaScript return value always
+contains the complete current state. Only emitted AX observations advance the
+diff baseline; `{ emit: false }` leaves the model's baseline unchanged. Screenshot
+observations, native errors and session reset discard history. Changed snapshot
+options force full output. Every read still collects a new native snapshot and
+uses its current element indices; the diff changes output only.
 
 On macOS, Windows and Linux, observation methods also accept optional `includeAX` and
 `includeScreenshot` booleans, both defaulting to true. Use
@@ -71,7 +80,7 @@ and move the system pointer; stale geometry, occlusion and foreground failures
 are refused. See [Windows input](../windows-input.md) for routing and desktop tests.
 
 On macOS, `selectText` selects exact text inside a text element. `prefix` and `suffix`
-match the immediately adjacent text to disambiguate repeated occurrences. `selection`
+match the immediately adjacent text to disambiguate repeated occurrences. `selectionType`
 is `text` (default), `cursor_before` or `cursor_after`. Snapshot and `query` indexes
 both work in the same session. For example:
 
@@ -79,7 +88,7 @@ both work in the same session. For example:
 var editor = await cua.getApp("TextEdit", { initialState: false });
 var fields = await editor.query({ role: "AXTextArea" });
 if (fields.matches.length !== 1) throw new Error("Choose the intended text area first");
-await editor.selectText(fields.matches[0].index, "target", { selection: "cursor_after" });
+await editor.selectText(fields.matches[0].index, "target", { selectionType: "cursor_after" });
 await editor.getAXState();
 ```
 

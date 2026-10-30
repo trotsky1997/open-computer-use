@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
-import { JsonLinePeer, PersistentJavaScriptSession, WorkerJavaScriptSession, parseListApps, toolDefinitions, computerUseGuidance, virtualDisplayEnabled } from "./open-computer-use-repl.mjs";
+import { JsonLinePeer, PersistentJavaScriptSession, WorkerJavaScriptSession, parseListApps, createCuaApi, toolDefinitions, computerUseGuidance, virtualDisplayEnabled } from "./open-computer-use-repl.mjs";
 
 function textResult(text, isError = false, image) {
   const content = [{ type: "text", text }];
@@ -410,7 +410,7 @@ for (const Session of [PersistentJavaScriptSession, WorkerJavaScriptSession]) {
     assert.equal(result.isError, false, result.content.at(-1).text);
     assert.deepEqual(native.calls[0], { name: "select_text", arguments: { app: "Text", element_index: 1000001, text: "中文🙂", prefix: "before ", suffix: " after", selection: undefined } });
     for (const mode of ["text", "cursor_before", "cursor_after"]) {
-      result = await session.run(`await selectionApp.selectText("5", "target", {selection: "${mode}"});`);
+      result = await session.run(`await selectionApp.selectText("5", "target", {selectionType: "${mode}"});`);
       assert.equal(result.isError, false, result.content.at(-1).text);
       assert.equal(native.calls.at(-1).arguments.selection, mode);
     }
@@ -421,7 +421,7 @@ for (const Session of [PersistentJavaScriptSession, WorkerJavaScriptSession]) {
     const native = mockNative(), session = new Session({ native });
     t.after(() => session.close?.());
     await session.run(`var selectionApp = await cua.getApp("Text", { initialState: false });`);
-    for (const args of [`-1,"x"`, `1.5,"x"`, `true,"x"`, `"bad","x"`, `[],"x"`, `0,""`, `0,3`, `0,"x",null`, `0,"x",[]`, `0,"x",{prefix:2}`, `0,"x",{suffix:null}`, `0,"x",{selection:"after"}`, `0,"x",{selection:""}`, `0,"x",{typo:true}`]) {
+    for (const args of [`-1,"x"`, `1.5,"x"`, `true,"x"`, `"bad","x"`, `[],"x"`, `0,""`, `0,3`, `0,"x",null`, `0,"x",[]`, `0,"x",{prefix:2}`, `0,"x",{suffix:null}`, `0,"x",{selectionType:"after"}`, `0,"x",{selectionType:""}`, `0,"x",{selection:"text"}`, `0,"x",{typo:true}`]) {
       const result = await session.run(`await selectionApp.selectText(${args});`);
       assert.equal(result.isError, true, args);
     }
@@ -474,3 +474,69 @@ test("disabled virtual displays reject stale JS options before native dispatch",
   assert.equal(restored.isError, false);
   assert.equal(native.calls.at(-1).arguments.window_placement, "restore");
 });
+
+
+test("AX output diffs retain current indexes and full return values", async () => {
+  let state = Array.from({ length: 40 }, (_, i) => `[${i}] button title-${i}`).join("\n");
+  const output = [];
+  const native = { request: async () => textResult(state) };
+  const cua = createCuaApi(native, () => ({ write: text => output.push(text) }));
+  const app = await cua.getApp("Text", { initialState: false });
+  output.length = 0;
+  assert.equal(await app.getAXState(), state);
+  assert.equal(output.at(-1), state);
+  await app.getAXState();
+  assert.equal(output.at(-1), "Accessibility state unchanged.");
+  state = state.replace("[12] button title-12", "[12] button Updated");
+  assert.equal(await app.getAXState(), state);
+  assert.match(output.at(-1), /- \[12\] button title-12\n\+ \[12\] button Updated/);
+  assert.ok(output.at(-1).length < state.length);
+  await app.getAXState({ disableDiffing: true });
+  assert.equal(output.at(-1), state);
+  const other = await cua.getApp("Other", { initialState: false });
+  await other.getAXState();
+  assert.equal(output.at(-1), state);
+  await assert.rejects(app.getAXState({ disableDiffing: "yes" }), /must be a boolean/);
+});
+
+test("unseen observations, screenshots, option changes and failures preserve diff baselines", async () => {
+  let state = "first state", fail = false;
+  const output = [];
+  const native = { request: async () => {
+    if (fail) throw new Error("native disconnected");
+    return textResult(state, false, { mimeType: "image/png", data: "iVBORw0KGgo=" });
+  } };
+  const cua = createCuaApi(native, () => ({ write: text => output.push(text), emitImage: async () => {} }));
+  const app = await cua.getApp("Text", { initialState: false });
+  await app.getAXState();
+  state = "unseen state";
+  await app.getAXState({ emit: false });
+  state = "first state";
+  await app.getAXState();
+  assert.equal(output.at(-1), "Accessibility state unchanged.");
+  await app.getScreenshot({ emit: false });
+  await app.getAXState();
+  assert.equal(output.at(-1), state);
+  await app.getAXState({ textLimit: "max" });
+  assert.equal(output.at(-1), state);
+  fail = true;
+  await assert.rejects(app.click(1), /disconnected/);
+  fail = false;
+  await app.getAXState({ textLimit: "max" });
+  assert.equal(output.at(-1), state);
+  await app.getAXStateAndScreenshot({ textLimit: "max" });
+  assert.equal(output.at(-1), "Accessibility state unchanged.");
+});
+
+for (const Session of [PersistentJavaScriptSession, WorkerJavaScriptSession]) {
+  test(`${Session.name}: AX diff history resets with the JavaScript session`, async t => {
+    const session = new Session({ native: mockNative() });
+    t.after(() => session.close?.());
+    await session.run('var app = await cua.getApp("Text", { initialState: false }); await app.getAXState();');
+    let result = await session.run('await app.getAXState();');
+    assert.equal(result.content.at(-1).text, "Accessibility state unchanged.");
+    await session.reset();
+    result = await session.run('var app = await cua.getApp("Text", { initialState: false }); await app.getAXState();');
+    assert.equal(result.content.at(-1).text, "state:Text");
+  });
+}

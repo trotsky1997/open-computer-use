@@ -39,7 +39,7 @@ The runtime exposes an asynchronous app-bound API:
 - \`await cua.listApps({ emit? })\`: list current apps.
 - \`await cua.getApp(nameOrBundleID, { initialState? })\`: bind an app; initialState defaults to true. Use false for a lightweight binding before query.
 - \`await app.query({ text?, role?, exact?, limit?, maxNodes?, windowId? })\`: macOS-only AX lookup; returns matches and truncation metadata, with indexes usable in this native session.
-- \`await app.getAXState({ emit?, textLimit?, maxTreeNodes?, maxTreeDepth?, windowPlacement? })\`
+- \`await app.getAXState({ emit?, disableDiffing?, textLimit?, maxTreeNodes?, maxTreeDepth?, windowPlacement? })\`
 - \`await app.getScreenshot({ emit? })\`
 - \`await app.getAXStateAndScreenshot(options?)\`
 - Optional observation on macOS, Windows and Linux: \`app.getScreenshot({ includeAX: false })\` skips AX/focus/selection and invalidates prior element indexes; refresh AX before element actions. \`app.getAXState({ includeScreenshot: false })\` skips capture; screenshot-coordinate actions require a fresh screenshot. Omitted options retain full native observation.
@@ -49,8 +49,10 @@ The runtime exposes an asynchronous app-bound API:
 - \`await app.typeText(text, { keyMethod? })\`
 - \`await app.pressKey(key, { keyMethod? })\`
 - \`await app.setValue(elementIndex, value)\`
-- \`await app.selectText(elementIndex, text, { prefix?, suffix?, selection? })\`: macOS-only; selection is text (default), cursor_before or cursor_after. Ambiguous text and unverified selections throw.
+- \`await app.selectText(elementIndex, text, { prefix?, suffix?, selectionType? })\`: macOS-only; selectionType is text (default), cursor_before or cursor_after. Ambiguous text and unverified selections throw.
 - \`await app.performSecondaryAction(elementIndex, action)\`
+
+AX observations emit a compact line replacement diff by default when it is smaller than the full state. Pass { disableDiffing: true } for full output. JavaScript return values always contain the full current state. Screenshot observations and native failures clear diff history.
 
 After actions, call \`getAXState()\` in the same js invocation when the next decision depends on the updated UI. Re-derive element indexes from fresh state after navigation or layout changes. Prefer element indexes over coordinates. Open Computer Use keeps its existing local safety gates, including password-manager denial and explicit authorization for global pointer fallbacks.`;
 
@@ -270,6 +272,9 @@ export function parseListApps(text) {
 
 function optionsToSnapshotArgs(options = {}) {
   const args = {};
+  if (options.disableDiffing !== undefined && typeof options.disableDiffing !== "boolean") {
+    throw new Error("disableDiffing must be a boolean");
+  }
   if (options.textLimit !== undefined) args.text_limit = options.textLimit;
   if (options.maxTreeNodes !== undefined) args.max_tree_nodes = options.maxTreeNodes;
   if (options.maxTreeDepth !== undefined) args.max_tree_depth = options.maxTreeDepth;
@@ -307,10 +312,16 @@ function optionsToKeyArgs(options = {}) {
 
 export function createCuaApi(native, activeOutput) {
   let docsEmitted = false;
+  const observations = new Map();
   async function call(tool, args = {}) {
-    const result = await native.request("tools/call", { name: tool, arguments: args });
-    if (result?.isError) throw new Error(toolResultText(result) || `${tool} failed`);
-    return result;
+    try {
+      const result = await native.request("tools/call", { name: tool, arguments: args });
+      if (result?.isError) throw new Error(toolResultText(result) || `${tool} failed`);
+      return result;
+    } catch (error) {
+      observations.clear();
+      throw error;
+    }
   }
   async function emitText(text, options = {}) {
     if (options.emit === false || !text) return;
@@ -319,6 +330,32 @@ export function createCuaApi(native, activeOutput) {
   async function emitImages(images, options = {}) {
     if (options.emit === false) return;
     for (const image of images) await activeOutput().emitImage({ bytes: Buffer.from(image.data, "base64"), mimeType: image.mimeType ?? "image/png" });
+  }
+  async function observe(app, text, options = {}) {
+    if (options.includeAX === false) {
+      observations.clear();
+      await emitText(text, options);
+      return;
+    }
+    if (options.emit === false) return;
+    const signature = JSON.stringify(optionsToSnapshotArgs(options));
+    const previous = observations.get(app);
+    let output = text;
+    if (!options.disableDiffing && previous?.signature === signature) {
+      const before = previous.text.split("\n"), after = text.split("\n");
+      let start = 0, end = 0;
+      while (start < before.length && start < after.length && before[start] === after[start]) start++;
+      while (end < before.length - start && end < after.length - start && before[before.length - 1 - end] === after[after.length - 1 - end]) end++;
+      if (start === before.length && start === after.length) output = "Accessibility state unchanged.";
+      else {
+        const removed = before.slice(start, before.length - end);
+        const added = after.slice(start, after.length - end);
+        const diff = `Accessibility state diff for ${app} (replace ${removed.length} line(s) at line ${start + 1} with ${added.length} line(s)):\n${removed.map(line => `- ${line}`).join("\n")}\n${added.map(line => `+ ${line}`).join("\n")}`;
+        if (diff.length < text.length) output = diff;
+      }
+    }
+    await emitText(output, options);
+    observations.set(app, { text, signature });
   }
   async function emitDocs() {
     if (docsEmitted) return;
@@ -349,10 +386,11 @@ export function createCuaApi(native, activeOutput) {
       async getAXState(options = {}) {
         const result = await call("get_app_state", { app, ...optionsToSnapshotArgs(options) });
         const text = toolResultText(result);
-        await emitText(text, options);
+        await observe(app, text, options);
         return text;
       },
       async getScreenshot(options = {}) {
+        observations.clear();
         const result = await call("get_app_state", { app, ...optionsToSnapshotArgs(options), text_limit: 1 });
         const image = toolResultImages(result)[0];
         if (!image) throw new Error(`Screenshot unavailable for ${app}`);
@@ -364,7 +402,7 @@ export function createCuaApi(native, activeOutput) {
         const result = await call("get_app_state", { app, ...optionsToSnapshotArgs(options) });
         const state = toolResultText(result);
         const images = toolResultImages(result);
-        await emitText(state, options);
+        await observe(app, state, options);
         await emitImages(images, options);
         return images[0] ? { state, screenshot: Buffer.from(images[0].data, "base64") } : { state };
       },
@@ -385,16 +423,16 @@ export function createCuaApi(native, activeOutput) {
         if (typeof text !== "string" || !text.length) throw new Error("selectText requires non-empty text");
         if (!isPlainObject(options)) throw new Error("selectText expects an options object");
         for (const key of Object.keys(options)) {
-          if (!["prefix", "suffix", "selection"].includes(key)) throw new Error(`Unknown selectText option: ${key}`);
+          if (!["prefix", "suffix", "selectionType"].includes(key)) throw new Error(`Unknown selectText option: ${key}`);
         }
         for (const key of ["prefix", "suffix"]) {
           if (options[key] !== undefined && typeof options[key] !== "string") throw new Error(`${key} must be a string`);
         }
-        if (options.selection !== undefined && !["text", "cursor_before", "cursor_after"].includes(options.selection)) {
-          throw new Error("selection must be text, cursor_before or cursor_after");
+        if (options.selectionType !== undefined && !["text", "cursor_before", "cursor_after"].includes(options.selectionType)) {
+          throw new Error("selectionType must be text, cursor_before or cursor_after");
         }
         await call("select_text", { app, element_index: elementIndex, text,
-          prefix: options.prefix, suffix: options.suffix, selection: options.selection });
+          prefix: options.prefix, suffix: options.suffix, selection: options.selectionType });
       },
       async typeText(text, options = {}) { await call("type_text", { app, text, ...optionsToKeyArgs(options) }); },
       async performSecondaryAction(elementIndex, action) { await call("perform_secondary_action", { app, element_index: elementIndex, action }); },
@@ -427,7 +465,7 @@ export function createCuaApi(native, activeOutput) {
       await emitDocs();
       if (options.initialState !== false) {
         const result = await call("get_app_state", { app, text_limit: "max" });
-        await emitText(toolResultText(result));
+        await observe(app, toolResultText(result), { textLimit: "max" });
       }
       return appBinding(app);
     },
