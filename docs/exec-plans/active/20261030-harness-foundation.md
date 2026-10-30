@@ -19,6 +19,15 @@ Build an independent, open computer-use harness on the upstream runtime, using t
 3. Validate the new output diffs on real multi-window applications, especially native index changes and screenshot-only observations. Full output is available with `disableDiffing: true`.
 4. Add remaining input operations according to observed platform capabilities and test on real desktops. Document unsupported behavior clearly.
 
+## Viewport and screenshot phase
+
+Browser capability discovery now exposes a host-owned viewport set/reset lease.
+PNG/JPEG viewport, full-page and cropped captures have real Chrome checks at
+native 1× and forced 2×, including coordinate mapping, lease cleanup and observer
+failure recovery. See [viewport and screenshots](../../browser-viewport.md).
+Mixed-DPI hardware, zoom, headful/cross-platform and external-client behavior
+remain in the full parity audit; the broader goal and next steps stay active.
+
 ## Validation boundaries
 
 The first change has REPL mock coverage only. Browser discovery/lifecycle/observations were validated on a disposable macOS headless Chrome with a local HTML fixture, including Worker inventory failure isolation. Browser input was exercised on the same headless Chrome: Unicode, select-all replacement, multiline insertion, visible clicks, scroll feedback, and covered/stale index rejection; Worker input also passed. Real native desktop behavior, headful browser focus, Windows and Linux parity remain open. Do not infer capabilities from API shape alone.

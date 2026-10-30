@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { BrowserDownloads } from "./browser-downloads.mjs";
 import { BrowserClipboard } from "./browser-clipboard.mjs";
+import { BrowserViewport } from "./browser-viewport.mjs";
 
 import { AsyncLocalStorage } from "node:async_hooks";
 import { spawn } from "node:child_process";
@@ -12,7 +13,7 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { Worker } from "node:worker_threads";
 import { BrowserFocusLeases } from "./browser-playwright.mjs";
-import { BrowserConsoleLogs, BrowserDialogs, browserEndpoint, withConnection, createBrowserApi, updateBrowserFocus } from "./browser-cdp.mjs";
+import { BrowserConsoleLogs, BrowserDialogs, browserEndpoint, openConnection, withConnection, createBrowserApi, updateBrowserFocus } from "./browser-cdp.mjs";
 import { inspectConfig } from "./ocu-config.mjs";
 
 const require = createRequire(import.meta.url);
@@ -32,6 +33,7 @@ const HOST_BROWSER_FOCUS = new BrowserFocusLeases(updateBrowserFocus);
 const HOST_BROWSER_LOGS = new BrowserConsoleLogs();
 const HOST_BROWSER_DIALOGS = new BrowserDialogs();
 const HOST_BROWSER_CLIPBOARD = new BrowserClipboard(() => browserEndpoint(process.env)?.href,withConnection);
+const HOST_BROWSER_VIEWPORT = new BrowserViewport(() => browserEndpoint(process.env)?.href,openConnection,withConnection,()=>HOST_BROWSER_CLIPBOARD.internalTargets(),(owner,error)=>BROWSER_FAILURE_HANDLERS.get(owner)?.(error));
 
 const SERVER_INSTRUCTIONS = `UI automation through a persistent JavaScript REPL using the initialized cua API.
 
@@ -492,6 +494,7 @@ export function createCuaApi(native, activeOutput, onDispose) {
     logRequest: native.browserHost ? args => native.request("browser/logs",args) : undefined,
     dialogRequest: native.browserHost ? args => native.request("browser/dialog",args) : undefined,
     clipboardRequest: native.browserHost ? args => native.request("browser/clipboard",args) : undefined,
+    viewportRequest: native.browserHost ? args => native.request("browser/viewport",args) : undefined,
     onDispose,
   });
   const api = {
@@ -696,6 +699,7 @@ export class WorkerJavaScriptSession {
     this.browserLogs = HOST_BROWSER_LOGS;
     this.browserDialogs = HOST_BROWSER_DIALOGS;
     this.browserClipboard = HOST_BROWSER_CLIPBOARD;
+    this.browserViewport = HOST_BROWSER_VIEWPORT;
     this.stoppingWorkers = new WeakMap();
     this.#start();
   }
@@ -715,12 +719,13 @@ export class WorkerJavaScriptSession {
     if (!this.stoppingWorkers.has(worker)) {
       this.invalidatedWorkers.add(worker);
       this.browserClipboard.cancel(worker);
+      this.browserViewport.cancel(worker);
       for (const pending of this.pending.values()) if (pending.worker === worker) clearTimeout(pending.timer);
       this.native.endSession?.();
       this.stoppingWorkers.set(worker, (async () => {
         await worker.terminate();
         await this.browserDialogs.cleanup(worker);
-        const cleaned = await Promise.allSettled([this.browserFocusLeases.cleanup(worker),this.browserDownloads.cleanup(worker),this.browserLogs.cleanup(worker),this.browserClipboard.cleanup(worker)]);
+        const cleaned = await Promise.allSettled([this.browserFocusLeases.cleanup(worker),this.browserDownloads.cleanup(worker),this.browserLogs.cleanup(worker),this.browserClipboard.cleanup(worker),this.browserViewport.cleanup(worker)]);
         const failed = cleaned.find(result=>result.status === "rejected");
         if(failed) throw failed.reason;
         BROWSER_FAILURE_HANDLERS.delete(worker);
@@ -769,10 +774,11 @@ export class WorkerJavaScriptSession {
           else throw new Error("Unknown browser logs action");
         } else if(message.method === "browser/dialog") result = await this.browserDialogs.request(worker,message.params);
         else if(message.method === "browser/clipboard") result = await this.browserClipboard.request(worker,message.params);
+        else if(message.method === "browser/viewport") result = await this.browserViewport.request(worker,message.params);
         else result = await this.native.request(message.method, message.params, message.timeoutMs);
         if (this.worker === worker && !this.invalidatedWorkers.has(worker)) worker.postMessage({ type: "native_response", id: message.id, result });
       } catch (error) {
-        if (error?.browserCleanupFailed && ["browser/focus","browser/download","browser/dialog","browser/clipboard"].includes(message.method)) {
+        if (error?.browserCleanupFailed && ["browser/focus","browser/download","browser/dialog","browser/clipboard","browser/viewport"].includes(message.method)) {
           await this.#workerFailed(worker,error);
           return;
         }

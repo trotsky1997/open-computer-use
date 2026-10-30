@@ -1,14 +1,63 @@
 import { BrowserDownloads } from "./browser-downloads.mjs";
 import { BrowserClipboard } from "./browser-clipboard.mjs";
+import { BrowserViewport, VIEWPORT_DOCUMENTATION } from "./browser-viewport.mjs";
 import { createPlaywrightApi, waitForBrowserEventReady } from "./browser-playwright.mjs";
 import { format } from "node:util";
 
 export function screenshotPoint(point, image) {
   if (!Array.isArray(point) || point.length !== 2 || !point.every(Number.isFinite)) throw new Error("Coordinates must be two finite screenshot pixels");
   if (!image) throw new Error("No fresh screenshot; capture the tab before coordinate input");
+  if (image.coordinateInput === false) throw new Error("Full-page screenshots require a fresh viewport capture for coordinate input");
   const [x,y] = point;
   if (x < 0 || y < 0 || x >= image.width || y >= image.height) throw new Error("Coordinates are outside the screenshot");
-  return {x:x * image.viewport.clientWidth / image.width, y:y * image.viewport.clientHeight / image.height};
+  const region = image.region ?? {x:image.viewport.pageX ?? 0,y:image.viewport.pageY ?? 0,width:image.viewport.clientWidth,height:image.viewport.clientHeight};
+  const position = {x:region.x-(image.viewport.pageX ?? 0)+x*region.width/image.width,y:region.y-(image.viewport.pageY ?? 0)+y*region.height/image.height};
+  if (position.x < 0 || position.y < 0 || position.x >= image.viewport.clientWidth || position.y >= image.viewport.clientHeight) throw new Error("Screenshot point is outside the current viewport; scroll and capture again");
+  return position;
+}
+
+export function imageDimensions(bytes, format) {
+  let width, height;
+  if (format === "png") {
+    if (bytes.length < 24 || bytes.subarray(0,8).toString("hex") !== "89504e470d0a1a0a" || bytes.subarray(12,16).toString() !== "IHDR") throw new Error("Invalid screenshot PNG");
+    width=bytes.readUInt32BE(16);height=bytes.readUInt32BE(20);
+  } else {
+    if (bytes.length < 4 || bytes.readUInt16BE(0) !== 0xffd8 || bytes.readUInt16BE(bytes.length-2) !== 0xffd9) throw new Error("Invalid screenshot JPEG");
+    let offset = 2;
+    while (offset+4 <= bytes.length) {
+      if (bytes[offset++] !== 0xff) break;
+      while (bytes[offset] === 0xff) offset++;
+      const marker = bytes[offset++];
+      if (marker === 0xda || marker === 0xd9) break;
+      if (marker === 0x01 || marker >= 0xd0 && marker <= 0xd8) continue;
+      if (offset+2 > bytes.length) break;
+      const length = bytes.readUInt16BE(offset);
+      if (length < 2 || offset+length > bytes.length) break;
+      if ([0xc0,0xc1,0xc2,0xc3,0xc5,0xc6,0xc7,0xc9,0xca,0xcb,0xcd,0xce,0xcf].includes(marker) && length >= 8) {
+        height=bytes.readUInt16BE(offset+3);width=bytes.readUInt16BE(offset+5);break;
+      }
+      offset += length;
+    }
+  }
+  if (!width || !height || width*height > 100_000_000) throw new Error("Invalid or oversized screenshot dimensions");
+  return {width,height};
+}
+
+export function screenshotRegion(options, geometry) {
+  if (!options || typeof options !== "object" || Array.isArray(options)) throw new Error("screenshot expects an options object");
+  for (const key of Object.keys(options)) if (!["emit","fullPage","clip"].includes(key)) throw new Error(`Unknown screenshot option: ${key}`);
+  if (options.fullPage !== undefined && typeof options.fullPage !== "boolean" || options.emit !== undefined && typeof options.emit !== "boolean") throw new Error("Screenshot flags must be booleans");
+  const viewport = geometry.viewport;
+  const base = options.fullPage ? geometry.contentSize : {x:viewport.pageX,y:viewport.pageY,width:viewport.clientWidth,height:viewport.clientHeight};
+  let region = {...base};
+  if (options.clip !== undefined) {
+    const clip = options.clip;
+    if (!clip || typeof clip !== "object" || Array.isArray(clip) || Object.keys(clip).some(key=>!["x","y","width","height"].includes(key)) || ![clip.x,clip.y,clip.width,clip.height].every(Number.isFinite) || clip.x < 0 || clip.y < 0 || clip.width <= 0 || clip.height <= 0) throw new Error("Invalid screenshot clip rectangle");
+    if (clip.x+clip.width > base.width+1e-6 || clip.y+clip.height > base.height+1e-6) throw new Error("Screenshot clip is outside the capture area");
+    region = {x:base.x+clip.x,y:base.y+clip.y,width:clip.width,height:clip.height};
+  }
+  if (!Number.isFinite(region.width*region.height) || region.width <= 0 || region.height <= 0 || region.width*region.height > 100_000_000) throw new Error("Screenshot capture area exceeds 100 million CSS pixels");
+  return region;
 }
 
 export function keyEvent(key) {
@@ -97,7 +146,7 @@ function editText(operation, text, options) {
 
 const TIMEOUT = 10_000;
 
-async function openConnection(url, onEvent = () => {}, onClose = () => {}) {
+export async function openConnection(url, onEvent = () => {}, onClose = () => {}) {
   if (typeof WebSocket !== "function") throw new Error("CDP browser support requires Node.js 22 or newer");
   const socket = new WebSocket(url);
   const pending = new Map();
@@ -290,6 +339,11 @@ export class BrowserDialogs {
     return entry;
   }
   async request(owner, args) {
+    if (args?.action === "checkBrowser") {
+      const active = [...this.targets.values()].find(target=>target.endpoint === this.endpoint() && target.dialog);
+      if (active) throw new Error(`Resolve the active JavaScript dialog in tab ${active.targetId} first`);
+      return;
+    }
     if (args?.action === "start") return this.start(owner,args.targetId);
     if (args?.action === "stop") return this.stop(owner,args.targetId);
     if (args?.action === "wait" || args?.action === "end") {
@@ -416,7 +470,7 @@ export async function withConnection(url, operation) {
 
 const DOCUMENTATION = `## CDP browser
 Use cua.listTabs(), cua.getTab(id or {url}), and cua.createBrowserTab("cdp", url).
-Tab bindings expose getAXState(), getScreenshot(), getAXStateAndScreenshot(),
+Tab bindings expose getAXState(), getScreenshot(), getAXStateAndScreenshot(), screenshot(),
 goto(url), back(), forward(), reload(), and close(). Observations emit by default;
 pass {emit:false} to suppress output. AX state uses browser accessibility node IDs.
 Tab input: click(elementIndex, {mouseButton?, clickCount?}), typeText(elementIndexOrNull, text),
@@ -433,13 +487,19 @@ Navigation waits: tab.playwright.expectNavigation(async action, {url?,waitUntil?
 Playwright actions invalidate prior AX and screenshot indices. Read current state afterwards. File chooser events: start tab.playwright.waitForEvent("filechooser", {timeoutMs?}) before clicking, then await the handle and use isMultiple() / setFiles(absolutePaths, {timeoutMs?}). The file handle is one-shot. Downloads: start waitForEvent("download") before clicking, then await download.path({timeoutMs?}) for the completed local artifact.
 Developer logs: await tab.dev.logs({filter?,levels?,limit?}) returns chronological console entries with level/message/timestamp/url. Capture begins at tab binding, continues across calls/navigation, and ends on close/reset/timeout. Levels: debug/info/log/warn/error (warning aliases warn). Default limit 100; retained cap 1000 entries, each at most 16,384 UTF-16 code units. Objects use shallow CDP descriptions; no page getters are executed. Prior console history and out-of-process frame/worker logs are excluded.
 JavaScript dialogs: await tab.getJsDialog() returns undefined or a handle with type. alert/beforeunload support dismiss(); confirm supports accept()/dismiss(); prompt supports accept(text)/dismiss(). Actions return when they open a dialog; answer it before further page reads/input. Handles are scoped to the observed dialog and owning session. Reset/timeout/close dismiss owned active dialogs. Beforeunload dismiss cancels navigation. Created tabs attach observers before loading their URL. A dialog predating first binding may prevent CDP initialization.
-Clipboard: tab.clipboard.read()/readText()/write(items)/writeText(text) uses the browser native process clipboard. Items contain entries [{mimeType,text? ,base64?}] and optional presentationStyle. Exactly one payload per entry; native Chrome validates supported formats. Requires verified --headless / --headless=new plus --enable-automation and a browser that can reach the host loopback bridge. Browser clipboard state is shared across tabs/JS sessions and survives js_reset. Internal control tabs are hidden and cleaned up on reset/timeout/close. paste(index,text,{format:"text"|"html"}) writes the isolated clipboard and dispatches trusted native paste atomically; typeText remains clipboard-independent. Headful clipboard APIs fail explicitly.`;
+Clipboard: tab.clipboard.read()/readText()/write(items)/writeText(text) uses the browser native process clipboard. Items contain entries [{mimeType,text? ,base64?}] and optional presentationStyle. Exactly one payload per entry; native Chrome validates supported formats. Requires verified --headless / --headless=new plus --enable-automation and a browser that can reach the host loopback bridge. Browser clipboard state is shared across tabs/JS sessions and survives js_reset. Internal control tabs are hidden and cleaned up on reset/timeout/close. paste(index,text,{format:"text"|"html"}) writes the isolated clipboard and dispatches trusted native paste atomically; typeText remains clipboard-independent. Headful clipboard APIs fail explicitly.
+Browser capabilities: await browser.capabilities.list(), then get("viewport") and documentation(). viewport.set({width,height}) applies explicit CSS dimensions for responsive tasks; viewport.reset() returns to normal sizing. The host cleans temporary overrides on reset/timeout/close. Competing sessions fail explicitly. Use existing sizing during normal tasks.
+Screenshots: tab.screenshot({fullPage?,clip?}) returns JPEG bytes with no implicit output; use nodeRepl.emitImage(bytes). getScreenshot returns/emits PNG. clip uses CSS pixels relative to the viewport or full-page area. Pixel input maps cropped viewport images back to CSS; full-page images require a new viewport capture before input. Geometry and viewport-revision changes invalidate capture coordinates.`;
 
-export function createBrowserApi(activeOutput, environment = process.env, {focusLease, downloadRequest, logRequest, dialogRequest, clipboardRequest, onDispose = () => {}} = {}) {
+export function createBrowserApi(activeOutput, environment = process.env, {focusLease, downloadRequest, logRequest, dialogRequest, clipboardRequest, viewportRequest, onDispose = () => {}} = {}) {
   const clipboard = clipboardRequest ? undefined : new BrowserClipboard(() => endpoint()?.href,withConnection);
   const clipboardOwner = {};
   if (clipboard) onDispose(() => clipboard.cleanup(clipboardOwner));
   const requestClipboard = clipboardRequest ?? (args => clipboard.request(clipboardOwner,args));
+  const viewport = viewportRequest ? undefined : new BrowserViewport(() => endpoint()?.href,openConnection,withConnection,()=>requestClipboard({method:"targets"}));
+  const viewportOwner = {};
+  if (viewport) onDispose(() => viewport.cleanup(viewportOwner));
+  const requestViewport = viewportRequest ?? (args => viewport.request(viewportOwner,args));
   const dialogs = dialogRequest ? undefined : new BrowserDialogs(() => endpoint()?.href);
   const dialogOwner = {};
   if (dialogs) onDispose(() => dialogs.cleanup(dialogOwner));
@@ -500,6 +560,7 @@ export function createBrowserApi(activeOutput, environment = process.env, {focus
       const current = (await targets()).find(item => item.id === target.id);
       if (!current) throw new Error("Tab closed or no longer available");
       await checkDialog(target.id);
+      await requestViewport({action:"sync",targetId:target.id});
       try { return await withConnection(current.webSocketDebuggerUrl, operation); }
       catch (error) { invalidate(); throw error; }
     };
@@ -513,7 +574,7 @@ export function createBrowserApi(activeOutput, environment = process.env, {focus
       const frame = (await send("Page.getFrameTree")).frameTree.frame;
       const metrics = await send("Page.getLayoutMetrics");
       const viewport = metrics.cssVisualViewport;
-      return {loaderId:frame.loaderId, viewport};
+      return {loaderId:frame.loaderId, viewport,contentSize:metrics.cssContentSize,viewportRevision:await requestViewport({action:"state"})};
     }
     async function coordinate(send, value) {
       const position = screenshotPoint(value, capture);
@@ -535,21 +596,22 @@ export function createBrowserApi(activeOutput, environment = process.env, {focus
       if (options.emit !== false) activeOutput().write(state, "cua.state");
       return state;
     }
-    async function screenshot(options = {}) {
+    async function screenshot(options = {}, format = "png", emit = true) {
       invalidate();
       const {bytes, image} = await operate(async send => {
         const before = await geometry(send);
-        const result = await send("Page.captureScreenshot", {format:"png", captureBeyondViewport:false, clip:{x:before.viewport.pageX,y:before.viewport.pageY,width:before.viewport.clientWidth,height:before.viewport.clientHeight,scale:1}});
+        const region = screenshotRegion(options,before);
+        const params = {format,...(format === "jpeg" ? {quality:90} : {}), captureBeyondViewport:options.fullPage === true, clip:{...region,scale:1}};
+        const result = await requestViewport({action:"capture",targetId:target.id,params}) ?? await send("Page.captureScreenshot",params);
         const after = await geometry(send);
         if (JSON.stringify(before) !== JSON.stringify(after)) throw new Error("Page changed during screenshot; capture again");
         const bytes = Buffer.from(result.data, "base64");
-        if (bytes.length < 24 || bytes.subarray(1,4).toString() !== "PNG") throw new Error("Invalid screenshot PNG");
-        const image = {width:bytes.readUInt32BE(16), height:bytes.readUInt32BE(20), viewport:after.viewport, geometry:JSON.stringify(after)};
-        if (!image.width || !image.height) throw new Error("Invalid screenshot dimensions");
+        if (bytes.length > 20*1024*1024) throw new Error("Screenshot exceeds 20 MiB");
+        const image = {...imageDimensions(bytes,format),region,coordinateInput:options.fullPage !== true,viewport:after.viewport,geometry:JSON.stringify(after)};
         return {bytes, image};
       });
       capture = image;
-      if (options.emit !== false) await activeOutput().emitImage({ bytes, mimeType: "image/png" });
+      if (options.emit ?? emit) await activeOutput().emitImage({ bytes, mimeType: `image/${format}` });
       return bytes;
     }
     async function element(send, index) {
@@ -612,6 +674,7 @@ export function createBrowserApi(activeOutput, environment = process.env, {focus
       },
       getAXState: ax,
       getScreenshot: screenshot,
+      screenshot: (options = {}) => screenshot(options,"jpeg",false),
       async getAXStateAndScreenshot(options = {}) {
         const image = await screenshot(options);
         return { state: await ax(options), screenshot: image };
@@ -734,6 +797,7 @@ export function createBrowserApi(activeOutput, environment = process.env, {focus
     }
   }
   async function prepare(target) {
+    await requestViewport({action:"sync",targetId:target.id});
     await requestDialog({action:"start",targetId:target.id});
     if (!await requestDialog({action:"state",targetId:target.id})) await requestLogs({action:"start",targetId:target.id});
     return bind(target);
@@ -772,7 +836,17 @@ export function createBrowserApi(activeOutput, environment = process.env, {focus
       }
       await json("/json/version");
       activeOutput().write(DOCUMENTATION, "cua.browser");
-      return Object.freeze({ browserId: "cdp", async documentation() { return DOCUMENTATION; } });
+      return Object.freeze({ browserId: "cdp", async documentation() { return DOCUMENTATION; },capabilities:Object.freeze({
+        list:()=>requestViewport({action:"capabilities"}),
+        async get(id) {
+          const capabilities = await requestViewport({action:"capabilities"});
+          if (!capabilities.some(capability=>capability.id===id)) throw new Error(`Unsupported browser capability: ${id}`);
+          return Object.freeze({documentation:async()=>VIEWPORT_DOCUMENTATION,
+            async set(options) {await requestDialog({action:"checkBrowser"});return requestViewport({action:"set",options});},
+            async reset() {await requestDialog({action:"checkBrowser"});return requestViewport({action:"reset"});},
+          });
+        },
+      }) });
     },
     async getTab(reference, options = {}) {
       checkBrowser(options);

@@ -1,8 +1,24 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { BrowserConsoleLogs, createBrowserApi, keyEvent, screenshotPoint } from "./browser-cdp.mjs";
+import { BrowserConsoleLogs, createBrowserApi, keyEvent, screenshotPoint, screenshotRegion, imageDimensions } from "./browser-cdp.mjs";
 import { createCuaApi } from "./open-computer-use-repl.mjs";
 const output = () => ({ write() {}, async emitImage() {} });
+
+test("screenshot clips map CSS regions and reject malformed or oversized requests", () => {
+  const geometry = {viewport:{pageX:100,pageY:200,clientWidth:800,clientHeight:600},contentSize:{x:0,y:0,width:1500,height:1800}};
+  assert.deepEqual(screenshotRegion({clip:{x:20,y:30,width:200,height:100}},geometry),{x:120,y:230,width:200,height:100});
+  assert.deepEqual(screenshotRegion({fullPage:true},geometry),geometry.contentSize);
+  for (const options of [null,[],{unknown:true},{fullPage:1},{clip:{x:0,y:0,width:0,height:2}},{clip:{x:799,y:0,width:2,height:2}},{clip:{x:0,y:0,width:Infinity,height:1}}]) assert.throws(()=>screenshotRegion(options,geometry),/screenshot|Screenshot|capture/);
+  assert.throws(()=>screenshotRegion({fullPage:true},{...geometry,contentSize:{width:1e6,height:1e6}}),/100 million/);
+  const image = {width:400,height:200,viewport:geometry.viewport,region:{x:120,y:230,width:200,height:100}};
+  assert.deepEqual(screenshotPoint([200,100],image),{x:120,y:80});
+  assert.throws(()=>screenshotPoint([0,0],{...image,coordinateInput:false}),/Full-page/);
+});
+
+test("screenshot metadata rejects truncated PNG and JPEG headers", () => {
+  for (const bytes of [Buffer.alloc(0),Buffer.from([0xff,0xd8,0xff,0xd9]),Buffer.from([0xff,0xd8,0xff,0xc0,0xff,0xff,0xff,0xd9])]) assert.throws(()=>imageDimensions(bytes,"jpeg"),/Invalid/);
+  assert.throws(()=>imageDimensions(Buffer.alloc(24),"png"),/Invalid screenshot PNG/);
+});
 
 test("console log options reject malformed filters, levels, bounds and unknown fields", async () => {
   const logs = new BrowserConsoleLogs();

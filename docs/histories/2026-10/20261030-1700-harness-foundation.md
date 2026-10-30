@@ -253,3 +253,31 @@ plain-text hash stayed unchanged without printing its contents. Existing browser
 download, dialog, console and native-free CLI/MCP smokes passed. Headful/CfT
 isolation detection, remote bridge access, incognito concurrency, native app paste,
 host crashes and Linux/Windows coverage remain open.
+
+Browser capability discovery now exposes viewport set/reset when the CDP schema
+has sizing, capture and target-discovery methods. The host leases metrics by
+origin, owns discovery and per-page agents, applies narrow/portrait sizes to
+existing and new tabs/windows, and clears overrides on reset/timeout/close.
+Native window minimum widths led to choosing device metrics, preserving native
+DPR and desktop layout without changing window bounds. Screenshot operations
+share the metrics-owning agent: separate agents otherwise restore cached default
+sizes. A rendered frame commits both sizing and restoration before returning.
+Observer loss recovers the idle Worker; cleanup failure retains ownership for retry.
+
+New screenshot({fullPage,clip}) returns JPEG bytes without implicit output. PNG
+observations use the same validated region pipeline. Header dimensions and CSS
+origins map viewport crops back to pointer coordinates; document/viewport/scroll
+checks plus a host revision invalidate stale captures, including resize-back
+cycles. Full-page captures require a fresh viewport image before pixel input.
+Encoding/capture bounds fail explicitly. Packaging/capability file checks include
+browser-viewport.mjs, and the new focused viewport document records API and limits.
+
+All 72 Node checks passed, including schema/argument/header/region boundaries and
+cleanup ordering. Real macOS headless Chrome passed at native 1x and forced 2x:
+responsive sizing, portrait dimensions, tabs before navigation, external windows
+before binding, JPEG emission, full-page/crop dimensions, scrolled crop clicks,
+stale capture rejection, lease contention, clipboard integration, reset/timeout/
+close, cleanup failure/retry and idle observer disconnect recovery. Existing
+browser, download, dialog, console, clipboard and native-free CLI/MCP smokes passed.
+Mixed-DPI hardware, browser zoom, headful/Linux/Windows behavior, external-client
+emulation, external-page initial script timing and host crash recovery remain open.

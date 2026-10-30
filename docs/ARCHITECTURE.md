@@ -299,3 +299,12 @@ queue, with document-loader validation. Canceled queued calls never reach the
 browser, and started work settles before teardown. Internal target IDs are shared
 within the host for inventory filtering. Packaging includes the new controller;
 ordinary headed clipboards are rejected until isolation can be verified.
+
+BrowserViewport advertises the supported viewport capability and leases metrics
+overrides by debugging origin. Root discovery and persistent page agents apply
+CSS sizes to existing/new pages while preserving native DPR. Captures share those
+agents to preserve their cached emulation; cleanup commits the restored frame,
+closes observers and gates reuse on success. Viewport revisions invalidate old
+coordinate captures across set/reset cycles. PNG/JPEG regions carry actual raster
+sizes and CSS origins; full-page output is inspection-only for pixel input.
+See [viewport and screenshots](browser-viewport.md) for API and evidence.
