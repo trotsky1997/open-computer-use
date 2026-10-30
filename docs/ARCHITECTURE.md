@@ -219,3 +219,9 @@ CDP text editing supports native control value setters and DOM ranges for
 contenteditable elements. Text selection uses exact matching and optional
 adjacent context, then verifies range offsets and unchanged text. See the
 browser provider contract for Unicode, cursor placement and supported controls.
+
+CDP coordinate input retains screenshot pixel dimensions and document/viewport
+geometry, revalidates geometry before dispatch and consumes the snapshot after
+input. Pixel pairs are mapped to CSS coordinates; pointer drags release the mouse
+in a finally block. The browser smoke covers pointer widgets and independent
+binding geometry invalidation; HTML drag-and-drop payloads remain open.

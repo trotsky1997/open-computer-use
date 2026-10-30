@@ -1,3 +1,11 @@
+export function screenshotPoint(point, image) {
+  if (!Array.isArray(point) || point.length !== 2 || !point.every(Number.isFinite)) throw new Error("Coordinates must be two finite screenshot pixels");
+  if (!image) throw new Error("No fresh screenshot; capture the tab before coordinate input");
+  const [x,y] = point;
+  if (x < 0 || y < 0 || x >= image.width || y >= image.height) throw new Error("Coordinates are outside the screenshot");
+  return {x:x * image.viewport.clientWidth / image.width, y:y * image.viewport.clientHeight / image.height};
+}
+
 export function keyEvent(key) {
   if (typeof key !== "string" || !key) throw new Error("pressKey requires a key");
   const parts = key.split("+");
@@ -139,7 +147,8 @@ pressKey(elementIndexOrNull, key), paste(elementIndexOrNull, text, {format:"text
 and scroll(elementIndex, direction, pages). Read fresh AX state after actions.
 Screenshot-only reads invalidate element indices. Navigation invalidates all indices.
 setValue(elementIndex, value) replaces editable text; selectText(elementIndex, text, {prefix?,suffix?,selectionType?}) selects exact text or positions the cursor.
-Playwright locators, formatted paste and coordinate actions remain unsupported.`;
+click and scroll also accept screenshot pixel pairs. drag(fromPixelPair, toPixelPair) performs a pointer drag. Capture a new screenshot after input; changed document or viewport geometry invalidates coordinates. Pinch zoom is unsupported.
+Playwright locators and formatted paste remain unsupported.`;
 
 export function createBrowserApi(activeOutput, environment = process.env) {
   function endpoint() {
@@ -171,8 +180,8 @@ export function createBrowserApi(activeOutput, environment = process.env) {
     return withConnection(version.webSocketDebuggerUrl, send => send(method, params));
   }
   function bind(target) {
-    let elements = new Map(), documentId;
-    const invalidate = () => { elements.clear(); documentId = undefined; };
+    let elements = new Map(), documentId, capture;
+    const invalidate = () => { elements.clear(); documentId = undefined; capture = undefined; };
     const operate = async operation => {
       const current = (await targets()).find(item => item.id === target.id);
       if (!current) throw new Error("Tab closed or no longer available");
@@ -180,6 +189,22 @@ export function createBrowserApi(activeOutput, environment = process.env) {
       catch (error) { invalidate(); throw error; }
     };
     const command = (method, params) => operate(send => send(method, params));
+    const input = operation => operate(async send => {
+      try { return await operation(send); }
+      finally { capture = undefined; }
+    });
+    async function geometry(send) {
+      const frame = (await send("Page.getFrameTree")).frameTree.frame;
+      const metrics = await send("Page.getLayoutMetrics");
+      const viewport = metrics.cssVisualViewport;
+      return {loaderId:frame.loaderId, viewport};
+    }
+    async function coordinate(send, value) {
+      const position = screenshotPoint(value, capture);
+      if (capture.viewport.scale !== 1 || capture.viewport.offsetX !== 0 || capture.viewport.offsetY !== 0) throw new Error("Pinch-zoom coordinate input is unsupported");
+      if (JSON.stringify(await geometry(send)) !== capture.geometry) throw new Error("Screenshot geometry changed; capture the tab again");
+      return position;
+    }
     async function ax(options = {}) {
       const result = await operate(async send => {
         const before = (await send("Page.getFrameTree")).frameTree.frame;
@@ -196,8 +221,18 @@ export function createBrowserApi(activeOutput, environment = process.env) {
     }
     async function screenshot(options = {}) {
       invalidate();
-      const result = await command("Page.captureScreenshot", { format: "png" });
-      const bytes = Buffer.from(result.data, "base64");
+      const {bytes, image} = await operate(async send => {
+        const before = await geometry(send);
+        const result = await send("Page.captureScreenshot", {format:"png", captureBeyondViewport:false, clip:{x:before.viewport.pageX,y:before.viewport.pageY,width:before.viewport.clientWidth,height:before.viewport.clientHeight,scale:1}});
+        const after = await geometry(send);
+        if (JSON.stringify(before) !== JSON.stringify(after)) throw new Error("Page changed during screenshot; capture again");
+        const bytes = Buffer.from(result.data, "base64");
+        if (bytes.length < 24 || bytes.subarray(1,4).toString() !== "PNG") throw new Error("Invalid screenshot PNG");
+        const image = {width:bytes.readUInt32BE(16), height:bytes.readUInt32BE(20), viewport:after.viewport, geometry:JSON.stringify(after)};
+        if (!image.width || !image.height) throw new Error("Invalid screenshot dimensions");
+        return {bytes, image};
+      });
+      capture = image;
       if (options.emit !== false) await activeOutput().emitImage({ bytes, mimeType: "image/png" });
       return bytes;
     }
@@ -215,6 +250,7 @@ export function createBrowserApi(activeOutput, environment = process.env) {
       if (index !== null) await send("DOM.focus", { backendNodeId: await element(send, index) });
     }
     async function point(send, index) {
+      if (Array.isArray(index)) return coordinate(send, index);
       const backendNodeId = await element(send, index);
       await send("DOM.scrollIntoViewIfNeeded", { backendNodeId });
       const { object } = await send("DOM.resolveNode", { backendNodeId });
@@ -231,7 +267,7 @@ export function createBrowserApi(activeOutput, environment = process.env) {
       return result.result.value;
     }
     async function edit(index, operation, text, options = {}) {
-      await operate(async send => {
+      await input(async send => {
         const backendNodeId = await element(send, index);
         const {object} = await send("DOM.resolveNode", {backendNodeId});
         const result = await send("Runtime.callFunctionOn", {objectId:object.objectId,
@@ -252,11 +288,26 @@ export function createBrowserApi(activeOutput, environment = process.env) {
         const button = ({l:"left",r:"right",m:"middle"})[options.mouseButton] ?? options.mouseButton ?? "left";
         const clickCount = options.clickCount ?? 1;
         if (!["left", "right", "middle"].includes(button) || !Number.isInteger(clickCount) || clickCount < 1 || clickCount > 3) throw new Error("Invalid click button or count");
-        await operate(async send => {
+        await input(async send => {
           const position = await point(send, index);
           for (let count = 1; count <= clickCount; count++) {
             await send("Input.dispatchMouseEvent", {type:"mousePressed", ...position, button, clickCount:count});
             await send("Input.dispatchMouseEvent", {type:"mouseReleased", ...position, button, clickCount:count});
+          }
+        });
+      },
+      async drag(from, to) {
+        if (!Array.isArray(from) || !Array.isArray(to)) throw new Error("drag requires screenshot coordinate pairs");
+        await input(async send => {
+          const start = await coordinate(send, from), end = await coordinate(send, to);
+          await send("Input.dispatchMouseEvent", {type:"mouseMoved", ...start});
+          await send("Input.dispatchMouseEvent", {type:"mousePressed", ...start, button:"left", buttons:1, clickCount:1});
+          try {
+            for (let step=1; step<=12; step++) {
+              await send("Input.dispatchMouseEvent", {type:"mouseMoved", x:start.x+(end.x-start.x)*step/12, y:start.y+(end.y-start.y)*step/12, button:"left", buttons:1});
+            }
+          } finally {
+            await send("Input.dispatchMouseEvent", {type:"mouseReleased", ...end, button:"left", buttons:0, clickCount:1});
           }
         });
       },
@@ -276,16 +327,16 @@ export function createBrowserApi(activeOutput, environment = process.env) {
       },
       async typeText(index, text) {
         if (typeof text !== "string") throw new Error("typeText requires text");
-        await operate(async send => { await focus(send, index); await send("Input.insertText", {text}); });
+        await input(async send => { await focus(send, index); await send("Input.insertText", {text}); });
       },
       async paste(index, text, options = {}) {
         if (Object.keys(options).some(key => key !== "format") || (options.format !== undefined && options.format !== "text")) throw new Error("CDP paste currently supports text format only");
         if (typeof text !== "string") throw new Error("paste requires text");
-        await operate(async send => { await focus(send, index); await send("Input.insertText", {text}); });
+        await input(async send => { await focus(send, index); await send("Input.insertText", {text}); });
       },
       async pressKey(index, key) {
         const event = keyEvent(key);
-        await operate(async send => {
+        await input(async send => {
           await focus(send, index);
           await send("Input.dispatchKeyEvent", {type:event.text ? "keyDown" : "rawKeyDown", ...event});
           await send("Input.dispatchKeyEvent", {type:"keyUp", ...event, text:undefined, commands:undefined, modifiers:0});
@@ -294,20 +345,26 @@ export function createBrowserApi(activeOutput, environment = process.env) {
       async scroll(index, direction, pages = 1) {
         const vectors = {up:[0,-1],down:[0,1],left:[-1,0],right:[1,0],u:[0,-1],d:[0,1],l:[-1,0],r:[1,0]};
         if (!vectors[direction] || !Number.isFinite(pages) || pages <= 0) throw new Error("Invalid scroll direction or pages");
-        await operate(async send => {
-          const backendNodeId = await element(send, index);
+        await input(async send => {
+          let backendNodeId;
+          if (Array.isArray(index)) {
+            const position = await coordinate(send, index);
+            const hit = await send("DOM.getNodeForLocation", {x:Math.floor(position.x), y:Math.floor(position.y)});
+            backendNodeId = hit.backendNodeId;
+          } else backendNodeId = await element(send, index);
           const {object} = await send("DOM.resolveNode", {backendNodeId});
           const [x,y] = vectors[direction];
           const result = await send("Runtime.callFunctionOn", {objectId:object.objectId, arguments:[{value:x},{value:y},{value:pages}],
             functionDeclaration:`function(x,y,pages) {
-              let target = this;
-              while (target && target !== this.ownerDocument.scrollingElement) {
+              const document = this.nodeType === 9 ? this : this.ownerDocument;
+              let target = this.nodeType === 1 ? this : this.parentElement;
+              while (target && target !== document.scrollingElement) {
                 const style = getComputedStyle(target);
                 const axis = x ? style.overflowX : style.overflowY;
                 if (/(auto|scroll|overlay)/.test(axis) && (x ? target.scrollWidth > target.clientWidth : target.scrollHeight > target.clientHeight)) break;
                 target = target.parentElement;
               }
-              target ??= this.ownerDocument.scrollingElement;
+              target ??= document.scrollingElement;
               if (!target || !this.isConnected) throw new Error("Scroll target unavailable");
               target.scrollBy({left:x*target.clientWidth*pages,top:y*target.clientHeight*pages,behavior:"instant"});
             }`});

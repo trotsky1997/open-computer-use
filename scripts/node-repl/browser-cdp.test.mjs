@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createBrowserApi, keyEvent } from "./browser-cdp.mjs";
+import { createBrowserApi, keyEvent, screenshotPoint } from "./browser-cdp.mjs";
 import { createCuaApi } from "./open-computer-use-repl.mjs";
 const output = () => ({ write() {}, async emitImage() {} });
 
@@ -43,4 +43,14 @@ test("keyboard events preserve modifiers, text, Unicode and reject unknown chord
   assert.throws(() => keyEvent("hyper+a"), /Unsupported key modifier/);
   assert.throws(() => keyEvent("Unknown"), /Unsupported key/);
   if (process.platform === "darwin") assert.deepEqual(keyEvent("meta+a").commands, ["selectAll"]);
+});
+
+
+test("screenshot coordinates scale from device pixels and reject invalid targets", () => {
+  const image = {width:1600,height:1200,viewport:{clientWidth:800,clientHeight:600}};
+  assert.deepEqual(screenshotPoint([800,600], image), {x:400,y:300});
+  assert.throws(() => screenshotPoint([0,0]), /fresh screenshot/);
+  for (const point of [[-1,0],[1600,0],[0,1200],[NaN,1],[1],[1,2,3],"1,2"]) {
+    assert.throws(() => screenshotPoint(point,image), /Coordinates/);
+  }
 });

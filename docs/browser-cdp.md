@@ -70,7 +70,21 @@ range and unchanged text are verified before success. Read fresh AX state after
 an error before reusing element indices. Contenteditable text matching follows
 DOM textContent; structural line breaks require matching the actual DOM text.
 
-Playwright locators, drag, formatted paste, coordinate actions,
+Coordinate `click([x,y])` and `scroll([x,y], direction, pages)` use pixel
+coordinates from the most recent screenshot. `drag([fromX,fromY], [toX,toY])`
+performs a left-button pointer drag with interpolated movement and releases the
+button in a finally block. Each input operation consumes the coordinate snapshot;
+capture again before the next coordinate action. Screenshot pixels are scaled to
+CSS viewport coordinates. Navigation, scrolling, viewport geometry changes and
+native errors require a new screenshot. Input checks loader and viewport geometry
+before dispatch, including changes made through another binding. Pinch-zoom input
+fails explicitly; screenshots remain available. Browser pointer operations stay
+inside the CDP target and do not move the system pointer. Layout/content changes
+that preserve loader and viewport geometry still require the agent to verify the
+latest observed UI.
+
+Pointer-widget dragging is verified. HTML drag-and-drop with DataTransfer payloads
+remains open, along with Playwright locators, formatted paste,
 extension transports and in-app browser integration remain open work. Native app bindings retain their existing input methods.
 
 `cua.getState()` returns `{apps, browsers, errors?}`; browsers contain their tabs.
@@ -93,8 +107,9 @@ OPEN_COMPUTER_USE_CDP_URL=http://127.0.0.1:9222 node scripts/run-browser-smoke.m
 The smoke runner serves a local HTML fixture, creates and closes its own tab,
 checks AX and PNG output, exercises click/type/key/paste/scroll and history/reload,
 checks exact selection, repeated-text disambiguation, cursor placement, multiline
-Unicode replacement and cross-node contenteditable selection, rejects covered,
-stale or read-only targets, and verifies browser inventory and input
+Unicode replacement and cross-node contenteditable selection, checks screenshot coordinate clicks, pointer-widget drag, coordinate scroll and
+geometry changes through another binding; rejects covered,
+stale, out-of-bounds or read-only targets, and verifies browser inventory and input
 through a Worker while native app discovery fails. It leaves existing
 tabs intact. This was exercised with headless Chrome on macOS; other platforms
 and headful browser focus behavior remain unverified.

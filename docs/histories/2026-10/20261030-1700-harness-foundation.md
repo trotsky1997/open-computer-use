@@ -57,3 +57,18 @@ also exercises setValue and selectText. All 56 Node checks and the extended real
 browser smoke passed. Structural contenteditable line breaks and untrusted
 application event behavior remain documented limits; no cross-platform claim is
 made from this macOS run.
+
+CDP pointer input now supports screenshot pixel click/scroll and left-button drag.
+Screenshots retain PNG dimensions and loader/viewport geometry. Coordinate input
+checks those values, scales pixels to CSS coordinates, rejects invalid bounds,
+and consumes the coordinate snapshot after input. Independent-binding scroll
+changes are detected. Pointer release is attempted in a finally block. AX-only
+input remains independent of screenshot coordinates. Pinch-zoom input is explicitly
+unsupported; screenshot capture remains available.
+
+Two real Chrome smoke runs passed coordinate click, pointer-widget drag, coordinate
+scroll, missing/out-of-bounds screenshot rejection and independent-binding geometry
+invalidation. A focused check covers device-pixel scaling and invalid pairs. All
+57 Node checks passed. The smoke cleanup closes leftover local HTTP connections.
+HTML drag-and-drop payloads, real high-DPI/zoom coverage, headful focus and other
+platforms remain unverified.

@@ -3,7 +3,12 @@ import { createServer } from 'node:http';
 import { createBrowserApi } from './node-repl/browser-cdp.mjs';
 import { WorkerJavaScriptSession } from './node-repl/open-computer-use-repl.mjs';
 if (!process.env.OPEN_COMPUTER_USE_CDP_URL) throw new Error('Set OPEN_COMPUTER_USE_CDP_URL to a disposable browser debugging origin');
-const server = createServer((req, res) => {res.setHeader('Content-Type', 'text/html'); res.end(`<html><title>OCU ${req.url}</title><body><h1>Browser harness ${req.url}</h1><label>Name<input aria-label="Name"></label><textarea aria-label="Notes"></textarea><div contenteditable="true" role="textbox" aria-label="Rich"><span>head tar</span><b>get tail</b></div><input aria-label="Read only" readonly value="original"><button onclick="this.textContent='Clicked'">Test button</button><div role="region" aria-label="Scroll area" tabindex="0" style="height:100px;overflow:auto" onscroll="document.getElementById('scroll-state').textContent='Scrolled'"><p style="height:1800px">Long content</p></div><p id="scroll-state">Not scrolled</p><div style="position:relative;width:100px;height:40px"><button>Covered button</button><div style="position:absolute;inset:0"></div></div></body></html>`);});
+const server = createServer((req, res) => {res.setHeader('Content-Type', 'text/html');
+if (req.url === '/pointer') {
+  res.end(`<html><body style="margin:0;min-height:2000px"><p id="viewport-width" style="position:absolute;left:300px;top:20px"></p><button style="position:absolute;left:20px;top:20px;width:100px;height:40px" onclick="this.textContent='Coordinate clicked'">Coordinate button</button><div role="slider" aria-label="Drag area" style="position:absolute;left:20px;top:100px;width:240px;height:60px;background:lightblue" onmousedown="window.dragging=true">Drag here</div><p id="drag-state" style="position:absolute;left:300px;top:100px">Not dragged</p><div role="region" aria-label="Coordinate scroll" style="position:absolute;left:20px;top:220px;width:240px;height:100px;overflow:auto" onscroll="document.getElementById('scroll-feedback').textContent='Coordinate scrolled'"><p style="height:1500px">Long content</p></div><p id="scroll-feedback" style="position:absolute;left:300px;top:220px">Not scrolled</p><script>document.getElementById("viewport-width").textContent="Viewport width "+innerWidth;window.onmousemove=e=>{if(window.dragging&&e.buttons===1)document.getElementById('drag-state').textContent='Dragged '+e.clientX};window.onmouseup=()=>{window.dragging=false}</script></body></html>`);
+  return;
+}
+ res.end(`<html><title>OCU ${req.url}</title><body><h1>Browser harness ${req.url}</h1><label>Name<input aria-label="Name"></label><textarea aria-label="Notes"></textarea><div contenteditable="true" role="textbox" aria-label="Rich"><span>head tar</span><b>get tail</b></div><input aria-label="Read only" readonly value="original"><button onclick="this.textContent='Clicked'">Test button</button><div role="region" aria-label="Scroll area" tabindex="0" style="height:100px;overflow:auto" onscroll="document.getElementById('scroll-state').textContent='Scrolled'"><p style="height:1800px">Long content</p></div><p id="scroll-state">Not scrolled</p><div style="position:relative;width:100px;height:40px"><button>Covered button</button><div style="position:absolute;inset:0"></div></div></body></html>`);});
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const api = createBrowserApi(() => ({write() {}, async emitImage() {}}));
 let tab;
@@ -95,10 +100,38 @@ try {
     assert.equal(typed.isError, false, JSON.stringify(typed.content));
     assert.ok(typed.content.some(item => item.text?.includes('value="Worker input verified"')));
   } finally {await session.close();}
+  await tab.goto(url.replace('/first','/pointer'));
+  await assert.rejects(tab.click([50,40]), /fresh screenshot/);
+  const pointerImage = await tab.getScreenshot({emit:false});
+  const pointerState = await tab.getAXState({emit:false});
+  const width = Number(pointerState.match(/Viewport width (\d+)/)[1]);
+  const scale = pointerImage.readUInt32BE(16) / width;
+  const pixel = (x,y) => [x*scale,y*scale];
+  await tab.click(pixel(50,40));
+  assert.match(await tab.getAXState({emit:false}), /Coordinate clicked/);
+  await assert.rejects(tab.click(pixel(50,40)), /fresh screenshot/);
+  await tab.getScreenshot({emit:false});
+  await tab.drag(pixel(50,130),pixel(220,130));
+  assert.match(await tab.getAXState({emit:false}), /Dragged 220/);
+  await tab.getScreenshot({emit:false});
+  await tab.scroll(pixel(50,250), 'down', 1);
+  for (let i=0;i<20;i++) {
+    state = (await tab.getAXStateAndScreenshot({emit:false})).state;
+    if(state.includes('Coordinate scrolled')) break;
+  }
+  assert.match(state, /Coordinate scrolled/);
+  await tab.getScreenshot({emit:false});
+  await assert.rejects(tab.click([-1,20]), /outside the screenshot/);
+  const alias = await api.getTab(tab.id);
+  const aliasState = await alias.getAXState({emit:false});
+  await tab.getScreenshot({emit:false});
+  await alias.scroll(find(aliasState, 'RootWebArea', ''), 'down', 0.2);
+  await assert.rejects(tab.click(pixel(50,40)), /geometry changed/);
   await tab.close();
   await assert.rejects(tab.getAXState(), /no longer available/);
-  console.log('PASS browser inventory, create/bind, AX, PNG, click/type/key/paste/scroll/setValue/selectText, stale-index rejection, navigation/history/reload, close, worker inventory failure isolation');
+  console.log('PASS browser inventory, create/bind, AX, PNG, click/type/key/paste/scroll/setValue/selectText/coordinate-click/drag/scroll, stale-index rejection, navigation/history/reload, close, worker inventory failure isolation');
 } finally {
   if (tab && (await api.listTabs({emit:false})).some(item=>item.id===tab.id)) await tab.close();
+  server.closeAllConnections();
   await new Promise(resolve => server.close(resolve));
 }
