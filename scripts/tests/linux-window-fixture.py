@@ -10,11 +10,11 @@ root = os.environ['OCU_WINDOW_FIXTURE_ROOT']
 name = os.environ['OCU_WINDOW_FIXTURE_NAME']
 GLib.set_prgname(name)
 GLib.set_application_name(name)
-windows, entries, notes = {}, {}, {}
+windows, entries, notes, keys = {}, {}, {}, {}
 
 def state(*_args):
     with open(root + '/state.tmp', 'w', encoding='utf-8') as output:
-        json.dump({'pid': os.getpid(), 'windows': list(windows),
+        json.dump({'pid': os.getpid(), 'windows': list(windows), 'keys': keys,
                    'values': {key: entry.get_text() for key, entry in entries.items()},
                    'carets': {key: entry.get_position() for key, entry in entries.items()},
                    'focused': {key: entry.has_focus() for key, entry in entries.items()},
@@ -51,13 +51,31 @@ def create(key, value):
         entries[key].grab_focus()
         entries[key].set_position(-1)
         window.get_window().focus(Gdk.CURRENT_TIME)
+    keys[key] = {'press': [], 'release': []}
+    key_area = Gtk.DrawingArea()
+    key_area.set_can_focus(True)
+    key_area.add_events(Gdk.EventMask.KEY_PRESS_MASK | Gdk.EventMask.KEY_RELEASE_MASK)
+    key_area.set_size_request(100, 24)
+    key_area.get_accessible().set_name('Key surface ' + key)
+    def record_key(_area, event, kind):
+        value = Gdk.keyval_to_unicode(event.keyval)
+        keys[key][kind].append(chr(value) if value else Gdk.keyval_name(event.keyval))
+        state()
+        return True
+    key_area.connect('key-press-event', record_key, 'press')
+    key_area.connect('key-release-event', record_key, 'release')
+    box.pack_start(key_area, False, False, 0)
+    def focus_keys(_button):
+        window.present()
+        key_area.grab_focus()
+        window.get_window().focus(Gdk.CURRENT_TIME)
     def select_notes(_button):
         buffer = notes[key].get_buffer()
         buffer.select_range(buffer.get_iter_at_offset(2), buffer.get_iter_at_offset(8))
     extra = [('Prepare caret', lambda _b: entries[key].set_position(2)),
              ('Prepare selection', lambda _b: entries[key].select_region(1, 4)),
              ('Select notes', select_notes), ('Focus entry', focus),
-             ('Read only', lambda _b: entries[key].set_editable(False))]
+             ('Read only', lambda _b: entries[key].set_editable(False)), ('Focus keys', focus_keys)]
     def replace(_button):
         old = entries.pop(key)
         box.remove(old)

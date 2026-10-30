@@ -142,6 +142,7 @@ The runtime exposes an asynchronous app-bound API:
 - Held click options require a backend advertising key/duration_ms (currently macOS). key holds a native key/chord across the sequence; durationMs holds each mouse press. auto selects targeted app_post. Click counts are 1...3. Unsupported backends and explicit non-event methods throw before input.
 - \`await app.scroll(elementIndex, direction, pages?)\`
 - \`await app.drag([fromX, fromY], [toX, toY])\`
+- \`await app.typeCharacters(text)\` on Linux sends printable keys to current focus without finding a field or pasting; returns \`{charactersSent}\` counting native synthesis acknowledgments. Inspect after errors before retrying.
 - \`await app.typeText(text, elementIndex?)\` on Linux: insert at the exact observed editable field caret/selection, or current focus when omitted. Other platforms use \`app.typeText(text, { keyMethod? })\`. Refresh AX indexes after UI changes; inspect after an attempted-edit error before retrying.
 - \`await app.pressKey(key, { keyMethod?, durationMs? })\`
 - \`await app.setValue(elementIndex, value)\`
@@ -625,6 +626,13 @@ export function createCuaApi(native, activeOutput, onDispose, {tabRequest,platfo
         await call("select_text", { app, element_index: elementIndex, text,
           prefix: options.prefix, suffix: options.suffix, selection: options.selectionType });
       },
+      ...(platform==='linux'?{async typeCharacters(text) {
+        if(typeof text!=='string'||/[^\p{L}\p{M}\p{N}\p{P}\p{S} ]/u.test(text))throw Error('Linux typeCharacters requires printable Unicode characters');
+        if(!(await native.request('tools/list',{}))?.tools?.some(tool=>tool.name==='type_characters'))throw Error('Native runtime does not advertise type_characters; update it before use');
+        const result=JSON.parse(toolResultText(await call('type_characters',{app,text})));
+        if(result?.charactersSent!==Array.from(text).length)throw Error('Invalid charactersSent from native input; inspect before retrying');
+        return {charactersSent:result.charactersSent};
+      }}:{}),
       async typeText(text, indexOrOptions) {
         if(platform==='linux'){
           if(typeof text!=='string'||!text.length||text.includes('\0'))throw Error('Linux typeText requires non-empty text without NUL');

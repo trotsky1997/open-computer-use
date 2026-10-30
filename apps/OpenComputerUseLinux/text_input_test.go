@@ -38,3 +38,37 @@ func TestIndexedTextCarriesExactObservedField(t *testing.T) {
 		t.Fatal("invalid field reached the native bridge")
 	}
 }
+
+func TestPrintableKeysValidateBeforeNativeAndRequireEmissionCount(t *testing.T) {
+	requestPath := fakePythonResponse(t, `{"ok":true,"charactersSent":4}`)
+	service := newService()
+	service.rememberSnapshot("Editor", &appSnapshot{App: appDescriptor{Name: "Editor", PID: 42}})
+	if result := service.callTool("type_characters", map[string]any{"app": "Editor", "text": "A 你🙂"}); result.IsError || result.Content[0].Text != `{"charactersSent":4}` {
+		t.Fatalf("bad result: %#v", result)
+	}
+	data, err := os.ReadFile(requestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var request linuxRequest
+	if err = json.Unmarshal(data, &request); err != nil {
+		t.Fatal(err)
+	}
+	if request.Tool != "type_characters" || !request.SkipReadBack || request.Element != nil {
+		t.Fatalf("unexpected request: %#v", request)
+	}
+	if err = os.Remove(requestPath); err != nil {
+		t.Fatal(err)
+	}
+	for _, text := range []any{nil, true, "x\n", "x\x00", string([]byte{0xff})} {
+		if !service.callTool("type_characters", map[string]any{"app": "Editor", "text": text}).IsError {
+			t.Fatalf("admitted invalid text: %#v", text)
+		}
+	}
+	if _, err = os.Stat(requestPath); !os.IsNotExist(err) {
+		t.Fatal("invalid text reached bridge")
+	}
+	if !service.callTool("type_characters", map[string]any{"app": "Editor", "text": "wrong count"}).IsError {
+		t.Fatal("accepted invalid emitted count")
+	}
+}

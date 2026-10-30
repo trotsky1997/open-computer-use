@@ -544,6 +544,41 @@ class WindowBindingTests(unittest.TestCase):
             self.assertIs(runtime.find_element(object(), {"objectPath": "/old"}, window=object(), strict=True), old)
 
 
+class PrintableKeyTests(unittest.TestCase):
+    def test_unicode_keysyms_without_gdk(self):
+        runtime = load_runtime()
+        runtime.Gdk = None
+        self.assertEqual(runtime.keyval("é"), 0xe9)
+        self.assertEqual(runtime.keyval("你"), 0x01004f60)
+        self.assertEqual(runtime.keyval("🙂"), 0x0101f642)
+
+    def test_printable_keys_use_symbols_and_stop_without_replay(self):
+        runtime = load_runtime()
+        runtime.Atspi.KeySynthType = types.SimpleNamespace(SYM="symbol")
+        runtime.Atspi.generate_keyboard_event = mock.Mock(return_value=True)
+        focus = mock.Mock()
+        with mock.patch.object(runtime, "keyval", side_effect=ord):
+            self.assertEqual(runtime.send_characters("A 你🙂", focus), 4)
+            self.assertEqual(focus.call_count, 4)
+            self.assertEqual(runtime.Atspi.generate_keyboard_event.call_args_list,
+                             [mock.call(ord(c), None, "symbol") for c in "A 你🙂"])
+            runtime.Atspi.generate_keyboard_event.reset_mock(side_effect=True)
+            runtime.Atspi.generate_keyboard_event.side_effect = [True, False]
+            with self.assertRaisesRegex(RuntimeError, "1 characters confirmed sent"):
+                runtime.send_characters("abc", focus)
+            self.assertEqual(runtime.Atspi.generate_keyboard_event.call_count, 2)
+            runtime.Atspi.generate_keyboard_event.reset_mock(side_effect=True)
+            focus.side_effect = [None, RuntimeError("Focus changed")]
+            with self.assertRaisesRegex(RuntimeError, "Focus changed; 1 characters confirmed sent"):
+                runtime.send_characters("abc", focus)
+            self.assertEqual(runtime.Atspi.generate_keyboard_event.call_count, 1)
+            for text in [None, "x\n", "x\0", "\ud800"]:
+                runtime.Atspi.generate_keyboard_event.reset_mock()
+                with self.assertRaisesRegex(RuntimeError, "printable Unicode"):
+                    runtime.send_characters(text, focus)
+                runtime.Atspi.generate_keyboard_event.assert_not_called()
+
+
 class IndexedTextTests(unittest.TestCase):
     def test_caret_unicode_and_selection_preserve_existing_text(self):
         runtime = load_runtime()

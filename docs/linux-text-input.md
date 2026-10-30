@@ -28,8 +28,7 @@ and Worker REPLs. It checks separate same-title windows, indexed Unicode input,
 caret/selection replacement, consecutive multiline edits, focus omission,
 inactive/read-only/stale rejection. Existing window identity and launch/lifecycle
 flows run alongside it. Python checks cover protected fields and attempted-edit
-failure without replay. Broader providers, Wayland/headful, `typeCharacters`,
-paste and Windows input remain open.
+failure without replay. Broader providers, Wayland/headful, paste and Windows input remain open.
 
 Run the fixture controller in a configured private desktop:
 
@@ -38,3 +37,36 @@ node scripts/tests/linux-text-js-smoke.mjs /path/to/open-computer-use-linux
 ```
 
 AT-SPI contract: [EditableText.insert_text](https://gnome.pages.gitlab.gnome.org/at-spi2-core/libatspi/method.EditableText.insert_text.html).
+
+
+## Printable key events
+
+Linux `await app.typeCharacters(text)` sends `KeySynthType.SYM` for each printable
+Unicode code point to the currently focused control, including controls that
+have no Text/EditableText interface. It never searches for a text field or uses
+the clipboard. Native window focus is checked before each key. Controls,
+newlines and invalid Unicode are rejected before any emission. Empty input
+returns `{charactersSent: 0}` without sending a key.
+
+`charactersSent` counts native API acknowledgments, in Unicode code points.
+Inspect app state to verify the task outcome. If synthesis or focus verification
+fails partway through, the error reports the acknowledged prefix length and
+stops without replay. Transport failure can leave the last emission uncertain.
+Native delivery and focus checks are sequential, so external focus changes can
+race an emission. Keymap/compositor/IME support varies; the implementation keeps
+AT-SPI failures visible and has no paste or semantic-edit fallback.
+
+The GTK controller also focuses a DrawingArea with no editable-text interface
+and checks exact press/release events for `aA 1!+é你🙂`, empty input and inactive
+window rejection in both REPLs. When launching a private D-Bus session before
+Xvfb, update that private bus activation environment after Xvfb starts:
+
+```sh
+dbus-update-activation-environment DISPLAY XAUTHORITY
+```
+
+Without the display environment, an AT-SPI registry can acknowledge synthesis
+while emitting no events. The test checks the receiving widget, beyond the
+native acknowledgment. Production desktop sessions need a correctly configured
+accessibility bus and display. See [AT-SPI keyboard synthesis](https://gnome.pages.gitlab.gnome.org/at-spi2-core/libatspi/func.generate_keyboard_event.html)
+and [key synthesis types](https://gnome.pages.gitlab.gnome.org/at-spi2-core/libatspi/enum.KeySynthType.html).

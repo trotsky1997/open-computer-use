@@ -777,7 +777,8 @@ def keyval(name):
     if len(name) == 1:
         if Gdk is not None:
             return int(Gdk.unicode_to_keyval(ord(name)))
-        return ord(name)
+        codepoint = ord(name)
+        return codepoint if codepoint <= 0xff else 0x01000000 | codepoint
     if Gdk is not None:
         value = int(Gdk.keyval_from_name(name))
         if value and value != VOID_SYMBOL:
@@ -813,6 +814,22 @@ def send_key(key):
             Atspi.generate_keyboard_event(
                 mask, None, Atspi.KeySynthType.UNLOCKMODIFIERS
             )
+
+
+def send_characters(text, verify_focus):
+    if not isinstance(text, str) or any(not character.isprintable() for character in text):
+        raise RuntimeError("type_characters requires printable Unicode characters")
+    symbols = [keyval(character) for character in text]
+    sent = 0
+    try:
+        for symbol in symbols:
+            verify_focus()
+            if not Atspi.generate_keyboard_event(symbol, None, Atspi.KeySynthType.SYM):
+                raise RuntimeError("Native key synthesis failed")
+            sent += 1
+    except Exception as exc:
+        raise RuntimeError("{}; {} characters confirmed sent; inspect before retrying".format(exc, sent)) from exc
+    return sent
 
 
 def send_text(text):
@@ -1021,6 +1038,8 @@ def perform_operation(operation):
         )
         to_x, to_y = screen_point(bounds, None, operation.get("to_x"), operation.get("to_y"))
         send_drag(from_x, from_y, to_x, to_y)
+    elif tool == "type_characters":
+        return {"ok": True, "charactersSent": send_characters(operation.get("text", ""), lambda: physical(force=True))}
     elif tool == "type_text":
         text = operation.get("text", "")
         if not isinstance(text, str) or not text or "\0" in text:

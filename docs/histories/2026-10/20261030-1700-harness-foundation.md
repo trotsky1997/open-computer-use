@@ -1036,3 +1036,27 @@ focus omission and inactive/read-only/stale rejection. No dependency or CI added
 Broader providers, rich-text formatting, concurrent edits, Wayland/headful,
 `typeCharacters`, paste and remaining native image/physical/Windows work stay open.
 The full harness goal remains active. See [text input](../../linux-text-input.md).
+
+
+## Linux printable-key input
+
+Implemented Linux-only `app.typeCharacters(text)` and native `type_characters`.
+Printable Unicode is validated before input, each code point uses AT-SPI SYM,
+and active-window descendant focus is checked before every key. Empty input
+returns zero. The result counts native synthesis acknowledgments; failures stop
+with the confirmed prefix count and never replay through paste/semantic edits.
+The GDK-free keysym mapping now handles Unicode code points above Latin-1.
+
+Passed 142 Node checks, 44 Python checks and the Linux Go suite (40 top-level
+checks plus 8 subchecks) on arm64 Ubuntu. Both REPLs passed private GTK tests
+for exact non-editable DrawingArea press/release events, uppercase, spaces,
+punctuation, Latin accents, Chinese and emoji, plus empty/inactive-window cases.
+Existing text, window-identity and native launch/lifecycle flows also passed.
+The private D-Bus activation environment must include Xvfb DISPLAY/XAUTHORITY:
+without it AT-SPI acknowledged synthesis while the receiver saw no events.
+Receiver-side assertions now expose this setup failure. Test apps and private
+VM work files were cleaned up; no dependency or CI added.
+
+Wider keymaps/IME/compositors and physical focus races remain limitations. Paste,
+native window images/pointer, Windows and the full harness goal remain open.
+See [Linux text input](../../linux-text-input.md).

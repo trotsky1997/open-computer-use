@@ -38,3 +38,13 @@ test('Linux text uses the focused/indexed signature and checks native support be
  await app.typeText('focus');assert.deepEqual(calls.at(-1).params.arguments,{app:'Editor',text:'focus'});
  advertised=false;await assert.rejects(app.typeText('must-not-send',2),/does not advertise/);
 });
+test('Linux printable keys validate input, capability and native emission counts',async()=>{
+ const calls=[];let advertised=true,count=4,fail=false;
+ const native={async request(method,params){calls.push({method,params});return method==='tools/list'?{tools:advertised?[{name:'type_characters'}]:[]}:result(fail?'1 characters confirmed sent; inspect before retrying':JSON.stringify({charactersSent:count}),fail);}};
+ const cua=createCuaApi(native,()=>({write(){}}),undefined,{platform:'linux'}),app=await cua.getApp('Editor',{initialState:false});
+ for(const text of [null,1,'x\n','x\0','\t','\ud800','\u200d'])await assert.rejects(app.typeCharacters(text),/printable Unicode/);
+ assert.equal(calls.length,0);assert.deepEqual(await app.typeCharacters('A 你🙂'),{charactersSent:4});assert.deepEqual(calls.at(-1).params.arguments,{app:'Editor',text:'A 你🙂'});
+ count=0;assert.deepEqual(await app.typeCharacters(''),{charactersSent:0});count=1;await assert.rejects(app.typeCharacters('ab'),/Invalid charactersSent/);
+ fail=true;await assert.rejects(app.typeCharacters('ab'),/1 characters confirmed sent/);fail=false;advertised=false;await assert.rejects(app.typeCharacters('ab'),/does not advertise/);
+ const mac=createCuaApi(native,()=>({write(){}}),undefined,{platform:'darwin'});assert.equal((await mac.getApp('Editor',{initialState:false})).typeCharacters,undefined);
+});

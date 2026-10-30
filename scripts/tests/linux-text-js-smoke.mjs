@@ -12,7 +12,7 @@ for(const Session of [PersistentJavaScriptSession,WorkerJavaScriptSession]){
  await copyFile(new URL('./linux-window-fixture.py',import.meta.url),executable);await chmod(executable,0o700);
  const native=new LazyNativePeer({command:binary,args:['mcp'],env:{...process.env,OCU_WINDOW_FIXTURE_ROOT:root,OCU_WINDOW_FIXTURE_NAME:name,OPEN_COMPUTER_USE_ACTION_READ_BACK:'0'}}),session=new Session({native});
  const state=async()=>JSON.parse(await readFile(root+'/state.json','utf8'));
- async function wait(predicate){const deadline=Date.now()+5000;while(!predicate(await state())){assert.ok(Date.now()<deadline,'Fixture state did not settle');await new Promise(resolve=>setTimeout(resolve,30));}}
+ async function wait(predicate){const deadline=Date.now()+5000;while(!predicate(await state())){assert.ok(Date.now()<deadline,'Fixture state did not settle: '+JSON.stringify(await state()));await new Promise(resolve=>setTimeout(resolve,30));}}
  try{
   await run(session,`await cua.computer.launch_app({app:${JSON.stringify(executable)}});nodeRepl.write(JSON.stringify(true));`);
   let windows=[];const deadline=Date.now()+15000;
@@ -29,10 +29,19 @@ for(const Session of [PersistentJavaScriptSession,WorkerJavaScriptSession]){
   await run(session,`await b.click(${index(b,'Focus entry')},{clickMethod:'accessibility'});nodeRepl.write(JSON.stringify(true));`);await wait(s=>s.focused.B);
   await run(session,`await b.typeText('焦点');nodeRepl.write(JSON.stringify(true));`);assert.equal((await state()).values.B,'i替🙂ial-B焦点');
   const inactive=await session.run(`await a.typeText('must-not-write');`);assert.equal(inactive.isError,true);assert.equal((await state()).values.A,'in你🙂itial-A');
+  await run(session,`await b.click(${index(b,'Focus keys')},{clickMethod:'accessibility'});nodeRepl.write(JSON.stringify(true));`);
+  const printable='aA 1!+é你🙂';
+  assert.deepEqual(await run(session,`nodeRepl.write(JSON.stringify(await b.typeCharacters(${JSON.stringify(printable)})));`),{charactersSent:Array.from(printable).length});
+  const printed=events=>events.filter(value=>Array.from(value).length===1).join('');
+  await wait(s=>printed(s.keys.B.press)===printable);
+  assert.equal(printed((await state()).keys.B.release),printable);
+  assert.equal((await state()).values.B,'i替🙂ial-B焦点');
+  assert.deepEqual(await run(session,`nodeRepl.write(JSON.stringify(await b.typeCharacters('')));`),{charactersSent:0});
+  const inactiveKeys=await session.run(`await a.typeCharacters('wrong');`);assert.equal(inactiveKeys.isError,true);assert.match(inactiveKeys.content.at(-1).text,/0 characters confirmed sent/);assert.deepEqual((await state()).keys.A,{press:[],release:[]});
   await run(session,`await b.click(${index(b,'Read only')},{clickMethod:'accessibility'});nodeRepl.write(JSON.stringify(true));`);
   const readonly=await session.run(`await b.typeText('must-not-write',${bEntry});`);assert.equal(readonly.isError,true);assert.match(readonly.content.at(-1).text,/not editable/);assert.equal((await state()).values.B,'i替🙂ial-B焦点');
   await run(session,`await a.click(${index(a,'Replace entry')},{clickMethod:'accessibility'});nodeRepl.write(JSON.stringify(true));`);
   const stale=await session.run(`await a.typeText('must-not-write',${aEntry});`);assert.equal(stale.isError,true);assert.match(stale.content.at(-1).text,/removed or replaced/);assert.equal((await state()).values.A,'replacement-entry');
-  console.log(`${Session.name} PASS indexed fields, Unicode bytes, caret/selection/multiline, focused omission, inactive/read-only/stale rejection and window isolation`);
+  console.log(`${Session.name} PASS printable key press/release without an editable field, indexed fields, Unicode bytes, caret/selection/multiline, focused omission, inactive/read-only/stale rejection and window isolation`);
  }finally{await session.close();await native.close();if(!pid)try{pid=(await state()).pid;}catch{}if(pid)try{process.kill(pid,'SIGTERM');}catch(error){if(error.code!=='ESRCH')throw error;}await rm(root,{recursive:true,force:true});}
 }

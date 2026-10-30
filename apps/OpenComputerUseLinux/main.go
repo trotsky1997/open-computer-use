@@ -18,6 +18,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unicode"
+	"unicode/utf8"
 )
 
 var version = "1.1.2"
@@ -31,7 +33,7 @@ var windowPlacementValues = []string{"keep", "agent_display", "restore"}
 //go:embed runtime.py
 var linuxRuntimeScript string
 
-const serverInstructions = "Computer Use tools let you interact with Linux desktop apps by performing UI actions.\n\nUse launch_app only for an explicitly requested application start; it accepts one literal executable name/path without arguments. The started application outlives this native session. Verify its readiness with get_app_state.\n\nBegin by calling `get_app_state` every turn you want to use Computer Use to get the latest state before acting. The available tools are list_windows, bind_window, launch_app, list_apps, get_app_state, click, perform_secondary_action, scroll, drag, type_text, press_key, and set_value.\n\nPrefer element-targeted interactions over coordinate clicks when an index for the targeted element is available. Linux actions use AT-SPI2 semantic actions and editable text APIs first. Coordinate mouse and key synthesis are best-effort fallbacks and are not a universal Wayland background input model."
+const serverInstructions = "Computer Use tools let you interact with Linux desktop apps by performing UI actions.\n\nUse launch_app only for an explicitly requested application start; it accepts one literal executable name/path without arguments. The started application outlives this native session. Verify its readiness with get_app_state.\n\nBegin by calling `get_app_state` every turn you want to use Computer Use to get the latest state before acting. The available tools are list_windows, bind_window, launch_app, list_apps, get_app_state, click, perform_secondary_action, scroll, drag, type_text, type_characters, press_key, and set_value.\n\nPrefer element-targeted interactions over coordinate clicks when an index for the targeted element is available. Linux actions use AT-SPI2 semantic actions and editable text APIs first. Coordinate mouse and key synthesis are best-effort fallbacks and are not a universal Wayland background input model."
 
 type toolDefinition struct {
 	Name        string         `json:"name"`
@@ -186,10 +188,11 @@ func (limit textLimit) runtimeValue() any {
 }
 
 type linuxResponse struct {
-	OK       bool         `json:"ok"`
-	Text     string       `json:"text,omitempty"`
-	Error    string       `json:"error,omitempty"`
-	Snapshot *appSnapshot `json:"snapshot,omitempty"`
+	CharactersSent *int         `json:"charactersSent,omitempty"`
+	OK             bool         `json:"ok"`
+	Text           string       `json:"text,omitempty"`
+	Error          string       `json:"error,omitempty"`
+	Snapshot       *appSnapshot `json:"snapshot,omitempty"`
 }
 
 type service struct {
@@ -281,6 +284,12 @@ func (s *service) callTool(name string, args map[string]any) toolCallResult {
 			requiredFloat(args, "to_x"),
 			requiredFloat(args, "to_y"),
 		)
+	case "type_characters":
+		text, ok := args["text"].(string)
+		if !ok {
+			return textResult("type_characters requires a text string", true)
+		}
+		return s.typeCharacters(requiredString(args, "app"), text)
 	case "type_text":
 		keyMethod, err := parseKeyMethod(optionalString(args, "key_method"))
 		if err != nil {
@@ -462,6 +471,32 @@ func (s *service) drag(app string, fromX, fromY, toX, toY *float64) toolCallResu
 		return textResult("Screenshot omitted by include_screenshot=false; request a screenshot before screenshot-coordinate actions.", true)
 	}
 	return s.actionResult(app, linuxRequest{Tool: "drag", App: app, FromX: fromX, FromY: fromY, ToX: toX, ToY: toY, WindowBounds: snapshot.WindowBounds})
+}
+
+func (s *service) typeCharacters(app, text string) toolCallResult {
+	if app == "" || !utf8.ValidString(text) {
+		return textResult("type_characters requires app and valid Unicode text", true)
+	}
+	for _, character := range text {
+		if !unicode.IsPrint(character) {
+			return textResult("type_characters requires printable Unicode characters", true)
+		}
+	}
+	if s.currentSnapshot(app) == nil {
+		return textResult("Run get_app_state before type_characters", true)
+	}
+	response, err := runPython(linuxRequest{Tool: "type_characters", App: app, Text: text, SkipReadBack: true})
+	if err != nil {
+		return textResult(err.Error(), true)
+	}
+	if !response.OK {
+		return textResult(response.Error, true)
+	}
+	if response.CharactersSent == nil || *response.CharactersSent != utf8.RuneCountInString(text) {
+		return textResult("Invalid charactersSent from native input; inspect before retrying", true)
+	}
+	data, _ := json.Marshal(map[string]int{"charactersSent": *response.CharactersSent})
+	return textResult(string(data), false)
 }
 
 func (s *service) typeText(app, text, keyMethod, elementIndex string) toolCallResult {
@@ -1308,6 +1343,7 @@ func globalPointerFallbacksEnabled() bool {
 
 func toolDefinitions() []toolDefinition {
 	return []toolDefinition{
+		{Name: "type_characters", Description: "Send printable keys to the selected window current focus without finding an editable field or pasting. Returns charactersSent (native synthesis acknowledgments, Unicode code points). Inspect after errors before retrying.", Annotations: defaultAnnotations(), InputSchema: objectSchema(map[string]any{"app": stringProperty("App or bound window selector"), "text": stringProperty("Printable Unicode characters; controls/newlines are rejected")}, []string{"app", "text"})},
 		{Name: "list_windows", Description: "List native Linux top-level windows with opaque numeric IDs, app and title. IDs identify native objects rather than title or order.", Annotations: readOnlyAnnotations(), InputSchema: objectSchema(map[string]any{}, nil)},
 		{Name: "bind_window", Description: "Bind an exact native Linux window from a fresh list_windows ID. Returns an opaque app selector for observations/actions; closed or replaced windows fail.", Annotations: readOnlyAnnotations(), InputSchema: objectSchema(map[string]any{"window_id": integerProperty("Positive safe-integer window ID from list_windows")}, []string{"window_id"})},
 		{
