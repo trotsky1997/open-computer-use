@@ -10,7 +10,8 @@ const url=`http://127.0.0.1:${server.address().port}/`;
 const version=await(await fetch(new URL('/json/version',endpoint))).json();
 const browser=operation=>withConnection(version.webSocketDebuggerUrl,operation);
 const native={async request(){throw Error('Native unused');}};
-const session=new WorkerJavaScriptSession({native}),other=new WorkerJavaScriptSession({native});
+const Session=process.argv.includes('--source') ? PersistentJavaScriptSession : WorkerJavaScriptSession;
+const session=new Session({native}),other=new Session({native});
 const targets=async()=> (await(await fetch(new URL('/json/list',endpoint))).json()).filter(target=>target.type==='page');
 const ids=async()=>new Set((await targets()).map(target=>target.id));
 async function run(code,target=session){const result=await target.run(code);assert.equal(result.isError,false,JSON.stringify(result.content));return JSON.parse(result.content.at(-1).text);}
@@ -31,7 +32,7 @@ try {
  const denied=await other.run('await observer.markDeliverable();');assert.equal(denied.isError,true);assert.match(denied.content.at(-1).text,/another session/);
  await session.reset();assert.ok((await ids()).has(temporary),'js_reset lost logical tab ownership');
  await run(`var handoff=await cua.getTab(${JSON.stringify(handoff)});var delivered=await cua.getTab(${JSON.stringify(delivered)});var sentinel=42;setTimeout(()=>{handoff.pressKey(null,'a').then(()=>{},()=>{});handoff.close().catch(()=>{});},200);nodeRepl.write(JSON.stringify(true));`);
- const idleWorker=session.worker;await session.endTurn();assert.equal(session.worker,idleWorker);
+ const idleContext=session.worker ?? session.repl;await session.endTurn();assert.equal(session.worker ?? session.repl,idleContext);
  const live=await ids();for(const id of [temporary,child.id,grandchild.id]) assert.equal(live.has(id),false);
  for(const id of [user,delivered,handoff]) assert.equal(live.has(id),true);
  assert.equal(await run(`await new Promise(resolve=>setTimeout(resolve,300));await handoff.getAXState({emit:false});await delivered.markDeliverable();nodeRepl.write(JSON.stringify(sentinel));`),42);
@@ -41,6 +42,13 @@ try {
  await waitFor(async()=> (await events(background)).some(event=>event.type==='keydown'));
  await session.endTurn();assert.equal((await events(background)).at(-1).shift,false);
  assert.equal(await run(`nodeRepl.write(JSON.stringify(typeof background));`),'undefined','A detached browser action retained its executor');
+ if(Session===PersistentJavaScriptSession) {
+   const timed=await run(`var timed=await cua.createBrowserTab('cdp',${JSON.stringify(url)},{visible:false});await timed.markHandoff();nodeRepl.write(JSON.stringify(timed.id));`);
+   const expired=session.run(`await timed.pressKey(null,'shift',{durationMs:5000});`,1500);
+   await waitFor(async()=> (await events(timed)).some(event=>event.type==='keydown'));
+   const result=await expired;assert.equal(result.isError,true);assert.match(result.content.at(-1).text,/timed out/);
+   assert.equal((await events(timed)).at(-1).shift,false,'Source timeout returned before key release');
+ }
  const held=await run(`var held=await cua.createBrowserTab('cdp',${JSON.stringify(url)},{visible:false});await held.markHandoff();var browser=await cua.getBrowser({id:'cdp'});await (await browser.capabilities.get('viewport')).set({width:320,height:240});nodeRepl.write(JSON.stringify(held.id));`);
  const running=session.run(`await held.pressKey(null,'shift',{durationMs:30000});`,60000);
  await waitFor(async()=> (await events(held)).some(event=>event.type==='keydown'));
@@ -68,7 +76,7 @@ try {
  peer.notify('notifications/turn-ended');assert.equal((await pending).isError,true);await peer.request('ping');assert.equal((await events(mcpId)).at(-1).shift,false);
  response=await peer.request('tools/call',{name:'js',arguments:{code:'nodeRepl.write(typeof sentinel);'}});assert.equal(response.content.at(-1).text,'undefined');
  await peer.close();await waitFor(async()=> !(await ids()).has(mcpId));
- console.log('PASS owned tab/popup/grandchild cleanup, user preservation, latest marks, handoff resume, idle JS persistence, stale callbacks, held input/viewport release, close failure/retry, source reset/close and real MCP turn-ended interruption');
+ console.log(Session.name+' PASS owned tab/popup/grandchild cleanup, user preservation, latest marks, handoff resume, idle JS persistence, stale callbacks, held input/viewport release, close failure/retry, source reset/close and real MCP turn-ended interruption');
 } finally {
  if(peer)await peer.close();await Promise.allSettled([session.close(),other.close()]);
  for(const target of await targets()) if(target.url.startsWith(url))await browser(send=>send('Target.closeTarget',{targetId:target.id}));

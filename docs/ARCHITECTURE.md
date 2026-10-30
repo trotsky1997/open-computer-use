@@ -364,3 +364,9 @@ turn ID, so retained JS bindings can use fresh resource owners while prior-turn
 callbacks fail. MCP turn-ended notifications interrupt active execution before
 the normal request queue and establish a cleanup barrier for following calls.
 See [tabs and turn boundaries](browser-tabs.md) for lifecycle and limits.
+
+Worker and in-process sessions now share host request dispatch and ordered
+resource release. Source evaluations carry a resource owner through the existing
+AsyncLocalStorage context. Their run queue fences earlier evaluations at reset
+and turn boundaries; idle contexts retain bindings and interrupted async
+contexts are discarded. Source CPU loops still require Worker isolation.

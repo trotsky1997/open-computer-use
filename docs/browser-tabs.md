@@ -42,22 +42,34 @@ the cleanup barrier. The next call begins a new turn. `close()` and MCP shutdown
 also release resources. A host that sends no boundary notification receives
 session-close cleanup, with its whole connection acting as one turn.
 
-Direct `PersistentJavaScriptSession` and standalone `createBrowserApi` close
-created tabs at disposal, respecting marks. Source-session reset keeps tab
-ownership, while standalone disposal ends that API's lifetime. Direct source
-turn notifications and idle context retention, user takeover integration,
-provider-specific claims, extension/in-app transports, crash recovery and
-headful/cross-platform behavior still need work.
+`PersistentJavaScriptSession.endTurn()` now uses the same host request dispatch,
+resource release order and tab ownership as the Worker session. Calls serialize;
+idle JS bindings survive, queued earlier calls fail, and the first call of the
+next turn obtains a fresh resource owner. Native/browser calls carry their
+originating evaluation owner, so old source callbacks also fail. Interrupted
+async evaluations reject and discard their REPL context. Timeouts wait for reset
+cleanup before returning; failed cleanup blocks reuse and can be retried with
+`reset()` or `endTurn()`. Source-session reset keeps logical tab ownership.
+
+In-process execution cannot preempt a CPU loop that blocks its own event loop,
+and discarding a REPL does not stop arbitrary Node.js promises or timers. Use
+`WorkerJavaScriptSession` when termination is required. Managed input is canceled
+and its releases acknowledged before the source turn finishes. Standalone
+`createBrowserApi` disposal still ends that API's lifetime and closes unmarked
+created tabs after resource cleanup. User takeover, exclusive claims,
+extension/in-app transports, crash recovery and headful/cross-platform behavior
+remain open.
 
 ## Verification
 
 ```sh
 node --test scripts/node-repl/*.test.mjs
 OPEN_COMPUTER_USE_CDP_URL=http://127.0.0.1:9222 node scripts/run-turn-smoke.mjs
+OPEN_COMPUTER_USE_CDP_URL=http://127.0.0.1:9222 node scripts/run-turn-smoke.mjs --source
 ```
 
 Use disposable Chrome. The live smoke checks user preservation, popup ancestry,
 latest marks, resuming/re-marking, stale callback denial, held-key and viewport
-cleanup, retained close failures and retry, direct source reset/close, and the
-real MCP notification path. Other feature fixtures explicitly retain pages that
+cleanup, retained close failures and retry, direct source reset/close/turns and timeout release barriers, and the real MCP
+notification path. Other feature fixtures explicitly retain pages that
 they inspect after session close, and close those disposable pages afterward.

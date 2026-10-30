@@ -533,3 +533,41 @@ and exclusive claims, extension/in-app transports, browser/host crash recovery
 and headful/native/cross-platform verification remain open. Arbitrary Node.js
 code remains trusted; proxy lifecycle guards do not sandbox arbitrary scripts.
 The complete harness parity goal remains active.
+
+
+### Source-session turn lifecycle
+
+PersistentJavaScriptSession now exposes endTurn with serialized run calls and
+per-evaluation resource ownership. Its browser/native facade rejects ended
+evaluations before dispatch. Idle boundaries retain JS variables and browser
+bindings; active asynchronous evaluations reject and discard their REPL, and
+earlier queued work is fenced by its generation. Source and Worker sessions
+share the existing host dispatch and ordered resource release, including stable
+logical tab ownership, fresh turn owners, lazy dialog capture and cleanup retry.
+No additional transport or dependency was added.
+
+Source timeout results now await reset cleanup, including key releases. Browser
+cleanup failures also await the recovery attempt and report a stopped session if
+it fails. A failed reset retains context-disposal state so a later successful
+turn-end retry rebuilds the context instead of reusing a closed REPL. Ended tab
+cleanup is retried before reset clears marks. Embedding and architecture guides,
+parity tracking and the active plan document the new entry point and limits.
+
+All 95 Node checks passed. Added source idle-context/stale-native-callback,
+active-async/queued-call cancellation and failed-reset/turn-end retry cases. The
+real disposable macOS headless Chrome turn smoke passed in source and Worker
+modes, including user/owned tab and popup lifetimes, marks, stale input/close
+callbacks, detached held input, viewport cleanup, close-failure retry, direct
+source reset/close and native-free MCP turn notifications. The source variant
+also asserts key-up acknowledgement before a timed-out run returns. Held input,
+dialog and native-free CLI/MCP regressions passed. Existing drop and clipboard
+smokes now accept --source; both passed with mixed MIME/file/frame flows,
+trusted text/HTML/PNG copy/cut/paste, cancellation, failure retry and unchanged
+macOS system clipboard. Their default Worker CPU-timeout probes are retained;
+the source clipboard variant exercises an asynchronous timeout explicitly.
+
+In-process CPU loops block their own event loop, and context disposal cannot
+terminate arbitrary user Node.js timers/promises. Worker isolation remains the
+production preemption boundary. User takeover/exclusive claims, crash recovery,
+other browser transports, native desktop and broader platform verification
+remain open. Full harness alignment remains active.

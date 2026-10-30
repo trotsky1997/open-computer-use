@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {BrowserTabs} from './browser-tabs.mjs';
-import {WorkerJavaScriptSession} from './open-computer-use-repl.mjs';
+import {WorkerJavaScriptSession,PersistentJavaScriptSession} from './open-computer-use-repl.mjs';
 
 function fixture() {
  const endpoint='http://tab-test/',tabs=new BrowserTabs(()=>endpoint),live=new Map([['user',{targetId:'user',type:'page',url:'about:blank'}]]);
@@ -50,8 +50,8 @@ test('uncertain creation remains owned until its unique target can be recovered'
  await tabs.end(owner);assert.deepEqual([...live.keys()],['user']);
 });
 
-test('idle turns retain JS bindings and reject native callbacks from the prior turn',async()=>{
- const calls=[],session=new WorkerJavaScriptSession({native:{async request(...args){calls.push(args);return {content:[]};}}});
+for(const Session of [PersistentJavaScriptSession,WorkerJavaScriptSession]) test(`${Session.name}: idle turns retain JS bindings and reject native callbacks`,async()=>{
+ const calls=[],session=new Session({native:{async request(...args){calls.push(args);return {content:[]};}}});
  try {
    assert.equal((await session.run("var sentinel=7,leaked;setTimeout(()=>cua.listApps({emit:false}).then(()=>leaked='allowed',()=>leaked='blocked'),200);")).isError,false);
    await session.endTurn();
@@ -76,4 +76,29 @@ test('definite creation errors release empty observers without closing user tabs
  entry.connection.send=async()=>{throw Object.assign(Error('Creation refused'),{cdpError:true});};
  await assert.rejects(tabs.request(owner,{action:'create'}),/Creation refused/);
  await tabs.end(owner);assert.equal(tabs.browsers.size,0);assert.deepEqual([...live.keys()],['user']);
+});
+
+
+test('source turns reject async work and queued evaluations before resuming a fresh context',async()=>{
+ const session=new PersistentJavaScriptSession({native:{async request(){throw Error('unused');}}});
+ try {
+   const running=session.run('var discarded=1;await new Promise(()=>{});',30000),queued=session.run('nodeRepl.write("should not execute")');
+   await new Promise(resolve=>setTimeout(resolve,20));await session.endTurn();
+   assert.equal((await running).isError,true);assert.equal((await queued).isError,true);
+   const result=await session.run('nodeRepl.write(typeof discarded)');assert.equal(result.content.at(-1).text,'undefined');
+   await session.close();assert.equal((await session.run('nodeRepl.write(1)')).isError,true);
+ } finally {await session.close();}
+});
+
+test('source cleanup failure blocks reuse and endTurn retries into a fresh context',async()=>{
+ let failed=false;
+ const session=new PersistentJavaScriptSession({native:{async request(){throw Error('unused');},async endSession(){if(failed)throw Error('Native cleanup outage');}}});
+ try {
+   await session.run('var previous=17;');failed=true;
+   await assert.rejects(session.reset(),/cleanup outage/);
+   assert.equal((await session.run('nodeRepl.write(1)')).isError,true);
+   failed=false;await session.endTurn();
+   const result=await session.run('nodeRepl.write(typeof previous)');
+   assert.equal(result.isError,false,JSON.stringify(result.content));assert.equal(result.content.at(-1).text,'undefined');
+ } finally {failed=false;await session.close();}
 });

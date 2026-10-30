@@ -3,7 +3,7 @@ import {createServer} from "node:http";
 import {mkdtemp,writeFile,rm} from "node:fs/promises";
 import {tmpdir} from "node:os";
 import path from "node:path";
-import {WorkerJavaScriptSession} from "./node-repl/open-computer-use-repl.mjs";
+import {WorkerJavaScriptSession,PersistentJavaScriptSession} from "./node-repl/open-computer-use-repl.mjs";
 import {withConnection,imageDimensions} from "./node-repl/browser-cdp.mjs";
 
 const endpoint=process.env.OPEN_COMPUTER_USE_CDP_URL;
@@ -46,8 +46,9 @@ const url=`http://127.0.0.1:${server.address().port}/`;
 const dir=await mkdtemp(path.join(tmpdir(),"ocu-drop-"));
 const file=path.join(dir,"你好.txt");await writeFile(file,"native file bytes 🙂");
 const native={async request(){throw new Error("Native backend unused");}};
-const session=new WorkerJavaScriptSession({native});
-const other=new WorkerJavaScriptSession({native});
+const Session=process.argv.includes('--source') ? PersistentJavaScriptSession : WorkerJavaScriptSession;
+const session=new Session({native});
+const other=new Session({native});
 async function run(source,target=session,timeout=30000){const result=await target.run(source,timeout);assert.equal(result.isError,false,JSON.stringify(result.content));return JSON.parse(result.content.at(-1).text);}
 const ids=[];
 const routeIds=new Map();

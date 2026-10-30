@@ -7,7 +7,7 @@ current native/browser documentation on 2026-10-30.
 
 | Area | Current implementation / evidence | Remaining work |
 | --- | --- | --- |
-| Persistent JavaScript | Worker kernel, serialized calls, timeout/reset checks and verified native-free CLI/MCP browser operation | Native-free source installer; real long-running workload and native desktop validation |
+| Persistent JavaScript | Worker kernel and source-session serialized calls/turn boundaries, timeout/reset checks and verified native-free CLI/MCP browser operation | Native-free source installer; real long-running workload and native desktop validation |
 | Native app observations | Existing native AX/screenshot APIs; output diffs and full-output option have Node checks | Real multi-window, index reuse, truncation and settle validation |
 | Native targeting / lifecycle | Existing string app binding | Window-ID binding, computer.target/launch_app, per-platform typeText/typeCharacters and screenshot-region identity |
 | Native app input | Existing native actions/selection plus macOS held-click implementation, build and no-GUI event checks | Live held-click/background/cancellation evidence (Mac locked), paste, coordinate scroll, press-key duration and Linux/Windows held input |
@@ -21,7 +21,7 @@ current native/browser documentation on 2026-10-30.
 | Dialogs / clipboard / developer tools | Host-owned dialog handles, logs and native text/HTML/PNG browser clipboard; real Chrome flows, resumed-action failure reporting and cleanup checks | Pre-binding/popup dialogs and broader frame flows, headful/remote clipboard, broader capability discovery and log sources |
 | Optional browser capabilities | Viewport discovery implemented | Management, page assets, tab CDP, history and remaining provider-specific capabilities |
 | Content / artifacts | Screenshots returned as binary; completed GUID-named downloads returned as local paths | Content export, remote delivery and artifact retention |
-| Host / session integration | Plugin installer, native permission boundaries, host-owned per-turn resources and tab/popup retention, immediate MCP turn-ended cleanup with idle JS preservation and stale-callback fencing | Source-session turn lifecycle, user takeover/claims, crash recovery and broader host integration |
+| Host / session integration | Plugin installer, native permission boundaries, host-owned per-turn resources and tab/popup retention, immediate MCP turn-ended cleanup with idle JS preservation and stale-callback fencing | In-process CPU preemption, user takeover/claims, crash recovery and broader host integration |
 | Platform coverage | Node checks and real disposable macOS headless Chrome evidence | Native desktop, headful focus, Linux and Windows verification |
 
 Keep the full goal active while any required capability or its verification is

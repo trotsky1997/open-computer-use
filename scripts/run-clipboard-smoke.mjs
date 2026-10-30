@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import {createServer} from "node:http";
 import {execFileSync} from "node:child_process";
 import {createHash} from "node:crypto";
-import {WorkerJavaScriptSession} from "./node-repl/open-computer-use-repl.mjs";
+import {WorkerJavaScriptSession,PersistentJavaScriptSession} from "./node-repl/open-computer-use-repl.mjs";
 
 const endpoint = process.env.OPEN_COMPUTER_USE_CDP_URL;
 if (!endpoint) throw new Error("Set OPEN_COMPUTER_USE_CDP_URL to a disposable headless Chrome launched with --enable-automation");
@@ -19,8 +19,9 @@ const server = createServer((request,response) => {
 await new Promise(resolve=>server.listen(0,"127.0.0.1",resolve));
 const url = `http://127.0.0.1:${server.address().port}/`;
 const native = {async request(){throw new Error("Native backend unused");}};
-const session = new WorkerJavaScriptSession({native});
-const other = new WorkerJavaScriptSession({native});
+const Session=process.argv.includes('--source') ? PersistentJavaScriptSession : WorkerJavaScriptSession;
+const session = new Session({native});
+const other = new Session({native});
 async function run(source,target=session) {
   const result = await target.run(source);
   assert.equal(result.isError,false,JSON.stringify(result.content));
@@ -91,15 +92,15 @@ try {
   assert.equal(await run('nodeRepl.write(JSON.stringify(await tab.playwright.getByRole("textbox",{name:"Rich",exact:true}).getAttribute("data-file-type")));'),"image/png");
 
   await run('await tab.clipboard.writeText("persistent browser state"); nodeRepl.write(JSON.stringify(true));');
-  const owner = session.resourceOwners.get(session.worker);
+  const owner = (session.resourceOwner ?? session.resourceOwners.get(session.worker));
   await session.reset();
   assert.equal(session.browserClipboard.owners.has(owner),false);
   assert.equal(await run('nodeRepl.write(JSON.stringify(await tab.clipboard.readText()));',other),"persistent browser state");
   await other.close();
   assert.equal(session.browserClipboard.server,undefined);
   assert.equal(await run(`var tab=await cua.getTab(${JSON.stringify(id)}); nodeRepl.write(JSON.stringify(await tab.clipboard.readText()));`),"persistent browser state");
-  const timedOutOwner = session.resourceOwners.get(session.worker);
-  assert.equal((await session.run('while(true){}',150)).isError,true);
+  const timedOutOwner = (session.resourceOwner ?? session.resourceOwners.get(session.worker));
+  assert.equal((await session.run(Session===PersistentJavaScriptSession ? 'await new Promise(()=>{});' : 'while(true){}',150)).isError,true);
   assert.equal(session.browserClipboard.owners.has(timedOutOwner),false);
   assert.equal(session.browserClipboard.server,undefined);
 

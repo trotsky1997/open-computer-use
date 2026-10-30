@@ -41,6 +41,55 @@ const HOST_BROWSER_DROPS = new BrowserDrops(() => browserEndpoint(process.env)?.
 const HOST_BROWSER_TABS = new BrowserTabs(()=>browserEndpoint(process.env)?.href,openConnection);
 const HOST_BROWSER_INPUTS = new BrowserInputs(()=>browserEndpoint(process.env)?.href,openConnection,()=>HOST_BROWSER_VIEWPORT.request(null,{action:"state"}),HOST_BROWSER_FOCUS,(owner,targetId)=>HOST_BROWSER_DIALOGS.request(owner,{action:"state",targetId}));
 
+const HOST_BROWSER_SERVICES={browserTabs:HOST_BROWSER_TABS,browserFocusLeases:HOST_BROWSER_FOCUS,browserDownloads:HOST_BROWSER_DOWNLOADS,browserLogs:HOST_BROWSER_LOGS,browserDialogs:HOST_BROWSER_DIALOGS,browserClipboard:HOST_BROWSER_CLIPBOARD,browserViewport:HOST_BROWSER_VIEWPORT,browserDrops:HOST_BROWSER_DROPS,browserInputs:HOST_BROWSER_INPUTS};
+
+async function hostRequest(services,owner,tabOwner,method,params,timeoutMs) {
+  let result;
+  if (method === "browser/focus") {
+    if (params?.action === "acquire") result = await services.browserFocusLeases.acquire(owner, params.targetId);
+    else if (params?.action === "release") result = await services.browserFocusLeases.release(owner, params.lease);
+    else throw new Error("Unknown browser focus action");
+  } else if(method === "browser/download") {
+    const args = params;
+    if(args?.action === "start") result = await services.browserDownloads.start(owner,args.targetId,args.options);
+    else if(args?.action === "wait") result = await services.browserDownloads.wait(owner,args.id);
+    else if(args?.action === "path") result = await services.browserDownloads.path(owner,args.id,args.options);
+    else throw new Error("Unknown download action");
+  } else if(method === "browser/logs") {
+    const args = params;
+    if(args?.action === "start") result = await services.browserLogs.start(owner,args.targetId);
+    else if(args?.action === "read") result = await services.browserLogs.read(owner,args.targetId,args.options);
+    else if(args?.action === "stop") result = services.browserLogs.stop(owner,args.targetId);
+    else throw new Error("Unknown browser logs action");
+  } else if(method === "browser/dialog") {
+    const args=params;
+    if(args?.targetId && !['start','stop'].includes(args.action)) {
+      const entry=services.browserDialogs.targets.get(`${services.browserDialogs.endpoint()}|${args.targetId}`);
+      if(!entry?.owners.has(owner)) await services.browserDialogs.start(owner,args.targetId);
+    }
+    result=await services.browserDialogs.request(owner,args);
+  }
+  else if(method === "browser/clipboard") result = await services.browserClipboard.request(owner,params);
+  else if(method === "browser/tabs") result=await services.browserTabs.request(tabOwner,params);
+  else if(method === "browser/input") result = await services.browserInputs.request(owner,params);
+  else if(method === "browser/drop") result = await services.browserDrops.request(owner,params);
+  else if(method === "browser/viewport") result = await services.browserViewport.request(owner,params);
+  else result = await services.native.request(method, params, timeoutMs);
+  return result;
+}
+
+async function releaseResources(services,owner,stopped=Promise.resolve()) {
+  services.browserClipboard.cancel(owner);services.browserViewport.cancel(owner);
+  services.browserDrops.cancel(owner);services.browserInputs.cancel(owner);
+  const nativeStopped=Promise.resolve(services.native.endSession?.());nativeStopped.catch(()=>{});
+  await stopped;await nativeStopped;
+  await services.browserDialogs.cleanup(owner);
+  await services.browserDrops.cleanup(owner);await services.browserInputs.cleanup(owner);
+  const cleaned=await Promise.allSettled([services.browserFocusLeases.cleanup(owner),services.browserDownloads.cleanup(owner),services.browserLogs.cleanup(owner),services.browserClipboard.cleanup(owner),services.browserViewport.cleanup(owner)]);
+  const failed=cleaned.find(result=>result.status==='rejected');if(failed) throw failed.reason;
+  BROWSER_FAILURE_HANDLERS.delete(owner);
+}
+
 const SERVER_INSTRUCTIONS = `UI automation through a persistent JavaScript REPL using the initialized cua API.
 
 On the first call after startup or js_reset, bind the requested app with await cua.getApp("Example App"), or call await cua.getState() only when an app inventory is actually needed. On macOS, use getApp(name, { initialState: false }) followed by app.query({ text, role }) for targeted lookup without an initial snapshot. App bindings persist across js calls. Batch deterministic actions and the resulting getAXState() in one js call, then verify the returned UI state. Use nodeRepl.write(value) for additional text and await nodeRepl.emitImage(image) for additional images. Ask the user before destructive or externally visible actions such as sending, deleting, or purchasing.`;
@@ -603,6 +652,15 @@ export function createCuaApi(native, activeOutput, onDispose, {tabRequest}={}) {
 export class PersistentJavaScriptSession {
   constructor({ native }) {
     this.native = native;
+    Object.assign(this,HOST_BROWSER_SERVICES);
+    this.hostsBrowser=native.browserHost!==true;
+    this.turnGeneration=0;this.runQueue=Promise.resolve();
+    this.browserNative=this.hostsBrowser ? {browserHost:true,request:async(method,params,timeoutMs)=>{
+      const owner=evaluationOwner.getStore()?.resourceOwner;
+      if(this.closed || !this.accepting || owner!==this.resourceOwner) throw new Error('Execution turn ended');
+      try {return await hostRequest(this,owner,this,method,params,timeoutMs);}
+      catch(error) {if(error?.browserCleanupFailed)this.#browserFailed(error);throw error;}
+    }} : native;
     this.active = null;
     this.disposers = [];
     this.browserTabs=HOST_BROWSER_TABS;
@@ -638,8 +696,18 @@ export class PersistentJavaScriptSession {
     };
   }
 
+  #newOwner() {
+    this.resourceOwner={};this.accepting=true;
+    BROWSER_FAILURE_HANDLERS.set(this.resourceOwner,error=>this.#browserFailed(error));
+  }
+  #browserFailed(error) {
+    if(!this.accepting) return;
+    this.accepting=false;this.active?.reject(error);
+    void this.reset().catch(()=>{});
+  }
   async #dispose() {
-    this.repl?.close();
+    this.accepting=false;this.discardContext=true;this.repl?.close();
+    if(this.hostsBrowser && this.resourceOwner) await releaseResources(this,this.resourceOwner);
     const results = await Promise.allSettled(this.disposers.map(dispose => Promise.resolve().then(dispose)));
     const failed = results.find(result => result.status === "rejected");
     if (failed) throw failed.reason;
@@ -647,10 +715,13 @@ export class PersistentJavaScriptSession {
   }
 
   reset() {
-    this.ready = this.ready.catch(() => {}).then(async () => {
+    this.turnGeneration++;this.accepting=false;
+    this.active?.reject(new Error("JavaScript session reset"));
+    const boundary=this.turnEnding ? this.endTurn() : this.ready.catch(()=>{});
+    this.ready = boundary.then(async () => {
       await this.#dispose();
       this.browserTabs.begin(this);
-      this.#initialize();
+      this.#initialize();this.turnEnded=false;this.discardContext=false;
       this.closed = false;
     });
     this.ready.catch(() => {});
@@ -658,13 +729,30 @@ export class PersistentJavaScriptSession {
   }
 
   close() {
-    this.closed = true;
+    this.closed = true;this.turnGeneration++;this.accepting=false;this.active?.reject(new Error("JavaScript session closed"));
     this.ready = this.ready.catch(() => {}).then(async () => {await this.#dispose();await this.browserTabs.end(this,{final:true});this.closed=true;});
     this.ready.catch(() => {});
     return this.ready;
   }
 
+  endTurn() {
+    if(!this.hostsBrowser) throw new Error('The parent Worker host owns this execution turn');
+    if(this.closed) return this.ready;
+    if(this.endingTurn) return this.endingTurn;
+    if(this.turnEnded) return this.ready;
+    this.turnGeneration++;this.accepting=false;this.turnEnding=true;
+    const interrupted=!!this.active || [...this.browserDialogs.waiters.values()].some(watch=>watch.owner===this.resourceOwner);
+    this.active?.reject(new Error('Execution turn ended'));
+    this.endingTurn=this.ready.catch(()=>{}).then(async()=>{
+      this.accepting=false;
+      if(interrupted) {this.discardContext=true;await this.#dispose();}
+      else if(this.resourceOwner) await releaseResources(this,this.resourceOwner);
+      await this.browserTabs.end(this);this.turnEnded=true;this.turnEnding=false;
+    }).finally(()=>{this.endingTurn=undefined;});
+    this.ready=this.endingTurn;this.ready.catch(()=>{});return this.ready;
+  }
   #initialize() {
+    if(this.hostsBrowser)this.#newOwner();
     const input = new PassThrough();
     const output = new PassThrough();
     output.resume();
@@ -699,17 +787,30 @@ export class PersistentJavaScriptSession {
     Object.freeze(nodeRepl);
     this.nodeRepl = nodeRepl;
     Object.defineProperty(this.repl.context, "nodeRepl", { value: nodeRepl, configurable: false, writable: false });
-    Object.defineProperty(this.repl.context, "cua", { value: createCuaApi(this.native, () => this.#currentOutput(), dispose => this.disposers.push(dispose),{tabRequest:args=>this.browserTabs.request(this,args)}), configurable: false, writable: false });
+    Object.defineProperty(this.repl.context, "cua", { value: createCuaApi(this.browserNative, () => this.#currentOutput(), dispose => this.disposers.push(dispose),{tabRequest:args=>this.browserTabs.request(this,args)}), configurable: false, writable: false });
   }
 
-  async run(code, timeoutMs = DEFAULT_TIMEOUT_MS, requestMeta = {}) {
+  run(code,timeoutMs=DEFAULT_TIMEOUT_MS,requestMeta={}) {
+    const generation=this.turnGeneration;
+    const queued=this.runQueue.then(()=>this.#run(code,timeoutMs,requestMeta,generation));
+    this.runQueue=queued.catch(()=>{});return queued;
+  }
+  async #run(code, timeoutMs, requestMeta,generation) {
     if (typeof code !== "string" || !code.trim()) throw new Error("js expects non-empty JavaScript source");
     try {
+      if(generation!==this.turnGeneration) throw new Error('Execution turn ended');
       await this.ready;
+      if(generation!==this.turnGeneration) throw new Error('Execution turn ended');
       if (this.closed) throw new Error("JavaScript session closed");
+      if(this.turnEnded) {
+        this.browserTabs.begin(this);
+        if(this.discardContext)this.#initialize();else this.#newOwner();
+        this.turnEnded=false;this.discardContext=false;
+      }
     } catch (error) { return {content:[{type:"text",text:`Error: ${asError(error).message}`}],isError:true}; }
     const content = [];
     const active = {
+      resourceOwner:this.resourceOwner,
       write(value, itemId) { content.push({ type: "text", text: formatValue(value), ...(itemId ? { _meta: { id: itemId } } : {}) }); },
       async emitImage(value) { const image = normalizeImage(await value); content.push({ type: "image", mimeType: image.mimeType, data: image.data }); },
     };
@@ -728,13 +829,19 @@ export class PersistentJavaScriptSession {
       if (content.length === 0) content.push({ type: "text", text: "(no output)" });
       return { content, isError: false };
     } catch (error) {
-      const message = asError(error).message;
-      if (message.includes("timed out")) this.reset();
+      let message = asError(error).message;
+      if (message.includes("timed out")) {
+        try {await this.reset();}
+        catch(cleanupError) {message+=`; browser cleanup failed: ${asError(cleanupError).message}; session stopped`;}
+      } else if(error?.browserCleanupFailed) {
+        try {await this.ready;}
+        catch(cleanupError) {message+=`; browser cleanup failed: ${asError(cleanupError).message}; session stopped`;}
+      }
       content.push({ type: "text", text: `Error: ${message}` });
       return { content, isError: true };
     } finally {
       clearTimeout(timer);
-      this.active = null;
+      if(this.active===active)this.active = null;
     }
   }
 }
@@ -778,22 +885,12 @@ export class WorkerJavaScriptSession {
     const owner={id:++this.nextOwnerId};this.resourceOwners.set(worker,owner);
     BROWSER_FAILURE_HANDLERS.set(owner,error=>void this.#workerFailed(worker,error));
   }
-  async #release(owner,stopped=Promise.resolve()) {
-    this.browserClipboard.cancel(owner);this.browserViewport.cancel(owner);
-    this.browserDrops.cancel(owner);this.browserInputs.cancel(owner);
-    const nativeStopped=Promise.resolve(this.native.endSession?.());nativeStopped.catch(()=>{});
-    await stopped;await nativeStopped;
-    await this.browserDialogs.cleanup(owner);
-    await this.browserDrops.cleanup(owner);await this.browserInputs.cleanup(owner);
-    const cleaned=await Promise.allSettled([this.browserFocusLeases.cleanup(owner),this.browserDownloads.cleanup(owner),this.browserLogs.cleanup(owner),this.browserClipboard.cleanup(owner),this.browserViewport.cleanup(owner)]);
-    const failed=cleaned.find(result=>result.status==='rejected');if(failed) throw failed.reason;
-    BROWSER_FAILURE_HANDLERS.delete(owner);
-  }
+
   #stop(worker) {
     if(!this.stoppingWorkers.has(worker)) {
       this.invalidatedWorkers.add(worker);
       for(const pending of this.pending.values()) if(pending.worker===worker) clearTimeout(pending.timer);
-      this.stoppingWorkers.set(worker,this.#release(this.resourceOwners.get(worker),worker.terminate()).catch(error=>{this.stoppingWorkers.delete(worker);throw error;}));
+      this.stoppingWorkers.set(worker,releaseResources(this,this.resourceOwners.get(worker),worker.terminate()).catch(error=>{this.stoppingWorkers.delete(worker);throw error;}));
     }
     return this.stoppingWorkers.get(worker);
   }
@@ -803,7 +900,7 @@ export class WorkerJavaScriptSession {
     const worker=this.worker,owner=this.resourceOwners.get(worker);
     this.turnGeneration++;this.turnEnding=true;
     const active=[...this.pending.values()].some(pending=>pending.worker===worker) || [...this.browserDialogs.waiters.values()].some(watch=>watch.owner===owner);
-    const released=active || final || this.invalidatedWorkers.has(worker) ? this.#stop(worker) : this.#release(owner);
+    const released=active || final || this.invalidatedWorkers.has(worker) ? this.#stop(worker) : releaseResources(this,owner);
     this.endingTurn=released.then(()=>this.browserTabs.end(this,{final})).then(()=>{
       this.turnEnded=true;this.turnEnding=false;
     }).finally(()=>{this.#failWorker(worker,new Error('Execution turn ended'));this.endingTurn=undefined;});
@@ -835,37 +932,7 @@ export class WorkerJavaScriptSession {
         worker.postMessage({type:'native_response',id:message.id,error:'Execution turn ended'});return;
       }
       try {
-        let result;
-        if (message.method === "browser/focus") {
-          if (message.params?.action === "acquire") result = await this.browserFocusLeases.acquire(owner, message.params.targetId);
-          else if (message.params?.action === "release") result = await this.browserFocusLeases.release(owner, message.params.lease);
-          else throw new Error("Unknown browser focus action");
-        } else if(message.method === "browser/download") {
-          const args = message.params;
-          if(args?.action === "start") result = await this.browserDownloads.start(owner,args.targetId,args.options);
-          else if(args?.action === "wait") result = await this.browserDownloads.wait(owner,args.id);
-          else if(args?.action === "path") result = await this.browserDownloads.path(owner,args.id,args.options);
-          else throw new Error("Unknown download action");
-        } else if(message.method === "browser/logs") {
-          const args = message.params;
-          if(args?.action === "start") result = await this.browserLogs.start(owner,args.targetId);
-          else if(args?.action === "read") result = await this.browserLogs.read(owner,args.targetId,args.options);
-          else if(args?.action === "stop") result = this.browserLogs.stop(owner,args.targetId);
-          else throw new Error("Unknown browser logs action");
-        } else if(message.method === "browser/dialog") {
-          const args=message.params;
-          if(args?.targetId && !['start','stop'].includes(args.action)) {
-            const entry=this.browserDialogs.targets.get(`${this.browserDialogs.endpoint()}|${args.targetId}`);
-            if(!entry?.owners.has(owner)) await this.browserDialogs.start(owner,args.targetId);
-          }
-          result=await this.browserDialogs.request(owner,args);
-        }
-        else if(message.method === "browser/clipboard") result = await this.browserClipboard.request(owner,message.params);
-        else if(message.method === "browser/tabs") result=await this.browserTabs.request(this,message.params);
-        else if(message.method === "browser/input") result = await this.browserInputs.request(owner,message.params);
-        else if(message.method === "browser/drop") result = await this.browserDrops.request(owner,message.params);
-        else if(message.method === "browser/viewport") result = await this.browserViewport.request(owner,message.params);
-        else result = await this.native.request(message.method, message.params, message.timeoutMs);
+        const result=await hostRequest(this,owner,this,message.method,message.params,message.timeoutMs);
         if (this.worker === worker && !this.invalidatedWorkers.has(worker)) worker.postMessage({ type: "native_response", id: message.id, result });
       } catch (error) {
         if (error?.browserCleanupFailed && ["browser/focus","browser/download","browser/dialog","browser/clipboard","browser/viewport","browser/drop","browser/input"].includes(message.method)) {

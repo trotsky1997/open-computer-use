@@ -238,3 +238,27 @@ Node.js 22, the adapter/kernel and their support modules remain required. The
 existing native `ocu mcp` command still requires the native executable. Source
 plugin installation/build scripts still assemble native payloads by default;
 this change covers the runtime/launcher, not a native-free installer workflow.
+
+
+## Embedding session lifecycle
+
+Both exported session classes serialize `run()` calls and expose `endTurn()` in
+addition to `reset()` and `close()`. Hosts embedding the source session should
+call the turn boundary explicitly:
+
+```js
+const session = new PersistentJavaScriptSession({native});
+await session.run('var tab = await cua.createBrowserTab("cdp", "about:blank"); await tab.markHandoff();');
+await session.endTurn();
+await session.run('await tab.getAXState(); await tab.markDeliverable();');
+await session.close();
+```
+
+Idle boundaries retain bindings. An active asynchronous evaluation is rejected
+and its context discarded; earlier queued work and old native/browser callbacks
+are refused. Native shutdown and browser resource releases complete before the
+turn finishes. Marked tabs survive that boundary; marks clear on the next call.
+Cleanup failures keep the session stopped until a retry succeeds. Source timeout
+results also wait for reset cleanup. CPU-bound preemption requires the Worker
+class because an in-process loop blocks the event loop needed to cancel it.
+See [tabs and turn boundaries](../browser-tabs.md) for ownership and limits.
