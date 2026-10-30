@@ -167,3 +167,16 @@ The existing browser smoke also passed after controller/locator integration.
 Remote filesystems, popup ownership, host crashes and artifact retention management
 remain open. Chromium default policy is restored; preexisting custom client
 policies are not reconstructed.
+
+JavaScript and plugin MCP startup now defer native process creation until an app
+request. A failed native initialization reports an explicit error while preserving
+JS bindings and browser operation. Concurrent startup shares one connection;
+reset/close cancels it without allowing stale failures to clobber a replacement.
+Capability reporting checks Node/runtime modules separately from native artifacts,
+and the shell adapter launcher no longer requires a native payload before startup.
+
+All 62 Node checks passed, including missing native artifacts, lazy-start
+cancellation and MCP binding preservation. A real Chrome smoke exercised native-free
+CLI/MCP entrypoints, inventory error isolation and browser field input. Native
+subprocess fixtures verified handshake/reuse. Real native desktop behavior and
+native-free source installation remain open.

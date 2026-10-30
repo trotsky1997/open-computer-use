@@ -7,7 +7,7 @@ current native/browser documentation on 2026-10-30.
 
 | Area | Current implementation / evidence | Remaining work |
 | --- | --- | --- |
-| Persistent JavaScript | Upstream Worker kernel, serialized calls, timeout/reset checks | Browser-only operation without a native artifact; real long-running workload and recovery validation |
+| Persistent JavaScript | Worker kernel, serialized calls, timeout/reset checks and verified native-free CLI/MCP browser operation | Native-free source installer; real long-running workload and native desktop validation |
 | Native app observations | Existing native AX/screenshot APIs; output diffs and full-output option have Node checks | Real multi-window, index reuse, truncation and settle validation |
 | Native app input | Existing native actions plus selection option alignment | Paste, click modifiers/durations and remaining platform-specific API differences |
 | Browser discovery / lifecycle | Explicit CDP provider, binding, create/close, navigation/history/reload; disposable Chrome smoke | Extension and in-app transports, browser selection/session naming, ownership and tab retention |

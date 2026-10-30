@@ -50,5 +50,5 @@ if command -v open-computer-use >/dev/null 2>&1; then
   exec node "${adapter}" -- "$(command -v open-computer-use)" mcp
 fi
 
-echo "open-computer-use could not find a runnable native runtime for the JS REPL adapter." >&2
-exit 1
+# Browser and JavaScript tools can start while native automation is unavailable.
+exec node "${adapter}"

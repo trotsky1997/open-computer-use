@@ -242,6 +242,43 @@ export class JsonLinePeer extends EventEmitter {
 
 }
 
+export class LazyNativePeer {
+  constructor(options) {
+    this.options = options;
+    this.disposed = false;
+    this.peer = null;
+    this.connection = null;
+  }
+  connect() {
+    if (this.disposed) throw new Error("Native runtime is closed");
+    if (!this.connection) {
+      if (!this.options.command) throw new Error("Native runtime unavailable: no executable configured for this platform");
+      const peer = new JsonLinePeer(this.options);
+      this.peer = peer;
+      const connection = peer.initialize().then(() => peer).catch(error => {
+        peer.close();
+        if (this.connection === connection) {this.connection = null;this.peer = null;}
+        throw new Error(`Native runtime unavailable: ${asError(error).message}`);
+      });
+      this.connection = connection;
+    }
+    return this.connection;
+  }
+  async request(method, params, timeoutMs) {
+    const peer = await this.connect();
+    if (this.peer !== peer) throw new Error("Native session ended before request dispatch");
+    return peer.request(method, params, timeoutMs);
+  }
+  notify(method, params) {this.peer?.notify(method, params);}
+  endSession() {
+    const peer = this.peer;
+    this.peer = null;
+    this.connection = null;
+    peer?.close();
+  }
+  close() {this.disposed = true;this.endSession();}
+}
+
 function toolResultText(result) {
   return (result?.content ?? []).filter(item => item?.type === "text").map(item => item.text ?? "").filter(Boolean).join("\n");
 }
@@ -764,8 +801,7 @@ function resolveNativeCommand(argv) {
 export async function runServer({ command, args }) {
   // Actions return a short status instead of a settle + full snapshot the adapter would
   // discard; state is read explicitly by getAXState(). Runtimes without the flag ignore it.
-  const native = new JsonLinePeer({ command, args, env: { ...process.env, OPEN_COMPUTER_USE_ACTION_READ_BACK: "0" } });
-  await native.initialize();
+  const native = new LazyNativePeer({ command, args, env: { ...process.env, OPEN_COMPUTER_USE_ACTION_READ_BACK: "0" } });
   const session = new WorkerJavaScriptSession({ native });
   let buffer = "";
   let requestQueue = Promise.resolve();

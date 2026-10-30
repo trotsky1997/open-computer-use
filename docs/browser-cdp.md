@@ -282,3 +282,18 @@ reset/close, context exclusivity, policy restore failure/retry and file-chooser 
 download sequencing. Host process crashes, remote browser filesystems, popup-owned
 downloads and headful presentation remain unverified. The artifact directory must
 be visible to the browser and host; a remote transfer layer is not implemented.
+
+## Browser-only runtime
+
+A package built from this fork can run `ocu js` / `ocu repl` and its plugin MCP
+adapter without a native artifact. Configure OPEN_COMPUTER_USE_CDP_URL normally.
+Native APIs initialize lazily on first use and report their own startup errors.
+getState can return browser results plus an apps error when native discovery is
+unavailable. The capability report checks Node and all required runtime modules
+independently of native artifact availability.
+
+`OPEN_COMPUTER_USE_CDP_URL=http://127.0.0.1:9222 node scripts/run-browser-only-smoke.mjs`
+verifies CLI and MCP browser discovery, native-error isolation and real field input
+against a disposable Chrome, with no usable native path. Healthy native handshake
+and initialization-cancellation behavior have subprocess fixture checks. Real
+native desktop behavior and a native-free source installer remain separate work.

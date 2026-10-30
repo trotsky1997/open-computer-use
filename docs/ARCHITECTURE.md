@@ -266,3 +266,11 @@ Worker, including failures reported by asynchronous completion cleanup.
 Native and locator input share per-event readiness barriers. File chooser and
 download preparation can coexist, including setFiles-triggered downloads. Packaging
 includes the download controller in npm and installed Codex plugin runtimes.
+
+CLI and plugin adapter sessions use a lazy native peer. Native initialization is
+shared across initial app calls and canceled at session reset/close; a stale
+initialization cannot overwrite a replacement. JavaScript startup checks only the
+Node adapter/kernel and support modules. Native artifacts are reported separately
+and loaded on first app request. The shell plugin launcher can start the adapter
+without finding native payloads; native MCP compatibility and source payload
+installation retain their existing artifact requirements.

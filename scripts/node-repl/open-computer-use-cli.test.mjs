@@ -5,6 +5,7 @@ import path from "node:path";
 import { PassThrough } from "node:stream";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import {JsonLinePeer,LazyNativePeer} from "./open-computer-use-repl.mjs";
 import {
   inspectCapabilities,
   launcherHelp,
@@ -193,4 +194,56 @@ test("ocu repl preserves bindings and reset discards them", async t => {
   });
   assert.equal(code, 0, errorOutput.value());
   assert.equal(output.value(), "40\n42\n42\nOpen Computer Use JavaScript session reset\nundefined\n");
+});
+
+
+test("JS remains usable without a native artifact and reports native failure at first use", async t => {
+  const fixture = makePackage();t.after(fixture.cleanup);
+  rmSync(fixture.nativePath);
+  const report = inspectCapabilities({packageRoot:fixture.packageRoot,platformPackages:fixture.platformPackages});
+  assert.equal(report.runtime.native.available,false);
+  assert.equal(report.capabilities.js.available,true);
+  assert.equal(report.capabilities.repl.available,true);
+  assert.deepEqual(report.capabilities.js.requires,["node","adapter","kernel","supportModules"]);
+  const output=captureStream(), errors=captureStream();
+  const code=await main({packageRoot:fixture.packageRoot,platformPackages:fixture.platformPackages,
+    argv:["js",'try {await cua.listApps();} catch(error) {nodeRepl.write(error.message);} nodeRepl.write(42);'],output:output.stream,errorOutput:errors.stream});
+  assert.equal(code,0,errors.value());
+  assert.match(output.value(),/Native runtime unavailable/);
+  assert.match(output.value(),/42/);
+  rmSync(path.join(fixture.packageRoot,"scripts/node-repl/browser-downloads.mjs"));
+  const broken=inspectCapabilities({packageRoot:fixture.packageRoot,platformPackages:fixture.platformPackages});
+  assert.equal(broken.capabilities.js.available,false);
+  assert.match(broken.capabilities.js.unavailableReasons.join("\n"),/support module.*browser-downloads/);
+});
+
+test("lazy native startup cancellation preserves a replacement connection", async t => {
+  const fixture=makePackage();t.after(fixture.cleanup);
+  const native=new LazyNativePeer({command:fixture.nativePath,args:["mcp"]});t.after(()=>native.close());
+  assert.equal(native.peer,null);
+  const interrupted=native.request("ping");
+  native.endSession();
+  const replacement=native.request("ping");
+  await assert.rejects(interrupted,/Native runtime unavailable/);
+  assert.deepEqual(await replacement,{});
+  const pid=native.peer.child.pid;
+  await Promise.all([native.request("ping"),native.request("ping")]);
+  assert.equal(native.peer.child.pid,pid);
+});
+
+test("MCP adapter initializes and preserves JS bindings when the native binary is missing", async t => {
+  const fixture=makePackage();t.after(fixture.cleanup);
+  const adapter=path.join(fixture.packageRoot,"scripts/node-repl/open-computer-use-repl.mjs");
+  const client=new JsonLinePeer({command:process.execPath,args:[adapter,"--",path.join(fixture.packageRoot,"missing-native"),"mcp"],env:{...process.env,OPEN_COMPUTER_USE_CDP_URL:""}});
+  t.after(()=>client.close());
+  await client.initialize();
+  assert.deepEqual((await client.request("tools/list")).tools.map(tool=>tool.name),["js","js_reset"]);
+  let result=await client.request("tools/call",{name:"js",arguments:{code:'var value=41; nodeRepl.write(value);'}});
+  assert.equal(result.isError,false);
+  result=await client.request("tools/call",{name:"js",arguments:{code:'await cua.listApps();'}});
+  assert.equal(result.isError,true);
+  assert.match(result.content.at(-1).text,/Native runtime unavailable/);
+  result=await client.request("tools/call",{name:"js",arguments:{code:'nodeRepl.write(++value);'}});
+  assert.equal(result.isError,false);
+  assert.equal(result.content.at(-1).text,'42');
 });

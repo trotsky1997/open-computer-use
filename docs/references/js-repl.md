@@ -155,7 +155,7 @@ full snapshot.
 - The npm CLI also exposes the same runtime directly:
 
 ```sh
-# One evaluation, then close the Worker and native MCP child.
+# One evaluation, then close the Worker and any started native child.
 ocu js 'var apps = await cua.listApps({ emit: false }); nodeRepl.write(apps)'
 
 # Read one evaluation from stdin or a file.
@@ -174,8 +174,9 @@ piped, each non-empty line is evaluated in the same persistent session. Use
 Use `ocu capabilities` for a human-readable preflight or
 `ocu capabilities --json` for a stable structured report. The commands remain
 visible in `ocu --help` even if the adapter, kernel, or native runtime is
-missing; the report marks them unavailable and execution fails with the missing
-component and path.
+missing. Missing adapter/kernel/support modules make JavaScript unavailable with
+component paths. Native artifact availability is reported independently; JavaScript
+and configured CDP browsers can run without it.
 
 The npm entrypoint itself currently has a `#!/usr/bin/env node` shebang. Once
 the launcher is running, `js` and `repl` reuse `process.execPath` and do not
@@ -204,7 +205,7 @@ JavaScript is not an acceptable host boundary.
 
 | Entry | Lifetime | Persistent state |
 | --- | --- | --- |
-| `ocu js` | One evaluation | A Worker and native MCP child exist only for that invocation. |
+| `ocu js` | One evaluation | A Worker exists for the invocation; a native child starts only if app automation is used. |
 | `ocu repl` | Current terminal session | JavaScript bindings and native snapshot state persist until `.reset`, `.exit`, Ctrl-D, or termination. |
 | `ocu mcp` | Current stdio MCP connection | Native MCP state persists until stdin EOF or host termination. |
 | Codex plugin adapter | Current plugin MCP connection | `js` bindings persist across tool calls until `js_reset` or connection shutdown. |
@@ -220,3 +221,20 @@ The REPL also exposes `listBrowsers`, `listTabs`, `getBrowser`, `getTab` and
 `createBrowserTab` through the opt-in CDP provider. `getState` combines app and
 browser inventories with independent error reporting. See [CDP browser](../browser-cdp.md)
 for configuration, supported tab operations and real-browser verification.
+
+
+## Optional native runtime
+
+CLI JavaScript sessions and the plugin MCP adapter defer native startup until an
+app request needs it. Browser inventory, CDP input and generic JavaScript can run
+with no native executable installed. MCP initialize/tools/list also work without
+a native backend. A failed native startup is reported as `Native runtime unavailable`
+and leaves JavaScript bindings usable; getState reports native inventory failure
+alongside browser results. Concurrent initial app requests share one initialization.
+Reset/close cancels pending initialization and a stale startup cannot replace the
+next native connection. Interrupted app requests are not replayed.
+
+Node.js 22, the adapter/kernel and their support modules remain required. The
+existing native `ocu mcp` command still requires the native executable. Source
+plugin installation/build scripts still assemble native payloads by default;
+this change covers the runtime/launcher, not a native-free installer workflow.

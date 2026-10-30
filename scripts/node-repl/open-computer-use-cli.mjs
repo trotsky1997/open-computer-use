@@ -66,6 +66,10 @@ export function inspectCapabilities({
   };
   const adapter = { available: existsSync(paths.adapterPath), path: paths.adapterPath };
   const kernel = { available: existsSync(paths.kernelPath), path: paths.kernelPath };
+  const supportModules = ["ocu-config.mjs","browser-cdp.mjs","browser-playwright.mjs","browser-downloads.mjs"].map(name => {
+    const modulePath = path.join(path.dirname(paths.adapterPath),name);
+    return {name,path:modulePath,available:existsSync(modulePath)};
+  });
   const native = {
     available: Boolean(paths.nativePath && canExecute(paths.nativePath, platform)),
     path: paths.nativePath ?? null,
@@ -76,13 +80,12 @@ export function inspectCapabilities({
   if (!node.available) unavailableReasons.push(`Node.js >= ${node.minimumVersion} is unavailable`);
   if (!adapter.available) unavailableReasons.push(`REPL adapter is missing at ${adapter.path}`);
   if (!kernel.available) unavailableReasons.push(`JavaScript kernel is missing at ${kernel.path}`);
-  if (!native.supported) unavailableReasons.push(`platform ${paths.platformKey} is unsupported`);
-  else if (!native.available) unavailableReasons.push(`native runtime is missing or not executable at ${native.path}`);
+  for (const module of supportModules) if (!module.available) unavailableReasons.push(`REPL support module is missing at ${module.path}`);
   const codeAvailable = unavailableReasons.length === 0;
 
   return {
     schemaVersion: 1,
-    runtime: { node, adapter, kernel, native },
+    runtime: { node, adapter, kernel, supportModules, native },
     capabilities: {
       nativeMcp: {
         available: native.available,
@@ -92,13 +95,13 @@ export function inspectCapabilities({
       js: {
         available: codeAvailable,
         lifecycle: "one-shot",
-        requires: ["node", "adapter", "kernel", "native"],
+        requires: ["node", "adapter", "kernel", "supportModules"],
         unavailableReasons,
       },
       repl: {
         available: codeAvailable,
         lifecycle: "terminal-session",
-        requires: ["node", "adapter", "kernel", "native"],
+        requires: ["node", "adapter", "kernel", "supportModules"],
         unavailableReasons,
       },
     },
@@ -148,7 +151,7 @@ Code-first status:
   js / repl            ${codeStatus}
 
 Notes:
-  js creates one adapter/native session and exits after the evaluation.
+  js creates one JavaScript session; native automation starts on first use and exits after the evaluation.
   repl keeps one adapter/native session alive until .exit, Ctrl-D, or termination.
   The npm launcher requires Node.js 22 or newer to start; run 'ocu capabilities --json' for component details.
   'ocu mcp' intentionally keeps the native 9-tool compatibility surface.
@@ -183,7 +186,7 @@ function capabilitiesHelp() {
   return `Usage:
   ocu capabilities [--json]
 
-Reports whether the current package has a usable Node runtime, REPL adapter, JavaScript kernel, and native runtime. Commands remain visible in help even when a component is unavailable.`;
+Reports Node, adapter, kernel, support-module and native-artifact availability. JavaScript requires its runtime modules; native automation starts on first app request and is reported independently.`;
 }
 
 function installHelp(scriptName, usage) {
@@ -267,16 +270,15 @@ function assertCodeCapability(report) {
 async function loadReplRuntime(paths) {
   const adapter = await import(pathToFileURL(paths.adapterPath).href);
   return {
-    JsonLinePeer: adapter.JsonLinePeer,
+    LazyNativePeer: adapter.LazyNativePeer,
     WorkerJavaScriptSession: adapter.WorkerJavaScriptSession,
   };
 }
 
 async function openSession({ paths, env }) {
-  const { JsonLinePeer, WorkerJavaScriptSession } = await loadReplRuntime(paths);
-  const native = new JsonLinePeer({ command: paths.nativePath, args: ["mcp"], env });
+  const { LazyNativePeer, WorkerJavaScriptSession } = await loadReplRuntime(paths);
+  const native = new LazyNativePeer({ command: paths.nativePath, args: ["mcp"], env });
   try {
-    await native.initialize();
     const session = new WorkerJavaScriptSession({ native });
     let closing;
     return {
