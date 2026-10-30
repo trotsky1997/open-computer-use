@@ -286,7 +286,11 @@ func (s *service) callTool(name string, args map[string]any) toolCallResult {
 		if err != nil {
 			return textResult(err.Error(), true)
 		}
-		return s.typeText(requiredString(args, "app"), requiredString(args, "text"), keyMethod)
+		index := optionalElementIndex(args)
+		if _, present := args["element_index"]; present && index == "" {
+			return textResult("Invalid element_index", true)
+		}
+		return s.typeText(requiredString(args, "app"), requiredString(args, "text"), keyMethod, index)
 	case "press_key":
 		if _, ok := args["duration_ms"]; ok {
 			return textResult("Held key duration_ms is not supported by this platform", true)
@@ -460,7 +464,7 @@ func (s *service) drag(app string, fromX, fromY, toX, toY *float64) toolCallResu
 	return s.actionResult(app, linuxRequest{Tool: "drag", App: app, FromX: fromX, FromY: fromY, ToX: toX, ToY: toY, WindowBounds: snapshot.WindowBounds})
 }
 
-func (s *service) typeText(app, text, keyMethod string) toolCallResult {
+func (s *service) typeText(app, text, keyMethod, elementIndex string) toolCallResult {
 	if app == "" {
 		return textResult("Missing required argument: app", true)
 	}
@@ -473,7 +477,18 @@ func (s *service) typeText(app, text, keyMethod string) toolCallResult {
 	if s.currentSnapshot(app) == nil {
 		return textResult("No app state is available for "+app+". Run get_app_state before action tools.", true)
 	}
-	return s.actionResult(app, linuxRequest{Tool: "type_text", App: app, Text: text})
+	if strings.ContainsRune(text, 0) {
+		return textResult("Text must not contain NUL", true)
+	}
+	request := linuxRequest{Tool: "type_text", App: app, Text: text}
+	if elementIndex != "" {
+		record, err := lookupElement(s.currentSnapshot(app), elementIndex)
+		if err != nil {
+			return textResult(err.Error(), true)
+		}
+		request.Element = record
+	}
+	return s.actionResult(app, request)
 }
 
 func (s *service) pressKey(app, key, keyMethod string) toolCallResult {
@@ -1390,12 +1405,13 @@ func toolDefinitions() []toolDefinition {
 		},
 		{
 			Name:        "type_text",
-			Description: "Type literal text using keyboard input. This tool is part of plugin `Computer Use`.",
+			Description: "Insert literal text at a Linux field caret/selection. Supply element_index for an exact observed field, or omit it for focused editable text. This tool is part of plugin `Computer Use`.",
 			Annotations: defaultAnnotations(),
 			InputSchema: objectSchema(map[string]any{
-				"app":        stringProperty("App name or bundle identifier"),
-				"text":       stringProperty("Literal text to type"),
-				"key_method": enumStringProperty("Keyboard delivery: auto (default) or sky_key. sky_key is the macOS SkyLight background-window path and is not supported on Linux.", keyMethodValues),
+				"app":           stringProperty("App name or bundle identifier"),
+				"text":          stringProperty("Literal text to type"),
+				"element_index": integerProperty("Optional exact field index from a fresh snapshot; omitted uses current focus"),
+				"key_method":    enumStringProperty("Keyboard delivery: auto (default) or sky_key. sky_key is the macOS SkyLight background-window path and is not supported on Linux.", keyMethodValues),
 			}, []string{"app", "text"}),
 		},
 	}

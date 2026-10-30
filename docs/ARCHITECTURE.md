@@ -132,6 +132,8 @@
 
 ### 7. Linux Runtime
 
+- Linux `app.typeText(text, elementIndex?)` 使用精确字段身份或当前焦点，支持光标插入、选区替换及 Unicode 字节长度；失败后由调用方检查结果再重试。实现和验证见 [Linux 文本输入](linux-text-input.md)。
+
 - Linux runtime 位于 `apps/OpenComputerUseLinux`，以 Go 维护 CLI、`call --calls` sequence、MCP JSON-RPC、tool schema 和进程内 snapshot cache。
 - Linux 支持与 macOS 一致的 `OPEN_COMPUTER_USE_ACTION_READ_BACK`：默认保持动作后等待并返回完整快照；设置为 `0`、`false`、`no` 或 `off`（忽略大小写与首尾空白）时，成功动作只返回 `ok`，跳过回读等待、AX、焦点/选区和截图采集，也不覆盖最后一次显式观察的索引缓存。REPL adapter 已自动设置此开关；调用方应在需要观察时显式调用 `get_app_state` / `getAXState()`，并在界面变化后刷新索引。`ok` 仅表示动作调用完成，不代表界面已完成更新或任务成功。显式观察不受开关影响，仍返回完整快照。
 - 构建入口是 `scripts/build-open-computer-use-linux.sh --arch arm64|amd64`，默认输出到 `dist/linux/<arch>/open-computer-use`；npm release package 会把两个 Linux artifact 内置到已有 root/alias packages，Node launcher 按 `process.platform/process.arch` 自动选择。

@@ -820,31 +820,54 @@ def send_text(text):
 
 
 def find_editable_text(root):
-    def is_editable(node):
-        return supports_interface(node, "EditableText") and supports_interface(
-            node, "Text"
-        )
-
-    return find_first(root, is_editable)
+    matches = [node for node in iter_all(root, max_depth=MAX_DEPTH)
+               if state_contains(node, Atspi.StateType.FOCUSED)
+               and supports_interface(node, "EditableText") and supports_interface(node, "Text")]
+    return matches[0] if len(matches) == 1 else None
 
 
-def insert_text(root, text):
-    node = find_editable_text(root)
+def insert_text(root, text, node=None):
+    if node is None:
+        if not state_contains(root, Atspi.StateType.ACTIVE):
+            return False
+        node = find_editable_text(root)
     if node is None:
         return False
-    editable = safe(node.get_editable_text_iface)
-    text_iface = safe(node.get_text_iface)
-    if editable is None or text_iface is None:
-        return False
-    offset = int(safe(lambda: Atspi.Text.get_character_count(text_iface), 0) or 0)
-    return bool(
-        safe(
-            lambda: Atspi.EditableText.insert_text(
-                editable, offset, str(text), len(str(text))
-            ),
-            False,
-        )
-    )
+    if not supports_interface(node, "EditableText") or not supports_interface(node, "Text") or not state_contains(node, Atspi.StateType.EDITABLE):
+        raise RuntimeError("Target field is not editable text")
+    editable, text_iface = node.get_editable_text_iface(), node.get_text_iface()
+    count = Atspi.Text.get_character_count(text_iface)
+    caret = Atspi.Text.get_caret_offset(text_iface)
+    selections = Atspi.Text.get_n_selections(text_iface)
+    if count < 0 or not 0 <= caret <= count or selections not in (0, 1):
+        raise RuntimeError("Invalid or ambiguous text caret/selection")
+    start = end = caret
+    if selections:
+        selected = Atspi.Text.get_selection(text_iface, 0)
+        start, end = selected.start_offset, selected.end_offset
+        if not 0 <= start <= end <= count:
+            raise RuntimeError("Invalid text selection")
+    protected = node_role(node).lower() == "password text"
+    before = None if protected else Atspi.Text.get_text(text_iface, 0, -1)
+    if before is not None and len(before) != count:
+        raise RuntimeError("Provider text offsets are inconsistent")
+    if start != end:
+        if protected and (start != 0 or end != count):
+            raise RuntimeError("Partial protected selection requires native keyboard input")
+        expected = text if protected else before[:start] + text + before[end:]
+        applied = Atspi.EditableText.set_text_contents(editable, expected)
+    else:
+        expected = None if protected else before[:caret] + text + before[caret:]
+        applied = Atspi.EditableText.insert_text(editable, caret, text, len(text.encode("utf-8")))
+    if not applied:
+        raise RuntimeError("Text edit failed; inspect the field before retrying")
+    if protected and Atspi.Text.get_character_count(text_iface) != count - (end - start) + len(text):
+        raise RuntimeError("Protected text length changed unexpectedly; inspect before retrying")
+    if not protected and Atspi.Text.get_text(text_iface, 0, -1) != expected:
+        raise RuntimeError("Text changed or was transformed during the edit; inspect before retrying")
+    if not Atspi.Text.set_caret_offset(text_iface, start + len(text)):
+        raise RuntimeError("Text was edited but caret placement failed; inspect before retrying")
+    return True
 
 
 def set_element_value(node, value):
@@ -926,10 +949,10 @@ def perform_operation(operation):
     bound = query.startswith(WINDOW_PREFIX)
     bounds = operation.get("windowBounds") or extents(window)
     element_record = operation.get("element")
-    element = find_element(app, element_record, window=window, strict=bound)
+    element = find_element(app, element_record, window=window, strict=bound or (tool == "type_text" and element_record is not None))
 
-    def physical(pointer=False):
-        if not bound:
+    def physical(pointer=False, force=False):
+        if not bound and not force:
             return
         if pointer:
             # shortcut: enable physical pointer input after native hit routing is verified.
@@ -999,9 +1022,15 @@ def perform_operation(operation):
         to_x, to_y = screen_point(bounds, None, operation.get("to_x"), operation.get("to_y"))
         send_drag(from_x, from_y, to_x, to_y)
     elif tool == "type_text":
-        if not insert_text(window, operation.get("text", "")):
-            physical()
-            send_text(operation.get("text", ""))
+        text = operation.get("text", "")
+        if not isinstance(text, str) or not text or "\0" in text:
+            raise RuntimeError("type_text requires non-empty text without NUL")
+        if element_record is not None:
+            if element is None or not insert_text(window, text, node=element):
+                raise RuntimeError("Indexed field is not editable text")
+        elif not insert_text(window, text):
+            physical(force=True)
+            send_text(text)
     elif tool == "press_key":
         physical()
         send_key(operation.get("key", ""))

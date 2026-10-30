@@ -647,7 +647,7 @@ func TestLinuxKeyMethodSchemaAndUnsupportedSkyKey(t *testing.T) {
 	}
 
 	service := newService()
-	result := service.typeText("Text Editor", "hello", "sky_key")
+	result := service.typeText("Text Editor", "hello", "sky_key", "")
 	if !result.IsError || result.Content[0].Text != "key_method 'sky_key' is not supported on Linux" {
 		t.Fatalf("type_text sky_key result = %#v", result)
 	}

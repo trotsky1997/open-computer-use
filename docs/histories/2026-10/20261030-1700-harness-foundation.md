@@ -1017,3 +1017,22 @@ The final revision passed 140 Node checks, 39 Python checks and 46 native Linux 
 checks, plus both session modes' multi-window GTK flow and the earlier native
 launch/lifecycle GTK regression. Owned test apps and private VM work files were
 removed. The full harness goal remains active.
+
+
+## Linux focused and indexed text verification
+
+Implemented `app.typeText(text, elementIndex?)` through JS capability discovery,
+Go schema/index validation and exact AT-SPI object identity. Omitted indexes use
+active-window focus. Native caret/selection offsets preserve surrounding text;
+Unicode insertion supplies UTF-8 byte length. Read-only and replaced fields fail
+before editing, and attempted edits never replay through global input. Protected
+fields skip content reads, validate length and reject partial selections. Inspect
+results before retrying an error after a provider edit/caret update.
+
+Passed 141 Node checks, 42 Python checks and the Linux Go suite (39 top-level
+checks plus 8 subchecks) on arm64 Ubuntu. Both REPL modes passed private GTK text,
+window-identity and launch/lifecycle flows, including consecutive multiline edits,
+focus omission and inactive/read-only/stale rejection. No dependency or CI added.
+Broader providers, rich-text formatting, concurrent edits, Wayland/headful,
+`typeCharacters`, paste and remaining native image/physical/Windows work stay open.
+The full harness goal remains active. See [text input](../../linux-text-input.md).

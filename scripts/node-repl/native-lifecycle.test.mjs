@@ -29,3 +29,12 @@ test('Linux windows bind an exact opaque selector and validate inventory/IDs bef
  advertised=false;await assert.rejects(cua.getApp({windowId:12}),/does not advertise/);
  const mac=createCuaApi(native,()=>({write(){}}),undefined,{platform:'darwin'});assert.equal(mac.listWindows,undefined);await assert.rejects(mac.getApp({windowId:12}),/available on Linux/);
 });
+test('Linux text uses the focused/indexed signature and checks native support before input',async()=>{
+ const calls=[];let advertised=true;
+ const native={async request(method,params){calls.push({method,params});return method==='tools/list'?{tools:advertised?[{name:'type_text',inputSchema:{properties:{element_index:{type:'integer'}}}}]:[]}:result('ok');}};
+ const cua=createCuaApi(native,()=>({write(){}}),undefined,{platform:'linux'}),app=await cua.getApp('Editor',{initialState:false});
+ for(const [text,index] of [['',0],['x\0',0],['x',-1],['x',1.5],['x',{}],['x',null]])await assert.rejects(app.typeText(text,index),/Linux typeText/);
+ assert.equal(calls.length,0);await app.typeText('你🙂',2);assert.deepEqual(calls.at(-1).params.arguments,{app:'Editor',text:'你🙂',element_index:2});
+ await app.typeText('focus');assert.deepEqual(calls.at(-1).params.arguments,{app:'Editor',text:'focus'});
+ advertised=false;await assert.rejects(app.typeText('must-not-send',2),/does not advertise/);
+});

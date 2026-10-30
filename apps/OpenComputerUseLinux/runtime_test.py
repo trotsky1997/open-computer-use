@@ -10,20 +10,41 @@ from unittest import mock
 class FakeText:
     @staticmethod
     def get_character_count(_interface):
-        return 5
+        return len(getattr(_interface, "text", "hello"))
 
     @staticmethod
     def get_text(_interface, _start, _end):
-        return "hello"
+        return getattr(_interface, "text", "hello")
+
+    @staticmethod
+    def get_caret_offset(node):
+        return node.caret
+
+    @staticmethod
+    def get_n_selections(node):
+        return int(node.selection is not None)
+
+    @staticmethod
+    def get_selection(node, _index):
+        return types.SimpleNamespace(start_offset=node.selection[0], end_offset=node.selection[1])
+
+    @staticmethod
+    def set_caret_offset(node, value):
+        node.caret = value
+        node.selection = None
+        return True
 
 
 class FakeEditableText:
     @staticmethod
     def insert_text(_interface, _offset, _text, _length):
+        _interface.byte_length = _length
+        _interface.text = _interface.text[:_offset] + _text + _interface.text[_offset:]
         return True
 
     @staticmethod
     def set_text_contents(_interface, _text):
+        _interface.text = _text
         return True
 
 
@@ -34,6 +55,7 @@ def load_runtime():
     repository.Atspi = types.SimpleNamespace(
         Text=FakeText,
         EditableText=FakeEditableText,
+        StateType=types.SimpleNamespace(EDITABLE="editable", FOCUSED="focused", ACTIVE="active"),
     )
     repository.Gdk = types.SimpleNamespace()
     gi.repository = repository
@@ -52,6 +74,14 @@ def load_runtime():
 class InterfaceOnlyAccessible:
     def __init__(self, interfaces):
         self.interfaces = interfaces
+        self.text, self.caret, self.selection = "hello", 2, None
+        self.editable, self.focused = True, False
+
+    def get_state_set(self):
+        return types.SimpleNamespace(contains=lambda state: self.editable if state == "editable" else self.focused if state == "focused" else False)
+
+    def get_role_name(self):
+        return getattr(self, "role", "text")
 
     def get_interfaces(self):
         return self.interfaces
@@ -79,7 +109,7 @@ class RuntimeInterfaceDetectionTests(unittest.TestCase):
     def test_insert_text_uses_accessible_interfaces(self):
         node = InterfaceOnlyAccessible(["Accessible", "Text", "EditableText"])
 
-        self.assertTrue(self.runtime.insert_text(node, "hello"))
+        self.assertTrue(self.runtime.insert_text(node, "hello", node=node))
 
     def test_set_value_uses_accessible_interfaces(self):
         node = InterfaceOnlyAccessible(["Accessible", "Text", "EditableText"])
@@ -512,6 +542,45 @@ class WindowBindingTests(unittest.TestCase):
                 runtime.find_element(object(), {"objectPath": "/old", "runtimeId": [0]}, window=object(), strict=True)
         with mock.patch.object(runtime, "iter_all", return_value=[old]):
             self.assertIs(runtime.find_element(object(), {"objectPath": "/old"}, window=object(), strict=True), old)
+
+
+class IndexedTextTests(unittest.TestCase):
+    def test_caret_unicode_and_selection_preserve_existing_text(self):
+        runtime = load_runtime()
+        node = InterfaceOnlyAccessible(["Text", "EditableText"])
+        runtime.insert_text(node, "你🙂", node=node)
+        self.assertEqual(node.text, "he你🙂llo")
+        self.assertEqual(node.caret, 4)
+        self.assertEqual(node.byte_length, len("你🙂".encode("utf-8")))
+        node.selection = (1, 5)
+        runtime.insert_text(node, "替", node=node)
+        self.assertEqual(node.text, "h替lo")
+        self.assertEqual(node.caret, 2)
+
+    def test_protected_selection_never_reuses_masked_contents(self):
+        runtime = load_runtime()
+        node = InterfaceOnlyAccessible(["Text", "EditableText"])
+        node.role, node.selection = "password text", (0, len(node.text))
+        with mock.patch.object(runtime.Atspi.Text, "get_text", side_effect=AssertionError("secret read")):
+            runtime.insert_text(node, "新🙂", node=node)
+        self.assertEqual(node.text, "新🙂")
+        node.selection = (0, 1)
+        with self.assertRaisesRegex(RuntimeError, "Partial protected selection"):
+            runtime.insert_text(node, "wrong", node=node)
+        self.assertEqual(node.text, "新🙂")
+
+    def test_read_only_and_attempted_failure_never_fall_back(self):
+        runtime = load_runtime()
+        node = InterfaceOnlyAccessible(["Text", "EditableText"])
+        node.editable = False
+        with self.assertRaisesRegex(RuntimeError, "not editable"):
+            runtime.insert_text(node, "wrong", node=node)
+        self.assertEqual(node.text, "hello")
+        node.editable = True
+        with mock.patch.object(runtime.Atspi.EditableText, "insert_text", return_value=False):
+            with self.assertRaisesRegex(RuntimeError, "inspect"):
+                runtime.insert_text(node, "wrong", node=node)
+        self.assertEqual(node.text, "hello")
 
 if __name__ == "__main__":
     unittest.main()

@@ -142,7 +142,7 @@ The runtime exposes an asynchronous app-bound API:
 - Held click options require a backend advertising key/duration_ms (currently macOS). key holds a native key/chord across the sequence; durationMs holds each mouse press. auto selects targeted app_post. Click counts are 1...3. Unsupported backends and explicit non-event methods throw before input.
 - \`await app.scroll(elementIndex, direction, pages?)\`
 - \`await app.drag([fromX, fromY], [toX, toY])\`
-- \`await app.typeText(text, { keyMethod? })\`
+- \`await app.typeText(text, elementIndex?)\` on Linux: insert at the exact observed editable field caret/selection, or current focus when omitted. Other platforms use \`app.typeText(text, { keyMethod? })\`. Refresh AX indexes after UI changes; inspect after an attempted-edit error before retrying.
 - \`await app.pressKey(key, { keyMethod?, durationMs? })\`
 - \`await app.setValue(elementIndex, value)\`
 - \`await app.selectText(elementIndex, text, { prefix?, suffix?, selectionType? })\`: macOS-only; selectionType is text (default), cursor_before or cursor_after. Ambiguous text and unverified selections throw.
@@ -625,7 +625,15 @@ export function createCuaApi(native, activeOutput, onDispose, {tabRequest,platfo
         await call("select_text", { app, element_index: elementIndex, text,
           prefix: options.prefix, suffix: options.suffix, selection: options.selectionType });
       },
-      async typeText(text, options = {}) { await call("type_text", { app, text, ...optionsToKeyArgs(options) }); },
+      async typeText(text, indexOrOptions) {
+        if(platform==='linux'){
+          if(typeof text!=='string'||!text.length||text.includes('\0'))throw Error('Linux typeText requires non-empty text without NUL');
+          if(indexOrOptions!==undefined&&(!Number.isSafeInteger(indexOrOptions)||indexOrOptions<0))throw Error('Linux typeText field index must be a non-negative safe integer');
+          const properties=(await native.request('tools/list',{}))?.tools?.find(tool=>tool.name==='type_text')?.inputSchema?.properties;
+          if(!properties?.element_index)throw Error('Native runtime does not advertise focused/indexed Linux text; update it before use');
+          await call('type_text',{app,text,...(indexOrOptions===undefined?{}:{element_index:indexOrOptions})});
+        }else await call('type_text',{app,text,...optionsToKeyArgs(indexOrOptions)});
+      },
       async performSecondaryAction(elementIndex, action) { await call("perform_secondary_action", { app, element_index: elementIndex, action }); },
     });
   }
