@@ -27,7 +27,7 @@ the name before creating a target; invalid names fail before target creation.
 
 ## Browser bridge setup
 
-`tabs.selected()` and the [management capability](browser-management.md) use the
+`tabs.selected()`, [history queries](browser-history.md) and the [management capability](browser-management.md) use the
 bundled Manifest V3 extension in the configured CDP browser. Chrome/Chromium 137+
 is required. Load `scripts/node-repl/chrome-browser-extension` from a source
 checkout, or `scripts/chrome-browser-extension` from an installed plugin. In the
@@ -40,7 +40,8 @@ including a development service worker's cached scripts. Extension ID:
 The manifest requests `tabs`, `debugger`, `tabGroups`, `bookmarks` and `storage`.
 `tabs` and `debugger` map native active-tab/window state to an exact CDP target;
 `tabGroups` and `bookmarks` support requested organization; `storage.session`
-retains the bounded before-state audit for this browser session. There are no
+retains the bounded before-state audit for this browser session. Optional `history`
+access requires a user gesture in the extension options; it starts disabled. There are no
 host permissions or remote endpoints. The host verifies extension identity and
 bridge protocol before invoking the fixed worker entry point.
 

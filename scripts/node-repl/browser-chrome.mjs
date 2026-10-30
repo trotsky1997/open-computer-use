@@ -1,3 +1,5 @@
+import {randomUUID} from 'node:crypto';
+import {normalizeHistoryOptions} from './chrome-browser-extension/history.mjs';
 import {BrowserTabs} from './browser-tabs.mjs';
 import {findBrowserPage} from './browser-playwright.mjs';
 import {validateManagement} from './chrome-browser-extension/policy.mjs';
@@ -8,24 +10,28 @@ export class BrowserChrome {
  hidden(){const ids=[],urls=[];for(const entry of this.tabs.browsers.values()){ids.push(...entry.tabs.keys());urls.push(...entry.creating.keys());}return {ids,urls};}
  request(owner,args){
   if(args?.action==='targets')return Promise.resolve(this.hidden());
-  if(!['selected','management','audit'].includes(args?.action))throw Error('Unknown Chrome bridge action');
+  if(!['selected','management','audit','history'].includes(args?.action))throw Error('Unknown Chrome bridge action');
+  if(args.action==='history')args={...args,options:normalizeHistoryOptions(args.options),id:randomUUID()};
   const mutation=args.action==='management'&&validateManagement(args.namespace,args.method,args.args);
-  if(Buffer.byteLength(JSON.stringify(args))>65536)throw Error('Management request exceeds 64 KiB');
+  if(Buffer.byteLength(JSON.stringify(args))>65536)throw Error('Chrome bridge request exceeds 64 KiB');
   if(this.closedOwners.has(owner))throw Error('Chrome bridge turn ended');
   let entry=this.owners.get(owner);
   if(entry&&entry.endpoint!==this.endpoint())throw Error('Configured browser changed; reset the session');
   if(!entry){
-   let reject;entry={owner,endpoint:this.endpoint(),pending:new Set(),mutations:new Set(),stopped:new Promise((_,no)=>{reject=no;})};entry.stopped.catch(()=>{});entry.reject=reject;entry.wait=promise=>Promise.race([promise,entry.stopped]);this.owners.set(owner,entry);
+   let reject;entry={owner,endpoint:this.endpoint(),pending:new Set(),mutations:new Set(),histories:new Map(),historyStops:new Map(),stopped:new Promise((_,no)=>{reject=no;})};entry.stopped.catch(()=>{});entry.reject=reject;entry.wait=promise=>Promise.race([promise,entry.stopped]);this.owners.set(owner,entry);
    entry.ready=this.initializing.then(()=>this.initialize(entry));this.initializing=entry.ready.catch(()=>{});
   }
   const job=(async()=>{
    await entry.ready;if(entry.error)throw entry.error;
    const operation=this.invoke(entry,args);
+   if(args.action==='history'){entry.histories.set(args.id,operation);const finished=()=>{entry.histories.delete(args.id);entry.historyStops.delete(args.id);};operation.then(finished,error=>{if(error.nativeAcknowledged)finished();}).catch(()=>{});}
    if(mutation){
     entry.mutations.add(operation);
     operation.then(()=>entry.mutations.delete(operation),error=>{if(!error.nativeAcknowledged)entry.uncertain=error;entry.mutations.delete(operation);}).catch(()=>{});
    }
-   const result=await this.bounded(entry,operation,!mutation);
+   let result;
+   try{result=await this.bounded(entry,operation,!mutation);}
+   catch(error){if(args.action==='history'&&entry.histories.has(args.id))await this.stopHistory(entry,args.id);throw error;}
    if(args.action==='selected'){
     if(result!==null&&(typeof result!=='string'||!result))throw Error('Invalid selected target identity');
     return result??undefined;
@@ -39,6 +45,13 @@ export class BrowserChrome {
   const result=await entry.connection.send('Runtime.callFunctionOn',{objectId:entry.objectId,functionDeclaration:'function(request){return this.request(request)}',arguments:[{value:args}],awaitPromise:true,returnByValue:true},0,entry.sessionId);
   if(result.exceptionDetails)throw Object.assign(Error(result.exceptionDetails.exception?.description??result.exceptionDetails.text),{nativeAcknowledged:true});
   return result.result.value;
+ }
+ async stopHistory(entry,id){
+  if(!entry.historyStops.has(id)){
+   const stop=(async()=>{if(!entry.connection)throw Error('History cancellation was not acknowledged: Chrome bridge disconnected');const result=await entry.connection.send('Runtime.callFunctionOn',{objectId:entry.objectId,functionDeclaration:'function(id){this.cancel(id)}',arguments:[{value:id}],returnByValue:true},10000,entry.sessionId);if(result.exceptionDetails)throw Error('History cancellation was not acknowledged');})();
+   entry.historyStops.set(id,stop);stop.catch(()=>{if(entry.historyStops.get(id)===stop)entry.historyStops.delete(id);entry.error??=Error('History cancellation was not acknowledged; reset before reuse');entry.reject(entry.error);});
+  }
+  return entry.historyStops.get(id);
  }
  async initialize(entry){
   try{
@@ -62,7 +75,7 @@ export class BrowserChrome {
    if(workers.length!==1)throw Error('Chrome extension worker has no unique target');entry.workerId=workers[0].targetId;
    ({sessionId:entry.sessionId}=await entry.connection.send('Target.attachToTarget',{targetId:entry.workerId,flatten:true}));
    const identity=await entry.connection.send('Runtime.evaluate',{expression:'({id:chrome.runtime.id,protocol:globalThis.ocuChromeBridge?.protocol})',returnByValue:true},10000,entry.sessionId);
-   if(identity.result.value?.id!==CHROME_EXTENSION_ID||identity.result.value?.protocol!==2)throw Error('Chrome browser extension identity/protocol mismatch');
+   if(identity.result.value?.id!==CHROME_EXTENSION_ID||identity.result.value?.protocol!==3)throw Error('Chrome browser extension identity/protocol mismatch');
    const object=await entry.connection.send('Runtime.evaluate',{expression:'globalThis.ocuChromeBridge'},10000,entry.sessionId);entry.objectId=object.result.objectId;
    if(entry.browser){await entry.browser.close();entry.browser=undefined;}await this.tabs.end(entry.owner,{final:true});
   }catch(error){
@@ -71,11 +84,20 @@ export class BrowserChrome {
   }
  }
  async disconnect(entry){entry.connection?.close();entry.connection=undefined;if(entry.browser){await entry.browser.close();entry.browser=undefined;}}
- cancel(owner){this.closedOwners.add(owner);const entry=this.owners.get(owner);if(entry){entry.error??=Error('Chrome bridge turn ended');entry.reject(entry.error);if(!entry.mutations.size)void this.disconnect(entry).catch(()=>{});}}
+ cancel(owner){
+  this.closedOwners.add(owner);const entry=this.owners.get(owner);
+  if(entry){
+   entry.error??=Error('Chrome bridge turn ended');entry.reject(entry.error);
+   if(entry.histories.size){for(const id of entry.histories.keys())void this.stopHistory(entry,id).catch(()=>{});}
+   else if(!entry.mutations.size)void this.disconnect(entry).catch(()=>{});
+  }
+ }
  async cleanup(owner){
   this.cancel(owner);const entry=this.owners.get(owner);
   if(entry){
+   const stopping=Promise.all([...entry.histories.keys()].map(id=>this.stopHistory(entry,id)));stopping.catch(()=>{});
    await Promise.allSettled([entry.ready,...entry.pending]);
+   await stopping;
    if(entry.mutations.size)await this.bounded(entry,Promise.allSettled([...entry.mutations]),false);
    await this.disconnect(entry);await this.tabs.end(owner,{final:true});this.owners.delete(owner);
    if(entry.uncertain)throw Error(`Management mutation outcome needs audit review before retry: ${entry.uncertain.message}`);

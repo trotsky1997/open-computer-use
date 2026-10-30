@@ -183,3 +183,26 @@ held response. Node and shared read-only/assets/content/lifecycle/CLI regression
 passed. See [locator media](../../browser-media.md). Browser download UI and
 approval-aware waiting, streaming/protected/provider fidelity, native desktop,
 other transports/platforms and artifact delivery remain open. Keep the full goal active.
+
+## Browser history
+
+Implemented the inspected browser.history date/query/limit interface, with optional
+Chrome history permission enabled only through an explicit extension-options user
+gesture. Query only owned synthetic history during verification. Keep results
+bounded, URL-deduplicated and descending by latest matching visit; preserve date
+bounds when Chrome reports a later global visit. Add acknowledged cooperative
+cancellation so an ended owner cannot schedule more history calls. Keep user
+profile permission installation and reference-provider semantics in the broader
+verification plan; retain the full harness objective.
+
+Both source and Worker sessions passed native synthetic dated/repeat visits, OR
+queries, Date bounds, order/limit, cancellation after an accepted deferred native
+read and next-turn reuse. The production optional permission passed denial and
+options status; positive tests used a separate required-permission fixture copy.
+No user history or normal-profile settings were accessed. Node regressions and
+selection/native-free browser smokes passed. See [history](../../browser-history.md).
+Real optional grant/revoke, reference cardinality, headful/platform and remaining
+transport/claims/WebMCP/native/provider work remain open. Keep the full goal active.
+
+Native management regressions also passed windows/tabs/groups/bookmarks/audit,
+worker restart and 32-second worker idle survival in the shared protocol-3 bridge.

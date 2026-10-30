@@ -905,3 +905,28 @@ and settings were left unchanged. CDP media uses private local artifacts; browse
 download UI/approval-aware waits, streaming/protected media/provider fidelity,
 headful/native desktop, Linux/Windows, crash recovery and remote delivery remain
 open. The full harness goal stays active.
+
+
+## Browser history queries
+
+Added browser.history date/query/limit reads through the shared source/Worker
+Chrome bridge. Requests validate options before IO, merge focused native searches,
+return the latest matching visit per URL, preserve older-window visit timestamps
+and bound result size. Optional history access starts disabled, with explicit
+Enable/Remove controls in the extension options. Permission is rechecked before
+results return; history rows are excluded from the management journal. Bridge
+protocol 3 and installer/CLI assets ship together. No dependency or CI was added.
+
+Per-request cancellation fences each native await and requires worker stop
+acknowledgement. Failed cancellation retains ownership for retry; accepted native
+reads may finish, while further reads and returned rows are suppressed. Isolated
+Chromium 141 source/Worker checks passed synthetic multiple/older-window visits,
+OR queries, Date arguments, ordering/limits, permission denial/options state,
+deferred-read cancellation and next-turn reuse. Positive fixtures used a separate
+required-history manifest copy; production permissions stayed optional. The
+fixture profiles were removed. All 132 Node checks and browser selection/lifecycle
+and native-free CLI/MCP regressions passed. Native management also passed windows,
+tabs, groups, bookmarks, audit retention, worker restart and idle survival.
+Real user-profile optional grant/revoke,
+reference-provider visit cardinality, headful/platform and broader harness work
+remain open. The full goal stays active.

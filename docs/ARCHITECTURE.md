@@ -463,3 +463,13 @@ download timeout leaves its siblings running. See [media downloads](browser-medi
 The REPL kernel worker starts with an explicit empty Node CLI-flag list, matching
 the evaluation worker. Programmatic hosts using `node --input-type=module` can
 start the file-backed kernel without passing that stdin-only flag to it.
+
+
+## Browser history
+
+BrowserChrome assigns read identities and joins cooperative worker cancellation
+before releasing an owner. The optional history permission is requested only from
+the extension options user gesture. Fixed native Chrome history search/getVisits
+queries return bounded, URL-deduplicated rows; no result journal is added. Shared
+normalization validates host/REPL/worker inputs, including cross-realm Dates.
+Packaging includes the worker helper and options assets. See [browser history](browser-history.md).

@@ -203,7 +203,7 @@ for repl_file in open-computer-use-repl.mjs open-computer-use-kernel.mjs ocu-con
   fi
 done
 
-for bridge_file in manifest.json bridge.html bridge.js background.mjs management.mjs policy.mjs; do
+for bridge_file in manifest.json bridge.html bridge.js background.mjs management.mjs policy.mjs history.mjs options.html options.js; do
   if [[ ! -f "${repl_source_root}/chrome-browser-extension/${bridge_file}" ]]; then
     echo "Missing Chrome browser bridge asset: ${bridge_file}" >&2
     exit 1
@@ -233,7 +233,7 @@ node "${repl_source_root}/runtime-dependencies.mjs" "${repo_root}" "${plugin_ins
 cp "${repl_source_root}/browser-input.mjs" "${plugin_install_root}/scripts/browser-input.mjs"
 cp "${repl_source_root}/browser-tabs.mjs" "${plugin_install_root}/scripts/browser-tabs.mjs"
 mkdir -p "${plugin_install_root}/scripts/chrome-browser-extension"
-for bridge_file in manifest.json bridge.html bridge.js background.mjs management.mjs policy.mjs; do
+for bridge_file in manifest.json bridge.html bridge.js background.mjs management.mjs policy.mjs history.mjs options.html options.js; do
   cp "${repl_source_root}/chrome-browser-extension/${bridge_file}" "${plugin_install_root}/scripts/chrome-browser-extension/${bridge_file}"
 done
 cp "${repl_source_root}/browser-chrome.mjs" "${plugin_install_root}/scripts/browser-chrome.mjs"

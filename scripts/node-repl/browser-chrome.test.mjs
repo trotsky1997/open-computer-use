@@ -9,6 +9,7 @@ import {BrowserViewport} from './browser-viewport.mjs';
 test('bundled browser extension identity and required assets match the host',async()=>{
  const manifest=JSON.parse(await readFile(new URL('./chrome-browser-extension/manifest.json',import.meta.url),'utf8'));
  const id=createHash('sha256').update(Buffer.from(manifest.key,'base64')).digest('hex').slice(0,32).replace(/[0-9a-f]/g,char=>String.fromCharCode(97+parseInt(char,16)));
+ assert.deepEqual(manifest.optional_permissions,['history']);assert.equal(manifest.options_ui.page,'options.html');
  assert.equal(id,CHROME_EXTENSION_ID);assert.equal(manifest.manifest_version,3);assert.deepEqual(manifest.permissions,['tabs','debugger','tabGroups','bookmarks','storage']);
  assert.match(await readFile(new URL('./chrome-browser-extension/bridge.html',import.meta.url),'utf8'),/src="bridge.js"/u);
  assert.match(await readFile(new URL('./chrome-browser-extension/background.mjs',import.meta.url),'utf8'),/chrome\.debugger\.getTargets/u);

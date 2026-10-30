@@ -1,3 +1,4 @@
+import {normalizeHistoryOptions} from './chrome-browser-extension/history.mjs';
 import {BrowserContent} from './browser-content.mjs';
 import {MANAGEMENT_METHODS,MANAGEMENT_DOCUMENTATION,validateManagement} from "./chrome-browser-extension/policy.mjs";
 import {BrowserChrome} from "./browser-chrome.mjs";
@@ -490,6 +491,7 @@ Read-only scripting: playwright.evaluate(fnOrExpression,arg?,{timeoutMs?}), loca
 Media: locator.downloadMedia({timeoutMs?}) downloads a matched image/audio/video/source or file link to a private local file. Default 120 seconds; timeoutMs:0 disables its operation deadline. Load lazy sources first. Completed private files survive reset; changed sources/navigation and cancellation remove partial files. Read docs/browser-media.md for provider and permission-integration limits.
 Content exports: tab.content.exportGsuite(type) exports Google Docs/Sheets/Slides (Docs pdf/md/docx; Sheets pdf/xlsx/csv; Slides pdf/pptx). tab.content.exportYouTubeTranscript() exports an HTTPS YouTube /watch transcript. Both return private local files, preserve completed artifacts and remove canceled outputs; authentication, missing captions, wrong formats and navigation fail explicitly. Read docs/browser-content.md for provider limits.
 Tab capabilities: get("pageAssets").documentation() describes rendered resource inventory and local asset bundles. await tab.capabilities.list(); get("cdp").documentation() describes permitted developer commands and cursor-based event reads. HTTP(S) pages only. Raw commands can mutate page state and invalidate this binding's observations; normal interaction uses higher-level APIs.
+Browser history: browser.history({from?,to?,queries?,limit?}) returns the latest matching visit per URL in descending dateVisited order. Use only when the user request needs history, with focused queries and date bounds. Defaults: last 24h, limit 100 (max 1000), OR across up to 20 queries. Requires optional history access granted by the user in the bundled extension options. Returns URL/title/dateVisited only; no history mutation API.
 Browser capabilities: get("management").documentation() describes native window/tab/group/bookmark organization and before-state audit (bundled extension required). await browser.capabilities.list(), then get("viewport") and documentation(). viewport.set({width,height}) applies explicit CSS dimensions for responsive tasks; viewport.reset() returns to normal sizing. The host cleans temporary overrides on reset/timeout/close. Competing sessions fail explicitly. Use existing sizing during normal tasks.
 Screenshots: tab.screenshot({fullPage?,clip?}) returns JPEG bytes with no implicit output; use nodeRepl.emitImage(bytes). getScreenshot returns/emits PNG. clip uses CSS pixels relative to the viewport or full-page area. Pixel input maps cropped viewport images back to CSS; full-page images require a new viewport capture before input. Geometry and viewport-revision changes invalidate capture coordinates.`;
 
@@ -894,7 +896,7 @@ export function createBrowserApi(activeOutput, environment = process.env, {focus
       }
       await json("/json/version");
       if(!browserDocsShown){activeOutput().write(DOCUMENTATION, "cua.browser");browserDocsShown=true;}
-      return Object.freeze({ browserId: "cdp",nameSession,tabs:Object.freeze({
+      return Object.freeze({ browserId: "cdp",nameSession,history:(options={})=>requestChrome({action:'history',options:normalizeHistoryOptions(options)}),tabs:Object.freeze({
         list:()=>api.listTabs({browser:"cdp",emit:false}),
         get:id=>{if(typeof id!=="string"||!id)throw Error('tabs.get requires a tab ID');return api.getTab(id,{browser:"cdp"});},
         new:()=>api.createBrowserTab('cdp','about:blank',{visible:false}),
