@@ -378,3 +378,46 @@ Private test processes and VM work files were removed. No dependency or CI added
 Clipboard paste still needs native ownership/MIME/lifecycle implementation.
 Wider text providers, Wayland/headful, window images, physical routing and Windows
 remain open under the full active goal. See [Linux text input](../../linux-text-input.md).
+
+## Linux native clipboard paste
+
+Implement `app.paste(text, {format?})` for text, literal Markdown and HTML using
+an owned GTK selection provider in a bounded native-session helper. Validate
+input/capability before side effects, check native target focus before clipboard
+ownership and key synthesis, serve UTF-8/plain and HTML MIME data, and report
+whether a payload request occurred. Keep the owner alive across actions and
+close/reap it on session/CLI termination. Verify receiving GTK text and custom
+HTML controls plus timeout, replacement and lifecycle behavior. No clipboard
+restoration is promised for Linux; Wayland and other platforms remain open.
+
+
+## Linux X11 session-owned clipboard paste
+
+Implemented `app.paste(text, {format?})` and native `paste` with text, literal
+Markdown and original HTML MIME plus simple plain-text fallback. An embedded
+GTK provider owns the clipboard per native session, validates Unicode/size and
+format, checks target-window focus before clipboard ownership and Ctrl+V, then
+waits for a payload request. Errors/transfer timeout are explicit and never
+replay through semantic editing. Linux replaces the clipboard and does not
+restore its earlier contents. Wayland/native platform work remains open.
+
+The Go service bounds helper waits, removes loaded temporary source files,
+serializes ownership and reaps the helper on CLI/MCP exit or pending termination.
+The shared JS native peer permits EOF cleanup before bounded SIGTERM/SIGKILL.
+This fixes an observed reset race where native exit preceded helper exit.
+A stale clipboard callback cannot finish a newer paste generation.
+
+Passed 145 Node checks, 49 Python checks (46 runtime + 3 clipboard), and Linux
+Go's 43 top-level checks plus 8 subchecks on arm64 Ubuntu. Source/Worker GTK flows
+verified multiline Unicode, empty payloads, literal Markdown, original HTML MIME
+and plain fallback, inactive focus, transfer timeout/recovery, external copying,
+helper reuse, idle/pending reset, CLI exit and final close. Existing text/key,
+selection, window-identity and launch/lifecycle flows also passed. All owned
+fixtures, helpers and private VM work files were cleaned up. No dependency or CI
+added; GTK/GdkX11 GI is the native platform prerequisite.
+
+Real rich-text app rendering, alternate paste shortcuts, broader keymap/IME,
+clipboard-manager behavior, external focus races and hard-kill/platform failure
+coverage remain limited. Full native images/physical routing, other native
+platforms and remaining harness requirements stay active. See
+[Linux paste](../../linux-paste.md).

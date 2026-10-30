@@ -56,3 +56,12 @@ test('Linux native selection requires advertised support and preserves exact con
  assert.deepEqual(calls.at(-1).params.arguments,{app:'Editor',element_index:2,text:'你🙂',prefix:'before ',suffix:' after',selection:'cursor_after'});
  advertised=false;const prior=calls.length;await assert.rejects(app.selectText(2,'must-not-select'),/does not advertise/);assert.equal(calls.length,prior+1);
 });
+test('Linux paste validates formats/content and requires an advertised clipboard owner',async()=>{
+ const calls=[];let advertised=true,fail=false;
+ const native={async request(method,params){calls.push({method,params});return method==='tools/list'?{tools:advertised?[{name:'paste'}]:[]}:result(fail?'No clipboard payload request observed; inspect before retrying':'Clipboard payload requested',fail);}};
+ const cua=createCuaApi(native,()=>({write(){}}),undefined,{platform:'linux'}),app=await cua.getApp('Editor',{initialState:false});
+ for(const [text,options] of [[null,{}],['x\0',{}],['\ud800',{}],['x',{format:'invalid'}],['x',{format:'text',extra:1}]])await assert.rejects(app.paste(text,options),/Paste/);
+ assert.equal(calls.length,0);await app.paste('你🙂\ntext');assert.deepEqual(calls.at(-1).params.arguments,{app:'Editor',text:'你🙂\ntext',format:'text'});
+ await app.paste('<b>你好🙂</b>',{format:'html'});assert.equal(calls.at(-1).params.arguments.format,'html');
+ fail=true;await assert.rejects(app.paste('x'),/inspect before retrying/);fail=false;advertised=false;await assert.rejects(app.paste('x'),/does not advertise/);
+});

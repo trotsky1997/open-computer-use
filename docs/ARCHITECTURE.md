@@ -132,6 +132,8 @@
 
 ### 7. Linux Runtime
 
+- Linux X11 `app.paste(text, {format?})` 通过会话持有的 GTK 剪贴板 helper 支持文本、Markdown 原文和 HTML MIME；原生服务负责有界等待、取消和子进程回收。调用会替换剪贴板，操作后需读取 app 状态确认插入。边界和实测见 [Linux 粘贴](linux-paste.md)。
+
 - Linux `app.selectText(index, text, {prefix?, suffix?, selectionType?})` 支持前后文消歧、文本选区和光标前后定位，并复核原生范围与文本。`app.typeText(text, elementIndex?)` 使用精确字段身份或当前焦点，支持光标插入、选区替换及 Unicode 字节长度；`app.typeCharacters(text)` 使用 AT-SPI SYM 逐个发送可打印按键，每次发送前核对窗口焦点，返回原生接口确认的字符数。失败后由调用方检查结果再重试。实现和验证见 [Linux 文本输入](linux-text-input.md)。
 
 - Linux runtime 位于 `apps/OpenComputerUseLinux`，以 Go 维护 CLI、`call --calls` sequence、MCP JSON-RPC、tool schema 和进程内 snapshot cache。

@@ -634,3 +634,9 @@ test('Worker sessions start from a parent using --input-type=module',()=>{
  const result=spawnSync(process.execPath,['--input-type=module','--eval',source],{encoding:'utf8',timeout:10000});
  assert.equal(result.status,0,result.stderr||result.error?.message);assert.equal(result.stdout.trim(),'42');
 });
+
+test('native EOF cleanup can finish before termination signals',async()=>{
+ const source=`let buffer='';process.stdin.setEncoding('utf8');process.stdin.on('data',chunk=>{buffer+=chunk;for(;;){const end=buffer.indexOf('\\n');if(end<0)break;const req=JSON.parse(buffer.slice(0,end));buffer=buffer.slice(end+1);if(req.id!==undefined)process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:req.id,result:{pid:process.pid}})+'\\n');}});process.stdin.on('end',()=>setTimeout(()=>process.exit(0),50));`;
+ const peer=new JsonLinePeer({command:process.execPath,args:['--input-type=module','-e',source]});
+ try {await peer.initialize();await peer.endSession();assert.equal(peer.child.exitCode,0);assert.equal(peer.child.signalCode,null);}finally{await peer.close();}
+});

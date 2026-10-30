@@ -11,10 +11,11 @@ name = os.environ['OCU_WINDOW_FIXTURE_NAME']
 GLib.set_prgname(name)
 GLib.set_application_name(name)
 windows, entries, notes, keys = {}, {}, {}, {}
+clipboard_data = []
 
 def state(*_args):
     with open(root + '/state.tmp', 'w', encoding='utf-8') as output:
-        json.dump({'pid': os.getpid(), 'windows': list(windows), 'keys': keys,
+        json.dump({'pid': os.getpid(), 'windows': list(windows), 'keys': keys, 'clipboard': clipboard_data,
                    'values': {key: entry.get_text() for key, entry in entries.items()},
                    'selections': {key: entry.get_selection_bounds() for key, entry in entries.items()},
                    'carets': {key: entry.get_position() for key, entry in entries.items()},
@@ -58,7 +59,13 @@ def create(key, value):
     key_area.add_events(Gdk.EventMask.KEY_PRESS_MASK | Gdk.EventMask.KEY_RELEASE_MASK)
     key_area.set_size_request(100, 24)
     key_area.get_accessible().set_name('Key surface ' + key)
+    def got_html(_clipboard, data, _unused):
+        clipboard_data.append({'target': data.get_target().name(), 'data': bytes(data.get_data()).decode('utf-8') if data.get_length() >= 0 else None})
+        state()
     def record_key(_area, event, kind):
+        if kind == 'press' and event.state & Gdk.ModifierType.CONTROL_MASK and Gdk.keyval_to_lower(event.keyval) == Gdk.KEY_v:
+            Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD).request_contents(Gdk.Atom.intern('text/html', False), got_html, None)
+            return True
         value = Gdk.keyval_to_unicode(event.keyval)
         keys[key][kind].append(chr(value) if value else Gdk.keyval_name(event.keyval))
         state()
@@ -76,7 +83,9 @@ def create(key, value):
     extra = [('Prepare caret', lambda _b: entries[key].set_position(2)),
              ('Prepare selection', lambda _b: entries[key].select_region(1, 4)),
              ('Select notes', select_notes), ('Focus entry', focus),
-             ('Read only', lambda _b: entries[key].set_editable(False)), ('Focus keys', focus_keys)]
+             ('Read only', lambda _b: entries[key].set_editable(False)), ('Focus keys', focus_keys),
+             ('Copy external', lambda _b: Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD).set_text('external-owned', -1)),
+             ('Focus notes', lambda _b: (window.present(), notes[key].grab_focus(), window.get_window().focus(Gdk.CURRENT_TIME)))]
     def replace(_button):
         old = entries.pop(key)
         box.remove(old)

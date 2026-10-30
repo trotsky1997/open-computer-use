@@ -28,7 +28,7 @@ and Worker REPLs. It checks separate same-title windows, indexed Unicode input,
 caret/selection replacement, consecutive multiline edits, focus omission,
 inactive/read-only/stale rejection. Existing window identity and launch/lifecycle
 flows run alongside it. Python checks cover protected fields and attempted-edit
-failure without replay. Broader providers, Wayland/headful, paste and Windows input remain open.
+failure without replay. Broader providers, Wayland/headful and native input on other platforms remain open.
 
 Run the fixture controller in a configured private desktop:
 
@@ -94,8 +94,12 @@ The GTK controller verifies repeated text with context, an astral character
 before the target, replacement after selection, both cursor modes, multiline
 selection and stale-widget rejection in both REPL modes. Python checks cover
 overlapping matches, changed text, provider refusal/wrong range and protected
-fields without reading their contents. Clipboard paste and its ownership /
-lifecycle remain separate pending work.
+fields without reading their contents. X11 clipboard paste and its ownership/lifecycle are covered in
+[Linux native paste](linux-paste.md).
 
 AT-SPI contracts: [add selection](https://gnome.pages.gitlab.gnome.org/at-spi2-core/libatspi/method.Text.add_selection.html)
 and [set selection](https://gnome.pages.gitlab.gnome.org/at-spi2-core/libatspi/method.Text.set_selection.html).
+
+
+X11 clipboard paste is now implemented with a session-owned MIME provider; see
+[Linux native paste](linux-paste.md) for clipboard effects, lifecycle and evidence.

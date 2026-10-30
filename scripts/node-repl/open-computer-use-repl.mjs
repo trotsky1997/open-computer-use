@@ -142,6 +142,7 @@ The runtime exposes an asynchronous app-bound API:
 - Held click options require a backend advertising key/duration_ms (currently macOS). key holds a native key/chord across the sequence; durationMs holds each mouse press. auto selects targeted app_post. Click counts are 1...3. Unsupported backends and explicit non-event methods throw before input.
 - \`await app.scroll(elementIndex, direction, pages?)\`
 - \`await app.drag([fromX, fromY], [toX, toY])\`
+- \`await app.paste(text, {format?})\` on Linux X11: text (default), literal md or html. Replaces the clipboard until native-session cleanup; inspect state after paste or errors. Linux does not restore the previous clipboard.
 - \`await app.typeCharacters(text)\` on Linux sends printable keys to current focus without finding a field or pasting; returns \`{charactersSent}\` counting native synthesis acknowledgments. Inspect after errors before retrying.
 - \`await app.typeText(text, elementIndex?)\` on Linux: insert at the exact observed editable field caret/selection, or current focus when omitted. Other platforms use \`app.typeText(text, { keyMethod? })\`. Refresh AX indexes after UI changes; inspect after an attempted-edit error before retrying.
 - \`await app.pressKey(key, { keyMethod?, durationMs? })\`
@@ -320,17 +321,21 @@ export class JsonLinePeer extends EventEmitter {
   endSession() {
     if (this.ending) return this.ending;
     const child = this.child;
-    let timer;
+    let timer, graceTimer;
     this.ending = new Promise(resolve=>{
       if(child.exitCode!=null || child.signalCode!=null || child.pid===undefined) resolve();
-      else child.once("exit",()=>{clearTimeout(timer);resolve();});
+      else child.once("exit",()=>{clearTimeout(timer);clearTimeout(graceTimer);resolve();});
     });
     this.#close(new Error("native Computer Use session ended"));
     child.stdin.end();
     if(child.exitCode==null && child.signalCode==null) {
-      timer = setTimeout(() => child.kill("SIGKILL"), 1_000);
-      timer.unref();
-      child.kill("SIGTERM");
+      // Give an idle native server time to reap session-owned helpers on EOF.
+      graceTimer = setTimeout(() => {
+        timer = setTimeout(() => child.kill("SIGKILL"), 1_000);
+        timer.unref();
+        child.kill("SIGTERM");
+      }, 250);
+      graceTimer.unref();
     }
     return this.ending;
   }
@@ -627,6 +632,12 @@ export function createCuaApi(native, activeOutput, onDispose, {tabRequest,platfo
         await call("select_text", { app, element_index: elementIndex, text,
           prefix: options.prefix, suffix: options.suffix, selection: options.selectionType });
       },
+      ...(platform==='linux'?{async paste(text, options={}) {
+        if(typeof text!=='string'||text.includes('\0')||Buffer.byteLength(text)>16*1024*1024||/[\uD800-\uDFFF]/u.test(text))throw Error('Paste requires Unicode text without NUL, at most 16 MiB');
+        if(!isPlainObject(options)||Object.keys(options).some(key=>key!=='format')||!['text','md','html'].includes(options.format??'text'))throw Error('Paste options require format text, md or html');
+        if(!(await native.request('tools/list',{}))?.tools?.some(tool=>tool.name==='paste'))throw Error('Native runtime does not advertise paste; update it before use');
+        await call('paste',{app,text,format:options.format??'text'});
+      }}:{}),
       ...(platform==='linux'?{async typeCharacters(text) {
         if(typeof text!=='string'||/[^\p{L}\p{M}\p{N}\p{P}\p{S} ]/u.test(text))throw Error('Linux typeCharacters requires printable Unicode characters');
         if(!(await native.request('tools/list',{}))?.tools?.some(tool=>tool.name==='type_characters'))throw Error('Native runtime does not advertise type_characters; update it before use');

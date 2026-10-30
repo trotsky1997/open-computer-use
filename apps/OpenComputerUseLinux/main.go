@@ -11,11 +11,13 @@ import (
 	"math"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 	"unicode"
@@ -33,7 +35,7 @@ var windowPlacementValues = []string{"keep", "agent_display", "restore"}
 //go:embed runtime.py
 var linuxRuntimeScript string
 
-const serverInstructions = "Computer Use tools let you interact with Linux desktop apps by performing UI actions.\n\nUse launch_app only for an explicitly requested application start; it accepts one literal executable name/path without arguments. The started application outlives this native session. Verify its readiness with get_app_state.\n\nBegin by calling `get_app_state` every turn you want to use Computer Use to get the latest state before acting. The available tools are list_windows, bind_window, launch_app, list_apps, get_app_state, click, perform_secondary_action, scroll, drag, type_text, type_characters, select_text, press_key, and set_value.\n\nPrefer element-targeted interactions over coordinate clicks when an index for the targeted element is available. Linux actions use AT-SPI2 semantic actions and editable text APIs first. Coordinate mouse and key synthesis are best-effort fallbacks and are not a universal Wayland background input model."
+const serverInstructions = "Computer Use tools let you interact with Linux desktop apps by performing UI actions.\n\nUse launch_app only for an explicitly requested application start; it accepts one literal executable name/path without arguments. The started application outlives this native session. Verify its readiness with get_app_state.\n\nBegin by calling `get_app_state` every turn you want to use Computer Use to get the latest state before acting. The available tools are list_windows, bind_window, launch_app, list_apps, get_app_state, click, perform_secondary_action, scroll, drag, type_text, type_characters, select_text, paste, press_key, and set_value.\n\nPrefer element-targeted interactions over coordinate clicks when an index for the targeted element is available. Linux actions use AT-SPI2 semantic actions and editable text APIs first. Coordinate mouse and key synthesis are best-effort fallbacks and are not a universal Wayland background input model."
 
 type toolDefinition struct {
 	Name        string         `json:"name"`
@@ -199,7 +201,11 @@ type linuxResponse struct {
 }
 
 type service struct {
-	snapshots map[string]*appSnapshot
+	clipboardMu      sync.Mutex
+	clipboardStopped bool
+	clipboardClosing *clipboardPeer
+	clipboard        *clipboardPeer
+	snapshots        map[string]*appSnapshot
 }
 
 func newService() *service {
@@ -287,6 +293,8 @@ func (s *service) callTool(name string, args map[string]any) toolCallResult {
 			requiredFloat(args, "to_x"),
 			requiredFloat(args, "to_y"),
 		)
+	case "paste":
+		return s.paste(args)
 	case "select_text":
 		index := optionalElementIndex(args)
 		if index == "" {
@@ -1377,6 +1385,7 @@ func globalPointerFallbacksEnabled() bool {
 
 func toolDefinitions() []toolDefinition {
 	return []toolDefinition{
+		{Name: "paste", Description: "Paste text, literal Markdown or HTML into current focus on Linux X11. Replaces the clipboard for this native session. Checks target focus and waits for a payload request; inspect app state to verify insertion. No clipboard restoration.", Annotations: defaultAnnotations(), InputSchema: objectSchema(map[string]any{"app": stringProperty("App or bound window selector"), "text": stringProperty("Unicode content without NUL; at most 16 MiB"), "format": enumStringProperty("Clipboard format; default text", []string{"text", "md", "html"})}, []string{"app", "text"})},
 		{Name: "select_text", Description: "Select unique readable text in an exact observed Linux field, or place its caret before/after the match. Immediate prefix/suffix disambiguate repeated text. Verifies unchanged text and native range; inspect after errors before retrying.", Annotations: defaultAnnotations(), InputSchema: objectSchema(map[string]any{"app": stringProperty("App or bound window selector"), "element_index": integerProperty("Exact observed field index"), "text": stringProperty("Non-empty text to match"), "prefix": stringProperty("Immediate context before text"), "suffix": stringProperty("Immediate context after text"), "selection": enumStringProperty("Selection mode", []string{"text", "cursor_before", "cursor_after"})}, []string{"app", "element_index", "text"})},
 		{Name: "type_characters", Description: "Send printable keys to the selected window current focus without finding an editable field or pasting. Returns charactersSent (native synthesis acknowledgments, Unicode code points). Inspect after errors before retrying.", Annotations: defaultAnnotations(), InputSchema: objectSchema(map[string]any{"app": stringProperty("App or bound window selector"), "text": stringProperty("Printable Unicode characters; controls/newlines are rejected")}, []string{"app", "text"})},
 		{Name: "list_windows", Description: "List native Linux top-level windows with opaque numeric IDs, app and title. IDs identify native objects rather than title or order.", Annotations: readOnlyAnnotations(), InputSchema: objectSchema(map[string]any{}, nil)},
@@ -1729,6 +1738,7 @@ func parsePositiveIntegerOption(value, option string) (int, error) {
 }
 
 func runCallCommand(args []string, svc *service) (any, bool, error) {
+	defer svc.closeClipboard()
 	if len(args) == 0 {
 		return nil, false, errors.New("call requires a tool name or --calls/--calls-file")
 	}
@@ -1883,12 +1893,30 @@ func readJSONSource(inline, file string) (string, error) {
 
 func runMCP(stdin io.Reader, stdout io.Writer) error {
 	svc := newService()
+	defer svc.closeClipboard()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	finished := make(chan struct{})
+	defer close(finished)
+	go func() {
+		select {
+		case <-ctx.Done():
+			svc.clipboardMu.Lock()
+			svc.clipboardStopped = true
+			svc.clipboardMu.Unlock()
+			svc.closeClipboard()
+			if closer, ok := stdin.(io.Closer); ok {
+				_ = closer.Close()
+			}
+		case <-finished:
+		}
+	}()
 	decoder := json.NewDecoder(stdin)
 	encoder := json.NewEncoder(stdout)
 	for {
 		var request map[string]any
 		if err := decoder.Decode(&request); err != nil {
-			if errors.Is(err, io.EOF) {
+			if ctx.Err() != nil || errors.Is(err, io.EOF) {
 				return nil
 			}
 			_ = encoder.Encode(jsonRPCError(nil, -32700, "Invalid JSON-RPC payload"))
