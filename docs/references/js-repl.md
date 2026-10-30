@@ -278,3 +278,9 @@ until timed native key delivery is implemented. See
 by an advertised native tool. Observe the resulting app before input; started
 processes survive REPL cleanup. macOS keeps launch in `getApp` and omits the
 optional explicit method. See [native lifecycle](../native-lifecycle.md).
+
+
+Linux additionally exposes `cua.listWindows({emit?})` and
+`cua.getApp({windowId}, {initialState?})` for AT-SPI window identity. This route
+provides AX/semantic actions and rejects unverified image/physical routing. See
+[native window binding](../native-window-binding.md) for the provider evidence.

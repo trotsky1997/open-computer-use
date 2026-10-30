@@ -469,5 +469,49 @@ class RuntimeActionReadBackTests(unittest.TestCase):
         self.snapshot.assert_not_called()
 
 
+
+class WindowBindingTests(unittest.TestCase):
+    def test_native_identity_survives_order_and_rejects_replacement(self):
+        runtime = load_runtime()
+        app, a, b = object(), object(), object()
+        aid = {"bus": ":1.2", "path": "/a", "pid": 42, "start": "100"}
+        bid = {**aid, "path": "/b"}
+        entries = [(app, 0, a, aid), (app, 1, b, bid)]
+        with mock.patch.object(runtime, "window_entries", return_value=entries):
+            selector = runtime.bind_window(runtime.window_id(aid))
+            self.assertEqual(runtime.resolve_target(selector), (app, 0, a))
+        with mock.patch.object(runtime, "window_entries", return_value=list(reversed(entries))):
+            self.assertEqual(runtime.bind_window(runtime.window_id(aid)), selector)
+        with mock.patch.object(runtime, "window_entries", return_value=[(app, 0, b, bid)]):
+            with self.assertRaisesRegex(RuntimeError, "closed or replaced"):
+                runtime.resolve_target(selector)
+
+    def test_unverified_bound_physical_input_never_reaches_global_synthesis(self):
+        runtime = load_runtime()
+        runtime.Atspi.StateType = types.SimpleNamespace(ACTIVE=1, FOCUSED=2)
+        with mock.patch.object(runtime, "resolve_target", return_value=(object(), 0, object())), mock.patch.object(runtime, "extents", return_value=None), mock.patch.object(runtime, "find_element", return_value=None), mock.patch.object(runtime, "state_contains", return_value=False), mock.patch.object(runtime, "send_drag") as drag, mock.patch.object(runtime, "send_key") as key:
+            with self.assertRaisesRegex(RuntimeError, "pointer routing is unavailable"):
+                runtime.perform_operation({"tool": "drag", "app": runtime.WINDOW_PREFIX + "owned"})
+            with self.assertRaisesRegex(RuntimeError, "verified focus"):
+                runtime.perform_operation({"tool": "press_key", "app": runtime.WINDOW_PREFIX + "owned", "key": "x"})
+            drag.assert_not_called()
+            key.assert_not_called()
+
+    def test_bound_lookup_traversal_stops_on_a_cyclic_provider_tree(self):
+        runtime = load_runtime()
+        root = object()
+        with mock.patch.object(runtime, "child_count", return_value=1), mock.patch.object(runtime, "child_at", return_value=root):
+            self.assertLess(len(runtime.iter_all(root, max_depth=runtime.MAX_DEPTH)), runtime.MAX_ELEMENTS)
+
+    def test_strict_element_lookup_never_uses_name_or_path_fallback(self):
+        runtime = load_runtime()
+        old = types.SimpleNamespace(path="/old")
+        replacement = types.SimpleNamespace(path="/new")
+        with mock.patch.object(runtime, "iter_all", return_value=[replacement]), mock.patch.object(runtime, "resolve_path", return_value=replacement):
+            with self.assertRaisesRegex(RuntimeError, "removed or replaced"):
+                runtime.find_element(object(), {"objectPath": "/old", "runtimeId": [0]}, window=object(), strict=True)
+        with mock.patch.object(runtime, "iter_all", return_value=[old]):
+            self.assertIs(runtime.find_element(object(), {"objectPath": "/old"}, window=object(), strict=True), old)
+
 if __name__ == "__main__":
     unittest.main()

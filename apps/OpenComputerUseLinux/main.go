@@ -31,7 +31,7 @@ var windowPlacementValues = []string{"keep", "agent_display", "restore"}
 //go:embed runtime.py
 var linuxRuntimeScript string
 
-const serverInstructions = "Computer Use tools let you interact with Linux desktop apps by performing UI actions.\n\nUse launch_app only for an explicitly requested application start; it accepts one literal executable name/path without arguments. The started application outlives this native session. Verify its readiness with get_app_state.\n\nBegin by calling `get_app_state` every turn you want to use Computer Use to get the latest state before acting. The available tools are launch_app, list_apps, get_app_state, click, perform_secondary_action, scroll, drag, type_text, press_key, and set_value.\n\nPrefer element-targeted interactions over coordinate clicks when an index for the targeted element is available. Linux actions use AT-SPI2 semantic actions and editable text APIs first. Coordinate mouse and key synthesis are best-effort fallbacks and are not a universal Wayland background input model."
+const serverInstructions = "Computer Use tools let you interact with Linux desktop apps by performing UI actions.\n\nUse launch_app only for an explicitly requested application start; it accepts one literal executable name/path without arguments. The started application outlives this native session. Verify its readiness with get_app_state.\n\nBegin by calling `get_app_state` every turn you want to use Computer Use to get the latest state before acting. The available tools are list_windows, bind_window, launch_app, list_apps, get_app_state, click, perform_secondary_action, scroll, drag, type_text, press_key, and set_value.\n\nPrefer element-targeted interactions over coordinate clicks when an index for the targeted element is available. Linux actions use AT-SPI2 semantic actions and editable text APIs first. Coordinate mouse and key synthesis are best-effort fallbacks and are not a universal Wayland background input model."
 
 type toolDefinition struct {
 	Name        string         `json:"name"`
@@ -74,6 +74,7 @@ func (f frame) renderedLocalFrame() string {
 }
 
 type elementRecord struct {
+	ObjectPath           string   `json:"objectPath,omitempty"`
 	Index                int      `json:"index"`
 	RuntimeID            []int    `json:"runtimeId,omitempty"`
 	AutomationID         string   `json:"automationId,omitempty"`
@@ -143,6 +144,7 @@ func (s *appSnapshot) result() toolCallResult {
 }
 
 type linuxRequest struct {
+	WindowID          int64 `json:"window_id,omitempty"`
 	IncludeAX         *bool `json:"include_ax,omitempty"`
 	IncludeScreenshot *bool `json:"include_screenshot,omitempty"`
 
@@ -200,6 +202,8 @@ func newService() *service {
 
 func (s *service) callTool(name string, args map[string]any) toolCallResult {
 	switch name {
+	case "list_windows", "bind_window":
+		return windowTool(name, args)
 	case "launch_app":
 		return launchApplication(args)
 	case "list_apps":
@@ -537,7 +541,7 @@ func actionReadBackEnabled() bool {
 }
 
 func (s *service) currentSnapshot(app string) *appSnapshot {
-	return s.snapshots[strings.ToLower(app)]
+	return s.snapshots[snapshotKey(app)]
 }
 
 func (s *service) refreshSnapshot(app string, request linuxRequest) (*appSnapshot, toolCallResult) {
@@ -560,6 +564,9 @@ func (s *service) refreshSnapshot(app string, request linuxRequest) (*appSnapsho
 		// Invalidate every alias of the prior observation, including PID queries.
 		previous := s.currentSnapshot(app)
 		for alias, cached := range s.snapshots {
+			if strings.HasPrefix(app, windowPrefix) && strings.HasPrefix(alias, windowPrefix) && alias != app {
+				continue
+			}
 			if cached == previous || cached.App.PID == response.Snapshot.App.PID ||
 				(previous != nil && cached.App.PID == previous.App.PID) {
 				delete(s.snapshots, alias)
@@ -575,6 +582,10 @@ func (s *service) refreshSnapshot(app string, request linuxRequest) (*appSnapsho
 }
 
 func (s *service) rememberSnapshot(query string, snapshot *appSnapshot) {
+	if strings.HasPrefix(query, windowPrefix) {
+		s.snapshots[query] = snapshot
+		return
+	}
 	keys := []string{query, snapshot.App.Name, snapshot.App.BundleIdentifier, strconv.Itoa(snapshot.App.PID)}
 	for _, key := range keys {
 		key = strings.ToLower(strings.TrimSpace(key))
@@ -1282,6 +1293,8 @@ func globalPointerFallbacksEnabled() bool {
 
 func toolDefinitions() []toolDefinition {
 	return []toolDefinition{
+		{Name: "list_windows", Description: "List native Linux top-level windows with opaque numeric IDs, app and title. IDs identify native objects rather than title or order.", Annotations: readOnlyAnnotations(), InputSchema: objectSchema(map[string]any{}, nil)},
+		{Name: "bind_window", Description: "Bind an exact native Linux window from a fresh list_windows ID. Returns an opaque app selector for observations/actions; closed or replaced windows fail.", Annotations: readOnlyAnnotations(), InputSchema: objectSchema(map[string]any{"window_id": integerProperty("Positive safe-integer window ID from list_windows")}, []string{"window_id"})},
 		{
 			Name:        "launch_app",
 			Description: "Explicitly launch one application executable by its literal name or path. Arguments, command lines and shell syntax are not accepted. The application persists after the automation session ends. Observe it with get_app_state before acting.",

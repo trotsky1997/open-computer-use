@@ -13,8 +13,8 @@ import (
 )
 
 func TestToolDefinitionCount(t *testing.T) {
-	if got := len(toolDefinitions()); got != 10 {
-		t.Fatalf("toolDefinitions() count = %d, want 10", got)
+	if got := len(toolDefinitions()); got != 12 {
+		t.Fatalf("toolDefinitions() count = %d, want 12", got)
 	}
 }
 

@@ -69,6 +69,6 @@ Linux-only bridge guard; native VM execution supplied the actual Linux evidence.
 
 Windows common Go tests passed on macOS and amd64/arm64 Windows binaries built.
 A real Windows desktop, console/job-object cleanup behavior, application aliases,
-installer distribution and startup-error/dialog cases remain unverified. Native
-window-ID binding, display-name/desktop-ID resolution, remote native executors,
+installer distribution and startup-error/dialog cases remain unverified. [Linux window binding](native-window-binding.md) now supports AX/semantic actions;
+Windows binding, display-name/desktop-ID resolution, remote native executors,
 per-platform input/paste and the broader harness goal remain open.

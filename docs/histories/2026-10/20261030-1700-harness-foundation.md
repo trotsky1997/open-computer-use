@@ -990,3 +990,30 @@ desktop resources were cleaned up. Windows common Go tests passed on macOS and
 amd64/arm64 Windows binaries compiled; real Windows UI/job/console persistence
 remains unverified. Desktop IDs/display-name launch, remote native executor
 identity, window-ID binding and remaining native/harness/platform work stay open.
+
+
+## Linux window identity foundation
+
+Added listWindows()/getApp({windowId}) through advertised Linux native discovery
+and binding tools. Opaque numeric IDs derive from AT-SPI connection/object paths
+and process-start identity; app bindings keep the full tuple and reject closed
+or replaced windows. Window selectors remain case-sensitive and native snapshots
+stay separate from generic app/PID aliases. Element object paths restrict
+semantic actions to the chosen window; removed objects have no name/geometry
+fallback. Snapshot AX omission preserves sibling bound caches, and tree traversal
+is bounded against cyclic providers. No library dependency or CI was added.
+
+Private arm64 Ubuntu GTK source/Worker flows passed same-title windows in one
+process, equal index/independent writes, widget replacement, closed/recreated
+window rejection, reordered children and stable identities through peer/turn/reset
+replacement. Bound image capture reports unavailable, preserving sibling indexes.
+Existing desktop-crop capture cannot prove an occluded window's pixels, so it is
+excluded from this new route; physical pointer routing also stays unavailable,
+and keyboard fallback checks selected-window native focus before global input.
+These remain required image/input work. Wider Linux providers, Windows binding,
+Wayland/headful, transport/claims and full native parity stay open.
+
+The final revision passed 140 Node checks, 39 Python checks and 46 native Linux Go
+checks, plus both session modes' multi-window GTK flow and the earlier native
+launch/lifecycle GTK regression. Owned test apps and private VM work files were
+removed. The full harness goal remains active.

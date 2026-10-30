@@ -116,7 +116,7 @@ async function releaseResources(services,owner,stopped=Promise.resolve()) {
 
 const SERVER_INSTRUCTIONS = `UI automation through a persistent JavaScript REPL using the initialized cua API.
 
-On the first call after startup or js_reset, bind the requested running app with await cua.getApp("Example App"), or call await cua.getState() only when an app inventory is actually needed. For explicitly requested Linux/Windows application startup, use await cua.computer.launch_app({app: executableNameOrPath}) and then bind/observe the app before input. macOS getApp keeps its existing launch behavior. On macOS, use getApp(name, { initialState: false }) followed by app.query({ text, role }) for targeted lookup without an initial snapshot. App bindings persist across js calls. Batch deterministic actions and the resulting getAXState() in one js call, then verify the returned UI state. Use nodeRepl.write(value) for additional text and await nodeRepl.emitImage(image) for additional images. Ask the user before destructive or externally visible actions such as sending, deleting, or purchasing.`;
+On the first call after startup or js_reset, bind the requested running app with await cua.getApp("Example App"), or call await cua.getState() only when an app inventory is actually needed. For explicitly requested Linux/Windows application startup, use await cua.computer.launch_app({app: executableNameOrPath}) and then bind/observe the app before input. macOS getApp keeps its existing launch behavior. On Linux, prefer a fresh listWindows() and getApp({windowId}) when selecting a particular native window. On macOS, use getApp(name, { initialState: false }) followed by app.query({ text, role }) for targeted lookup without an initial snapshot. App bindings persist across js calls. Batch deterministic actions and the resulting getAXState() in one js call, then verify the returned UI state. Use nodeRepl.write(value) for additional text and await nodeRepl.emitImage(image) for additional images. Ask the user before destructive or externally visible actions such as sending, deleting, or purchasing.`;
 
 const JS_DESCRIPTION = `Run JavaScript in a persistent Node.js REPL with top-level await and an initialized asynchronous cua API for Open Computer Use. Use this for all desktop interactions. Bind an app with let app = await cua.getApp("Example App"); then call await app.click(...), await app.typeText(...), and await app.getAXState(). Top-level bindings persist until js_reset, so prefer top-level var for names that may be assigned again. Batch deterministic actions and the resulting state read in one call to reduce round trips. Use nodeRepl.write(value) for extra text and await nodeRepl.emitImage(image) for extra images. If timeout_ms is omitted, execution times out after 30000 ms.`;
 
@@ -130,6 +130,7 @@ The runtime exposes an asynchronous app-bound API:
 - \`cua.computer.target\`: local executor platform (mac, linux or windows). Linux/Windows expose \`await cua.computer.launch_app({app})\` for one literal executable name/path; no command-line arguments or shell expansion. A successful start persists after reset/turn end; use getApp and observe readiness before acting. macOS launches through getApp.
 - \`await cua.listApps({ emit? })\`: list current apps.
 - CDP browser: configure OPEN_COMPUTER_USE_CDP_URL, then use cua.listBrowsers(), cua.listTabs(), cua.getBrowser({id:"cdp"}), cua.getTab(id or {url}), and cua.createBrowserTab("cdp", url). Binding a tab emits provider documentation and initial AX state.
+- \`await cua.listWindows({ emit? })\`: Linux native window metadata with opaque numeric IDs. \`await cua.getApp({windowId}, {initialState?})\` binds exact AT-SPI window identity for AX and semantic actions; close/replacement invalidates it. Exact images and physical pointer routing for these bindings remain unavailable; keyboard fallback requires verified focus.
 - \`await cua.getApp(nameOrBundleID, { initialState? })\`: bind an app; initialState defaults to true. Use false for a lightweight binding before query.
 - \`await app.query({ text?, role?, exact?, limit?, maxNodes?, windowId? })\`: macOS-only AX lookup; returns matches and truncation metadata, with indexes usable in this native session.
 - \`await app.getAXState({ emit?, disableDiffing?, textLimit?, maxTreeNodes?, maxTreeDepth?, windowPlacement? })\`
@@ -538,7 +539,7 @@ export function createCuaApi(native, activeOutput, onDispose, {tabRequest,platfo
     activeOutput().write(computerUseGuidance(), "cua.core");
     docsEmitted = true;
   }
-  function appBinding(app) {
+  function appBinding(app,identity=app) {
     return Object.freeze({
       async query(options = {}) {
         if (!isPlainObject(options)) throw new Error("app.query expects an options object");
@@ -562,14 +563,14 @@ export function createCuaApi(native, activeOutput, onDispose, {tabRequest,platfo
       async getAXState(options = {}) {
         const result = await call("get_app_state", { app, ...optionsToSnapshotArgs(options) });
         const text = toolResultText(result);
-        await observe(app, text, options);
+        await observe(identity, text, options);
         return text;
       },
       async getScreenshot(options = {}) {
         observations.clear();
         const result = await call("get_app_state", { app, ...optionsToSnapshotArgs(options), text_limit: 1 });
         const image = toolResultImages(result)[0];
-        if (!image) throw new Error(`Screenshot unavailable for ${app}`);
+        if (!image) throw new Error(`Screenshot unavailable for ${identity}`);
         const bytes = Buffer.from(image.data, "base64");
         await emitImages([image], options);
         return bytes;
@@ -578,7 +579,7 @@ export function createCuaApi(native, activeOutput, onDispose, {tabRequest,platfo
         const result = await call("get_app_state", { app, ...optionsToSnapshotArgs(options) });
         const state = toolResultText(result);
         const images = toolResultImages(result);
-        await observe(app, state, options);
+        await observe(identity, state, options);
         await emitImages(images, options);
         return images[0] ? { state, screenshot: Buffer.from(images[0].data, "base64") } : { state };
       },
@@ -646,6 +647,7 @@ export function createCuaApi(native, activeOutput, onDispose, {tabRequest,platfo
     viewportRequest: native.browserHost ? args => native.request("browser/viewport",args) : undefined,
     onDispose,
   });
+  async function windowSupport(name){const tools=(await native.request('tools/list',{}))?.tools;if(!tools?.some(tool=>tool.name===name))throw Error('Native runtime does not advertise window-ID binding; update it before use');}
   const target={darwin:'mac',linux:'linux',win32:'windows'}[platform];
   const computer=Object.freeze({target,...(['linux','windows'].includes(target)?{async launch_app(input){
     if(!isPlainObject(input)||Object.keys(input).some(key=>key!=='app')||typeof input.app!=='string'||!input.app.trim()||Buffer.byteLength(input.app)>4096||/[\0\r\n]/u.test(input.app))throw Error('launch_app requires {app: executable name or path} (max 4096 bytes)');
@@ -676,6 +678,13 @@ export function createCuaApi(native, activeOutput, onDispose, {tabRequest,platfo
       if (options.emit !== false) activeOutput().write(state, "cua.state");
       return state;
     },
+    ...(target==='linux'?{async listWindows(options={}){
+      if(!isPlainObject(options)||Object.keys(options).some(key=>key!=='emit')||options.emit!==undefined&&typeof options.emit!=='boolean')throw Error('listWindows expects {emit?: boolean}');
+      await emitDocs();await windowSupport('list_windows');
+      const windows=JSON.parse(toolResultText(await call('list_windows',{})));
+      if(Buffer.byteLength(JSON.stringify(windows))>6*1024*1024||!Array.isArray(windows)||windows.some(window=>!isPlainObject(window)||!Number.isSafeInteger(window.id)||window.id<1||typeof window.app!=='string'||window.title!==undefined&&typeof window.title!=='string')||new Set(windows.map(window=>window.id)).size!==windows.length)throw Error('Invalid native window listing');
+      if(options.emit!==false)activeOutput().write(windows,'cua.state');return windows;
+    }}:{}),
     async listApps(options = {}) {
       await emitDocs();
       const result = await call("list_apps", {});
@@ -691,14 +700,23 @@ export function createCuaApi(native, activeOutput, onDispose, {tabRequest,platfo
       return apps;
     },
     async getApp(app, options = {}) {
-      if (typeof app !== "string" || !app.trim()) throw new Error("getApp requires an app name or bundle ID");
+      const window=isPlainObject(app);
+      if(window){
+        if(Object.keys(app).length!==1||!Object.hasOwn(app,'windowId')||!Number.isSafeInteger(app.windowId)||app.windowId<1)throw Error('getApp requires {windowId: positive safe integer}');
+        if(target!=='linux')throw Error('Native window-ID binding is currently available on Linux');
+      }else if(typeof app!=='string'||!app.trim())throw Error('getApp requires an app name, bundle ID or {windowId}');
       if (!isPlainObject(options) || (options.initialState !== undefined && typeof options.initialState !== "boolean")) throw new Error("initialState must be true or false");
-      await emitDocs();
+      await emitDocs();let identity=app;
+      if(window){
+        identity=`window:${app.windowId}`;await windowSupport('bind_window');
+        const bound=JSON.parse(toolResultText(await call('bind_window',{window_id:app.windowId})));
+        if(!isPlainObject(bound)||typeof bound.app!=='string'||!bound.app.startsWith('ocu-window:'))throw Error('Invalid native window binding');app=bound.app;
+      }
       if (options.initialState !== false) {
         const result = await call("get_app_state", { app, text_limit: "max" });
-        await observe(app, toolResultText(result), { textLimit: "max" });
+        await observe(identity, toolResultText(result), { textLimit: "max" });
       }
-      return appBinding(app);
+      return appBinding(app,identity);
     },
     async rewriteDocumentation() { activeOutput().write(computerUseGuidance(), "cua.core"); },
   };

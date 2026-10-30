@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import base64
+import hashlib
 import json
 import math
 import os
@@ -204,6 +205,87 @@ def resolve_app(query):
     raise RuntimeError('appNotFound("{}")'.format(query))
 
 
+WINDOW_PREFIX = "ocu-window:"
+
+
+def window_identity(window):
+    pid = node_pid(window)
+    bus = str(window.app.bus_name or "")
+    path = str(window.path or "")
+    try:
+        with open("/proc/{}/stat".format(pid), encoding="utf-8") as source:
+            start = source.read().rsplit(")", 1)[1].split()[19]
+    except (OSError, IndexError):
+        raise RuntimeError("Window process identity is unavailable")
+    if not bus or not path or pid <= 0 or not start.isdigit():
+        raise RuntimeError("Window identity is unavailable")
+    return {"bus": bus, "path": path, "pid": pid, "start": start}
+
+
+def identity_text(identity):
+    return json.dumps(identity, sort_keys=True, separators=(",", ":"))
+
+
+def window_id(identity):
+    return int.from_bytes(hashlib.sha256(identity_text(identity).encode()).digest()[:6], "big") + 1
+
+
+def window_selector(identity):
+    return WINDOW_PREFIX + base64.urlsafe_b64encode(identity_text(identity).encode()).decode()
+
+
+def window_entries(expected=None):
+    entries = []
+    for app in iter_apps():
+        if expected and (node_pid(app) != expected["pid"] or str(safe(lambda: app.app.bus_name, "")) != expected["bus"]):
+            continue
+        for index, window in app_windows(app):
+            if expected and str(window.path) != expected["path"]:
+                continue
+            if node_role(window).lower() not in {"frame", "window", "dialog", "alert"}:
+                continue
+            identity = window_identity(window)
+            entries.append((app, index, window, identity))
+            if len(entries) > MAX_ELEMENTS:
+                raise RuntimeError("Window enumeration exceeds the native budget")
+    return entries
+
+
+def list_windows():
+    entries = window_entries()
+    ids = [window_id(item[3]) for item in entries]
+    if len(ids) != len(set(ids)):
+        raise RuntimeError("Ambiguous native window IDs")
+    return [{"id": window_id(identity), "app": limit_text(node_name(app)), "title": limit_text(node_name(window))}
+            for app, _index, window, identity in entries]
+
+
+def bind_window(value):
+    if isinstance(value, bool) or not isinstance(value, int) or not 0 < value <= 9007199254740991:
+        raise RuntimeError("window_id must be a positive safe integer")
+    matches = [entry for entry in window_entries() if window_id(entry[3]) == value]
+    if len(matches) != 1:
+        raise RuntimeError("Window is unavailable or ambiguous; list windows again")
+    return window_selector(matches[0][3])
+
+
+def resolve_target(query):
+    if not query.startswith(WINDOW_PREFIX):
+        app = resolve_app(query)
+        index, window = main_window(app)
+        return app, index, window
+    try:
+        identity = json.loads(base64.b64decode(query[len(WINDOW_PREFIX):], altchars=b"-_", validate=True))
+        if not isinstance(identity, dict) or set(identity) != {"bus", "path", "pid", "start"} or type(identity["pid"]) is not int or identity["pid"] <= 0 or not all(isinstance(identity[key], str) and identity[key] for key in ("bus", "path", "start")) or not identity["path"].startswith("/") or not identity["start"].isdigit():
+            raise ValueError("Invalid identity")
+    except (ValueError, TypeError):
+        raise RuntimeError("Invalid native window binding")
+    matches = [entry for entry in window_entries(identity) if entry[3] == identity]
+    if len(matches) != 1:
+        raise RuntimeError("Bound window is closed or replaced; list windows and bind again")
+    return matches[0][:3]
+
+
 def action_names(node):
     names = []
     count = int(safe(node.get_n_actions, 0) or 0)
@@ -278,6 +360,7 @@ def record_for(node, index, path, window_bounds, text_limit=DEFAULT_TEXT_LIMIT, 
     return {
         "index": index,
         "runtimeId": path[:],
+        "objectPath": str(getattr(node, "path", "") or ""),
         "automationId": "" if omit_details else accessible_id(node),
         "name": limit_text(node_name(node), text_limit=text_limit),
         "controlType": role,
@@ -443,8 +526,7 @@ def focus_details(window, text_limit=DEFAULT_TEXT_LIMIT, max_nodes=MAX_ELEMENTS,
 
 
 def build_snapshot(query, text_limit=DEFAULT_TEXT_LIMIT, max_tree_nodes=MAX_ELEMENTS, max_tree_depth=MAX_DEPTH, include_ax=True, include_screenshot=True):
-    app = resolve_app(query)
-    window_index, window = main_window(app)
+    app, window_index, window = resolve_target(query)
     bounds = extents(window)
     records, lines = [], []
     focus, selection = None, None
@@ -460,6 +542,9 @@ def build_snapshot(query, text_limit=DEFAULT_TEXT_LIMIT, max_tree_nodes=MAX_ELEM
         focus, selection, focus_truncated = focus_details(window, text_limit, max_tree_nodes, max_tree_depth)
         if focus_truncated:
             lines.append("[Focus search incomplete: node/depth budget reached.]")
+    if include_screenshot and query.startswith(WINDOW_PREFIX):
+        # shortcut: enable images after exact native window capture is verified.
+        lines.append("Exact window screenshot capture is unavailable for this AT-SPI binding.")
     pid = node_pid(app)
     return {
         "app": {
@@ -469,7 +554,7 @@ def build_snapshot(query, text_limit=DEFAULT_TEXT_LIMIT, max_tree_nodes=MAX_ELEM
         },
         "windowTitle": limit_text(node_name(window), text_limit=text_limit),
         "windowBounds": bounds,
-        "screenshotPngBase64": capture_window_png(bounds) if include_screenshot else None,
+        "screenshotPngBase64": capture_window_png(bounds) if include_screenshot and not query.startswith(WINDOW_PREFIX) else None,
         "treeLines": lines,
         "focusedSummary": focus,
         "selectedText": selection,
@@ -505,15 +590,15 @@ def find_first(root, predicate):
     return None
 
 
-def iter_all(root):
+def iter_all(root, max_depth=None):
     items = []
 
-    def visit(node):
-        if node is None or len(items) >= MAX_ELEMENTS:
+    def visit(node, depth=0):
+        if node is None or len(items) >= MAX_ELEMENTS or (max_depth is not None and depth > max_depth):
             return
         items.append(node)
         for index in range(child_count(node)):
-            visit(child_at(node, index))
+            visit(child_at(node, index), depth + 1)
 
     visit(root)
     return items
@@ -539,14 +624,23 @@ def same_frame(record_frame, node_frame):
     return True
 
 
-def find_element(app, record):
+def find_element(app, record, window=None, strict=False):
     if not record:
         return None
+    if window is None:
+        _, window = main_window(app)
+    object_path = record.get("objectPath")
+    if strict:
+        if not object_path:
+            raise RuntimeError("Element identity unavailable; refresh the bound window")
+        matches = [node for node in iter_all(window, max_depth=MAX_DEPTH) if str(getattr(node, "path", "")) == object_path]
+        if len(matches) != 1:
+            raise RuntimeError("Bound element was removed or replaced; refresh the window")
+        return matches[0]
     node = resolve_path(app, record.get("runtimeId") or [])
     if node is not None:
         return node
 
-    _, window = main_window(app)
     target_name = str(record.get("name") or "")
     target_id = str(record.get("automationId") or "")
     target_role = str(record.get("controlType") or "")
@@ -803,6 +897,10 @@ def scroll_element(direction, pages):
 
 def perform_operation(operation):
     tool = operation.get("tool")
+    if tool == "list_windows":
+        return {"ok": True, "text": json.dumps(list_windows())}
+    if tool == "bind_window":
+        return {"ok": True, "text": json.dumps({"app": bind_window(operation.get("window_id"))})}
     if tool == "list_apps":
         return {"ok": True, "text": list_apps_text()}
     if tool == "get_app_state":
@@ -823,11 +921,22 @@ def perform_operation(operation):
             ),
         }
 
-    app = resolve_app(operation.get("app", ""))
-    _, window = main_window(app)
+    query = operation.get("app", "")
+    app, _, window = resolve_target(query)
+    bound = query.startswith(WINDOW_PREFIX)
     bounds = operation.get("windowBounds") or extents(window)
     element_record = operation.get("element")
-    element = find_element(app, element_record)
+    element = find_element(app, element_record, window=window, strict=bound)
+
+    def physical(pointer=False):
+        if not bound:
+            return
+        if pointer:
+            # shortcut: enable physical pointer input after native hit routing is verified.
+            raise RuntimeError("Window-bound physical pointer routing is unavailable; use a native accessibility action")
+        if not state_contains(window, Atspi.StateType.ACTIVE) or not any(state_contains(node, Atspi.StateType.FOCUSED) for node in iter_all(window, max_depth=MAX_DEPTH)):
+            raise RuntimeError("Window-bound keyboard input requires verified focus in the bound window")
+
 
     if tool == "click":
         click_method = (operation.get("click_method") or "auto").lower()
@@ -847,6 +956,7 @@ def perform_operation(operation):
         elif click_method == "sky_click":
             raise RuntimeError("click_method 'sky_click' is not supported on Linux")
         elif click_method == "global":
+            physical(pointer=True)
             x, y = screen_point(
                 bounds,
                 element_record,
@@ -861,6 +971,7 @@ def perform_operation(operation):
             if element is not None and operation.get("mouse_button", "left") == "left":
                 handled = do_action_by_index(element, preferred_action_index(element))
             if not handled:
+                physical(pointer=True)
                 x, y = screen_point(
                     bounds,
                     element_record,
@@ -878,8 +989,10 @@ def perform_operation(operation):
     elif tool == "perform_secondary_action":
         invoke_secondary_action(element, operation.get("action", ""))
     elif tool == "scroll":
+        physical()
         scroll_element(operation.get("direction", "down"), operation.get("pages", 1))
     elif tool == "drag":
+        physical(pointer=True)
         from_x, from_y = screen_point(
             bounds, None, operation.get("from_x"), operation.get("from_y")
         )
@@ -887,8 +1000,10 @@ def perform_operation(operation):
         send_drag(from_x, from_y, to_x, to_y)
     elif tool == "type_text":
         if not insert_text(window, operation.get("text", "")):
+            physical()
             send_text(operation.get("text", ""))
     elif tool == "press_key":
+        physical()
         send_key(operation.get("key", ""))
     elif tool == "set_value":
         if element is None:

@@ -18,3 +18,14 @@ test('explicit native launch validates shape and preserves one literal executabl
  advertised=false;await assert.rejects(cua.computer.launch_app({app}),/does not advertise/);assert.equal(calls.length,3);
  advertised=true;fail=true;await assert.rejects(cua.computer.launch_app({app}),/Start failed/);
 });
+test('Linux windows bind an exact opaque selector and validate inventory/IDs before actions',async()=>{
+ const calls=[];let advertised=true,listing=[{id:12,app:'shared',title:'same'}];
+ const native={async request(method,params){calls.push({method,params});if(method==='tools/list')return {tools:advertised?[{name:'list_windows'},{name:'bind_window'}]:[]};if(params.name==='list_windows')return result(JSON.stringify(listing));if(params.name==='bind_window')return result(JSON.stringify({app:'ocu-window:identityAa'}));return result('exact state');}};
+ const cua=createCuaApi(native,()=>({write(){}}),undefined,{platform:'linux'});
+ for(const target of [{windowId:0},{windowId:1.5},{windowId:12,extra:1}])await assert.rejects(cua.getApp(target),/windowId/);
+ assert.equal(calls.length,0);assert.deepEqual(await cua.listWindows({emit:false}),listing);
+ const app=await cua.getApp({windowId:12},{initialState:false});assert.equal(await app.getAXState({emit:false}),'exact state');assert.equal(calls.at(-1).params.arguments.app,'ocu-window:identityAa');
+ listing=[listing[0],listing[0]];await assert.rejects(cua.listWindows({emit:false}),/Invalid native window listing/);
+ advertised=false;await assert.rejects(cua.getApp({windowId:12}),/does not advertise/);
+ const mac=createCuaApi(native,()=>({write(){}}),undefined,{platform:'darwin'});assert.equal(mac.listWindows,undefined);await assert.rejects(mac.getApp({windowId:12}),/available on Linux/);
+});

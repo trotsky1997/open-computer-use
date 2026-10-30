@@ -254,3 +254,30 @@ Windows common Go checks passed on macOS; both Windows architectures compiled.
 Real Windows desktop/job/console cases, desktop/AppUserModelID resolution, remote
 native identity, window-ID targeting and broader input/platform work remain open.
 See [native lifecycle](../../native-lifecycle.md). Keep the full goal active.
+
+## Linux window identities
+
+Add listWindows() and getApp({windowId}) using native AT-SPI connection/object
+paths plus process start identity. Numeric discovery IDs remain opaque; bound
+selectors preserve the full native identity across native-peer replacement.
+Resolve the exact window before observation/action, scope snapshot caches and
+native element identity to it, and reject destroyed/replaced windows. Preserve
+Windows/macOS explicit unsupported handling until their native identity routes
+are implemented. Verify same-process multiple/same-title/reordered/recreated
+windows and targeted semantic actions in an owned GTK desktop. Physical routing
+must fail when target focus/hit testing cannot be verified; it remains part of
+the wider native input work rather than an implied success claim.
+
+GTK source/Worker workflows passed same-process/same-title windows, independent
+cache/index writes, widget replacement, close/reordered children, recreated window
+rejection and stable peer/turn/reset IDs. Bound screenshot unavailability and
+sibling-cache preservation are verified. Exact native images and physical pointer
+routing stay unavailable; keyboard fallback requires verified selected-window
+focus. These are explicit remaining input/capture requirements. See
+[native windows](../../native-window-binding.md). Wider provider/Windows/Wayland/
+headful/transport/claims/native parity remains open. Keep the full goal active.
+
+The final revision passed 140 Node checks, 39 Python checks and 46 native Linux Go
+checks, plus both session modes' multi-window GTK flow and the earlier native
+launch/lifecycle GTK regression. Owned test apps and private VM work files were
+removed. The full harness goal remains active.

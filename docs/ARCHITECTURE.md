@@ -498,3 +498,15 @@ independent application process/session. Started apps persist across automation
 cleanup; the peer reaps child exits while alive. Source/Worker Linux GTK fixtures
 verify startup, AX observation and turn/native/reset/close persistence. See
 [native lifecycle](native-lifecycle.md) for limits and platform evidence.
+
+
+## Linux window bindings
+
+The AT-SPI bridge enumerates window connection/object paths and process start
+identity. Numeric discovery IDs bind a full native selector that survives MCP
+peer replacement. Go snapshots keep case-sensitive bound selectors separate from
+app/PID aliases, and the Python bridge resolves exact element object paths only
+inside that window. The JS API exposes Linux listWindows()/getApp({windowId}),
+with numeric labels for diffs. Current bindings expose AX/semantic actions and
+reject unverified image/physical routing. See [native windows](native-window-binding.md)
+for limits, validation and remaining platform work.
