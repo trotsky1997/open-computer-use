@@ -18,7 +18,7 @@ current native/browser documentation on 2026-10-30.
 | Navigation / event waits | Basic navigation exists, locator waitFor exists | expectNavigation, URL/load waits, download/file chooser lifecycle |
 | Dialogs / clipboard / developer tools | Not exposed | Explicit dialog handles, session clipboard, logs and capability discovery |
 | Content / artifacts | Screenshots returned as binary | Content export, download delivery and artifact retention |
-| Host / session integration | Current plugin installer and native permission boundaries | Host-owned locator cancellation/focus cleanup, turn lifecycle, user takeover, ownership, managed tab cleanup and host integration |
+| Host / session integration | Plugin installer, native permission boundaries, host-owned Worker focus cleanup with real timeout/reset/close/exit checks | Turn lifecycle, user takeover, ownership, managed tab cleanup and host integration |
 | Platform coverage | Node checks and real disposable macOS headless Chrome evidence | Native desktop, headful focus, Linux and Windows verification |
 
 Keep the full goal active while any required capability or its verification is

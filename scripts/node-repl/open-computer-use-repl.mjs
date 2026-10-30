@@ -9,7 +9,8 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { Worker } from "node:worker_threads";
-import { createBrowserApi } from "./browser-cdp.mjs";
+import { BrowserFocusLeases } from "./browser-playwright.mjs";
+import { createBrowserApi, updateBrowserFocus } from "./browser-cdp.mjs";
 import { inspectConfig } from "./ocu-config.mjs";
 
 const require = createRequire(import.meta.url);
@@ -23,6 +24,7 @@ const DEFAULT_TIMEOUT_MS = 30_000;
 const MAX_TIMEOUT_MS = 300_000;
 const MAX_FRAME_BYTES = 32 * 1024 * 1024;
 const HERE = path.dirname(fileURLToPath(import.meta.url));
+const HOST_BROWSER_FOCUS = new BrowserFocusLeases(updateBrowserFocus);
 
 const SERVER_INSTRUCTIONS = `UI automation through a persistent JavaScript REPL using the initialized cua API.
 
@@ -440,7 +442,7 @@ export function createCuaApi(native, activeOutput) {
       async performSecondaryAction(elementIndex, action) { await call("perform_secondary_action", { app, element_index: elementIndex, action }); },
     });
   }
-  const browserApi = createBrowserApi(activeOutput);
+  const browserApi = createBrowserApi(activeOutput, process.env, native.browserFocus ? args => native.request("browser/focus", args) : undefined);
   const api = {
     ...browserApi,
     async getState(options = {}) {
@@ -608,6 +610,8 @@ export class WorkerJavaScriptSession {
     this.pending = new Map();
     this.runQueue = Promise.resolve();
     this.invalidatedWorkers = new WeakSet();
+    this.browserFocusLeases = HOST_BROWSER_FOCUS;
+    this.stoppingWorkers = new WeakMap();
     this.#start();
   }
 
@@ -615,14 +619,32 @@ export class WorkerJavaScriptSession {
     const worker = new Worker(new URL("./open-computer-use-kernel.mjs", import.meta.url));
     this.worker = worker;
     worker.on("message", message => void this.#onMessage(worker, message));
-    worker.on("error", error => {
-      if (this.worker === worker && !this.invalidatedWorkers.has(worker)) {
-        this.invalidatedWorkers.add(worker);
-        this.native.endSession?.();
-      }
-      this.#failWorker(worker, error);
+    worker.on("error", error => void this.#workerFailed(worker, error));
+    worker.on("exit", code => {
+      if (this.worker === worker && !this.invalidatedWorkers.has(worker)) void this.#workerFailed(worker, new Error(`JavaScript kernel exited with code ${code}`));
     });
-    worker.on("exit", code => { if (code !== 0) this.#failWorker(worker, new Error(`JavaScript kernel exited with code ${code}`)); });
+  }
+
+  #stop(worker) {
+    if (!this.stoppingWorkers.has(worker)) {
+      this.invalidatedWorkers.add(worker);
+      for (const pending of this.pending.values()) if (pending.worker === worker) clearTimeout(pending.timer);
+      this.native.endSession?.();
+      this.stoppingWorkers.set(worker, (async () => {
+        await worker.terminate();
+        await this.browserFocusLeases.cleanup(worker);
+      })().catch(error => { this.stoppingWorkers.delete(worker); throw error; }));
+    }
+    return this.stoppingWorkers.get(worker);
+  }
+
+  async #workerFailed(worker, error) {
+    if (this.invalidatedWorkers.has(worker)) return;
+    try {
+      await this.#stop(worker);
+      if (this.worker === worker) this.#start();
+    } catch (cleanupError) { error = new Error(`${asError(error).message}; browser cleanup failed: ${asError(cleanupError).message}`); }
+    this.#failWorker(worker, error);
   }
 
   async #onMessage(worker, message) {
@@ -637,10 +659,15 @@ export class WorkerJavaScriptSession {
     }
     if (message.type === "native_request") {
       try {
-        const result = await this.native.request(message.method, message.params, message.timeoutMs);
-        if (this.worker === worker) worker.postMessage({ type: "native_response", id: message.id, result });
+        let result;
+        if (message.method === "browser/focus") {
+          if (message.params?.action === "acquire") result = await this.browserFocusLeases.acquire(worker, message.params.targetId);
+          else if (message.params?.action === "release") result = await this.browserFocusLeases.release(worker, message.params.lease);
+          else throw new Error("Unknown browser focus action");
+        } else result = await this.native.request(message.method, message.params, message.timeoutMs);
+        if (this.worker === worker && !this.invalidatedWorkers.has(worker)) worker.postMessage({ type: "native_response", id: message.id, result });
       } catch (error) {
-        if (this.worker === worker) worker.postMessage({ type: "native_response", id: message.id, error: asError(error).message });
+        if (this.worker === worker && !this.invalidatedWorkers.has(worker)) worker.postMessage({ type: "native_response", id: message.id, error: asError(error).message });
       }
     }
   }
@@ -656,19 +683,17 @@ export class WorkerJavaScriptSession {
 
   async reset() {
     const old = this.worker;
-    this.invalidatedWorkers.add(old);
-    this.native.endSession?.();
+    try {
+      await this.#stop(old);
+      if (this.worker === old) this.#start();
+    } catch (error) { this.#failWorker(old, error); throw error; }
     this.#failWorker(old, new Error("JavaScript session reset"));
-    await old.terminate();
-    if (this.worker === old) this.#start();
   }
 
   async close() {
     const old = this.worker;
-    this.invalidatedWorkers.add(old);
-    this.native.endSession?.();
-    this.#failWorker(old, new Error("JavaScript session closed"));
-    await old.terminate();
+    try { await this.#stop(old); }
+    finally { this.#failWorker(old, new Error("JavaScript session closed")); }
   }
 
   run(code, timeoutMs = DEFAULT_TIMEOUT_MS, requestMeta = {}) {
@@ -678,6 +703,7 @@ export class WorkerJavaScriptSession {
   }
 
   #run(code, timeoutMs, requestMeta) {
+    if (this.invalidatedWorkers.has(this.worker)) return Promise.resolve({content:[{type:"text",text:"Error: JavaScript session stopped; browser cleanup must succeed before reuse"}],isError:true});
     const id = this.nextId++;
     return new Promise(resolve => {
       const worker = this.worker;
@@ -685,11 +711,12 @@ export class WorkerJavaScriptSession {
         const pending = this.pending.get(id);
         if (!pending || pending.worker !== worker) return;
         this.pending.delete(id);
-        this.invalidatedWorkers.add(worker);
-        this.native.endSession?.();
-        await worker.terminate();
-        if (this.worker === worker) this.#start();
-        resolve({ content: [{ type: "text", text: `Error: js execution timed out after ${timeoutMs} ms; session reset` }], isError: true });
+        let error = `js execution timed out after ${timeoutMs} ms; session reset`;
+        try {
+          await this.#stop(worker);
+          if (this.worker === worker) this.#start();
+        } catch (cleanupError) { error += `; browser cleanup failed: ${asError(cleanupError).message}; session stopped`; }
+        resolve({ content: [{ type: "text", text: `Error: ${error}` }], isError: true });
       }, timeoutMs);
       this.pending.set(id, { resolve, timer, worker });
       worker.postMessage({ type: "exec", id, code, timeoutMs, requestMeta });

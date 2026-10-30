@@ -232,3 +232,11 @@ binds the exact target, resolves the locator, applies bounded waits and disconne
 Action operations use scoped virtual focus with explicit cleanup and discard old
 AX/screenshot observations. npm metadata and the plugin installer carry the same
 dependency. See [harness parity](harness-parity.md) for the broader unfinished scope.
+
+Worker locator focus is now leased from a host-wide registry through the internal
+browser/focus request route. The host owns a separate live CDP connection for the
+lease. Cancellation stops the Worker, awaits in-flight acquisition, disables focus
+and then replaces the kernel. Failed cleanup retains the lease and keeps the
+session stopped until a successful reset retry. A stale Worker cannot acknowledge
+new work or replay the interrupted browser action. See the browser contract for
+remaining cross-process and host-lifecycle boundaries.

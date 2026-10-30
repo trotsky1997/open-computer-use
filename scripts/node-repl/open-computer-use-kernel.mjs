@@ -5,6 +5,7 @@ let nextNativeId = 1;
 let activeTimeoutMs;
 const pendingNative = new Map();
 const native = {
+  browserFocus: true,
   request(method, params, timeoutMs = activeTimeoutMs) {
     const id = nextNativeId++;
     return new Promise((resolve, reject) => {

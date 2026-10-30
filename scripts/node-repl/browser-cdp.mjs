@@ -93,7 +93,7 @@ function editText(operation, text, options) {
 
 const TIMEOUT = 10_000;
 
-async function withConnection(url, operation) {
+async function openConnection(url) {
   if (typeof WebSocket !== "function") throw new Error("CDP browser support requires Node.js 22 or newer");
   const socket = new WebSocket(url);
   const pending = new Map();
@@ -131,12 +131,20 @@ async function withConnection(url, operation) {
       try { socket.send(JSON.stringify({ id, method, params })); }
       catch (error) { pending.delete(id); clearTimeout(timeout); reject(error); }
     });
-    return await operation(send);
-  } finally {
+    return {send, close() { fail(new Error("Browser operation ended")); socket.close(); }};
+  } catch (error) {
     clearTimeout(timer);
-    fail(new Error("Browser operation ended"));
+    fail(error);
     socket.close();
+    throw error;
   }
+}
+
+
+async function withConnection(url, operation) {
+  const connection = await openConnection(url);
+  try { return await operation(connection.send); }
+  finally { connection.close(); }
 }
 
 const DOCUMENTATION = `## CDP browser
@@ -156,7 +164,7 @@ act with click/dblclick/fill/press/check/uncheck/setChecked/selectOption/hover/s
 Playwright resolves fresh elements and waits for actionability; ambiguous matches fail. Default action timeout is 10 seconds.
 Playwright actions invalidate prior AX and screenshot indices. Read current state afterwards. Formatted paste remains unsupported.`;
 
-export function createBrowserApi(activeOutput, environment = process.env) {
+export function createBrowserApi(activeOutput, environment = process.env, focusLease) {
   function endpoint() {
     if (!environment.OPEN_COMPUTER_USE_CDP_URL) return null;
     const url = new URL(environment.OPEN_COMPUTER_USE_CDP_URL);
@@ -283,7 +291,7 @@ export function createBrowserApi(activeOutput, environment = process.env) {
     }
     return Object.freeze({
       ...info(target),
-      playwright: createPlaywrightApi(() => { const value = endpoint(); if (!value) throw new Error("No CDP browser configured"); return value.href; }, target.id, invalidate),
+      playwright: createPlaywrightApi(() => { const value = endpoint(); if (!value) throw new Error("No CDP browser configured"); return value.href; }, target.id, invalidate, focusLease),
       getAXState: ax,
       getScreenshot: screenshot,
       async getAXStateAndScreenshot(options = {}) {
@@ -448,4 +456,34 @@ export function createBrowserApi(activeOutput, environment = process.env) {
     },
   };
   return Object.freeze(api);
+}
+
+
+const focusConnections = new Map();
+export async function updateBrowserFocus(targetId, enabled) {
+  const origin = new URL(process.env.OPEN_COMPUTER_USE_CDP_URL);
+  if (!["http:","https:"].includes(origin.protocol) || origin.username || origin.password || origin.pathname !== "/" || origin.search || origin.hash) throw new Error("Invalid configured CDP origin");
+  const key = `${origin.href}|${targetId}`;
+  if (!enabled && focusConnections.has(key)) {
+    const connection = focusConnections.get(key);
+    try {
+      await connection.send("Emulation.setFocusEmulationEnabled", {enabled:false});
+      return;
+    } catch {
+      // A lost connection needs a fresh acknowledgement before releasing ownership.
+    } finally { connection.close(); focusConnections.delete(key); }
+  }
+  const response = await fetch(new URL("/json/list", origin), {signal:AbortSignal.timeout(TIMEOUT), redirect:"error"});
+  if (!response.ok) throw new Error(`Browser focus discovery failed: HTTP ${response.status}`);
+  const targets = await response.json();
+  const target = targets.find(item => item.type === "page" && item.id === targetId);
+  if (!target) {
+    if (enabled) throw new Error("Browser focus target closed");
+    return;
+  }
+  if (enabled) {
+    const connection = await openConnection(target.webSocketDebuggerUrl);
+    focusConnections.set(key, connection);
+    await connection.send("Emulation.setFocusEmulationEnabled", {enabled:true});
+  } else await withConnection(target.webSocketDebuggerUrl, send => send("Emulation.setFocusEmulationEnabled", {enabled:false}));
 }

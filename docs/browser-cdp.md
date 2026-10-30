@@ -154,7 +154,17 @@ Playwright actions discard prior native AX and screenshot indices. Read fresh
 state after an action. Read-only evaluation isolation, navigation/event wrappers,
 downloads, file choosers and other browser lifecycle integrations remain open.
 
-Forced Worker termination can bypass the operation's finally cleanup and leave
-virtual focus enabled. Host-owned cancellation cleanup is pending. Avoid inferring
-remote action failure from a REPL timeout; inspect current browser state before
-retrying an action.
+Worker locator actions acquire an exclusive focus lease owned by the host before
+starting input. The host keeps its own CDP connection until release, independently
+of the Worker. Timeout, reset, close and unexpected Worker exit terminate the
+Worker and restore focus before completing cancellation or starting its replacement.
+Lease acquisition is registered before any asynchronous enable request, so cleanup
+also covers a Worker that dies while acquisition is in flight. Concurrent actions
+on the same target in one host are refused until its existing input lease ends.
+
+Cleanup failure retains ownership and stops the session. New evaluations are
+refused until reset retries cleanup successfully. Cleanup can extend the requested
+JavaScript timeout while CDP recovery completes. No interrupted action is replayed.
+A timeout can leave an action's application result uncertain; inspect current
+browser state before retrying. This protects Worker cancellation while the host is
+alive; separate host processes or other CDP clients are not jointly coordinated.

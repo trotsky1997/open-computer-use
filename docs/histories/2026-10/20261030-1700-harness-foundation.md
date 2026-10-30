@@ -100,3 +100,17 @@ Final extended smoke also passed locator recipes retained across Worker calls,
 including regex selectors in the Worker realm. Background visibility restoration
 was verified on both success and strict-match failure. The remaining forced-Worker
 termination gap is explicitly retained in the parity plan.
+
+Worker focus cleanup is now host-owned. Locator actions acquire an exclusive
+host-wide target lease through the internal native-request route. The host retains
+an independent CDP connection and restores focus on timeout, reset, close and
+unexpected exit, including acquisition in flight. Stale Worker responses are
+ignored. Cleanup failure retains ownership and stops evaluation; reset can retry
+cleanup before creating a replacement kernel. No action is replayed.
+
+The focus registry has two focused checks for in-flight acquisition, ownership,
+cleanup failure retention and retry. All 59 Node checks passed. Real Chrome smoke
+covers timeout/reset/close/external Worker termination and subsequent session
+recovery; cleanup-outage injection additionally checks stopped-session behavior
+and successful retry. Application results after cancellation still require fresh
+observation, and cross-process coordination remains open.

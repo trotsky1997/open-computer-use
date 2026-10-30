@@ -5,7 +5,7 @@ import { WorkerJavaScriptSession } from './node-repl/open-computer-use-repl.mjs'
 if (!process.env.OPEN_COMPUTER_USE_CDP_URL) throw new Error('Set OPEN_COMPUTER_USE_CDP_URL to a disposable browser debugging origin');
 const server = createServer((req, res) => {res.setHeader('Content-Type', 'text/html');
 if (req.url === '/locators') {
-  res.end(`<html><body><label>User name<input placeholder="Enter your name"></label><input type="checkbox" aria-label="Accept"><select aria-label="Plan"><option value="basic">Basic</option><option value="pro">Pro</option></select><button data-testid="save" onclick="document.getElementById('result').textContent='Saved '+document.querySelector('input').value">Save</button><p id="result">Waiting</p><button>Duplicate</button><button>Duplicate</button><ul><li>Alpha</li><li>Beta</li></ul><div id="dynamic"></div><iframe title="child" srcdoc="<label>Child field<input></label>"></iframe><script>window.showLate=()=>{const button=document.createElement('button');button.textContent='Late button';button.onclick=()=>button.textContent='Late clicked';document.getElementById('dynamic').appendChild(button)};setTimeout(showLate,500)</script></body></html>`);
+  res.end(`<html><body><label>User name<input placeholder="Enter your name"></label><input type="checkbox" aria-label="Accept"><select aria-label="Plan"><option value="basic">Basic</option><option value="pro">Pro</option></select><button data-testid="save" onclick="document.getElementById('result').textContent='Saved '+document.querySelector('input').value">Save</button><p id="result">Waiting</p><button>Duplicate</button><button>Duplicate</button><button disabled>Never enabled</button><ul><li>Alpha</li><li>Beta</li></ul><div id="dynamic"></div><iframe title="child" srcdoc="<label>Child field<input></label>"></iframe><script>window.showLate=()=>{const button=document.createElement('button');button.textContent='Late button';button.onclick=()=>button.textContent='Late clicked';document.getElementById('dynamic').appendChild(button)};setTimeout(showLate,500)</script></body></html>`);
   return;
 }
 if (req.url === '/pointer') {
@@ -163,6 +163,43 @@ try {
     assert.equal(result.isError, false, JSON.stringify(result.content));
     assert.equal(result.content.at(-1).text, '1');
   } finally {await locatorWorker.close();}
+  for (const mode of ['timeout','reset','close','exit','cleanup-failure']) {
+    const cancellation = new WorkerJavaScriptSession({native:{async request(){throw new Error('Native not used');}}});
+    const originalUpdate = cancellation.browserFocusLeases.updateFocus;
+    try {
+      if (mode === 'cleanup-failure') cancellation.browserFocusLeases.updateFocus = (target,enabled) => {
+        if (!enabled) throw new Error('Injected cleanup outage');
+        return originalUpdate(target,enabled);
+      };
+      const baseline = await visibility(tab.id);
+      const running = cancellation.run(`var t = await cua.getTab(${JSON.stringify(tab.id)}); await t.playwright.getByRole("button", {name:"Never enabled",exact:true}).click({timeoutMs:0});`, ['timeout','cleanup-failure'].includes(mode) ? 1500 : 10000);
+      let acquired = false;
+      for (let i=0;i<100;i++) {
+        if ((await visibility(tab.id)) === 'visible') { acquired = true; break; }
+        await new Promise(resolve=>setTimeout(resolve,20));
+      }
+      assert.equal(acquired,true,`${mode}: host focus lease was never observed`);
+      if(mode === 'reset') await cancellation.reset();
+      if(mode === 'close') await cancellation.close();
+      if(mode === 'exit') await cancellation.worker.terminate();
+      const result = await running;
+      assert.equal(result.isError,true,mode);
+      if(mode === 'cleanup-failure') {
+        assert.match(result.content.at(-1).text,/browser cleanup failed/);
+        assert.equal((await cancellation.run('nodeRepl.write(99)')).isError,true);
+        cancellation.browserFocusLeases.updateFocus = originalUpdate;
+        await cancellation.reset();
+      }
+      assert.equal(await visibility(tab.id),baseline,`${mode}: focus cleanup did not restore background visibility`);
+      if(mode !== 'close') {
+        const recovered = await cancellation.run('nodeRepl.write(42)');
+        assert.equal(recovered.content.at(-1).text,'42',mode);
+      }
+    } finally {
+      cancellation.browserFocusLeases.updateFocus = originalUpdate;
+      await cancellation.close();
+    }
+  }
   await tab.goto(url.replace('/first','/pointer'));
   await assert.rejects(tab.click([50,40]), /fresh screenshot/);
   const pointerImage = await tab.getScreenshot({emit:false});
@@ -192,7 +229,7 @@ try {
   await assert.rejects(tab.click(pixel(50,40)), /geometry changed/);
   await tab.close();
   await assert.rejects(tab.getAXState(), /no longer available/);
-  console.log('PASS browser inventory, create/bind, AX, PNG, click/type/key/paste/scroll/setValue/selectText/coordinate-click/drag/scroll/playwright, stale-index rejection, navigation/history/reload, close, worker inventory failure isolation');
+  console.log('PASS browser inventory, create/bind, AX, PNG, click/type/key/paste/scroll/setValue/selectText/coordinate-click/drag/scroll/playwright/cancellation, stale-index rejection, navigation/history/reload, close, worker inventory failure isolation');
 } finally {
   if (tab && (await api.listTabs({emit:false})).some(item=>item.id===tab.id)) await tab.close();
   server.closeAllConnections();

@@ -54,3 +54,37 @@ test("screenshot coordinates scale from device pixels and reject invalid targets
     assert.throws(() => screenshotPoint(point,image), /Coordinates/);
   }
 });
+
+
+test("host focus cleanup waits for an in-flight acquire before disabling", async () => {
+  const {BrowserFocusLeases} = await import("./browser-playwright.mjs");
+  let enabled;
+  const calls = [];
+  let finish;
+  const ready = new Promise(resolve => {finish=resolve;});
+  const leases = new BrowserFocusLeases(async (target,value) => {calls.push(value); if(value) await ready; enabled=value;});
+  const owner = {};
+  const acquire = leases.acquire(owner,"target");
+  const cleanup = leases.cleanup(owner);
+  await assert.rejects(leases.acquire({},"target"), /active input lease/);
+  finish();
+  await acquire;
+  await cleanup;
+  assert.deepEqual(calls,[true,false]);
+  assert.equal(enabled,false);
+  assert.equal(leases.entries.size,0);
+});
+
+test("failed host cleanup retains ownership for a later retry", async () => {
+  const {BrowserFocusLeases} = await import("./browser-playwright.mjs");
+  let fail = true;
+  const leases = new BrowserFocusLeases(async (target,enabled) => {if(!enabled && fail) throw new Error("offline");});
+  const owner = {}, other = {};
+  const lease = await leases.acquire(owner,"target");
+  await assert.rejects(leases.release(other,lease), /Unknown/);
+  await assert.rejects(leases.cleanup(owner), /offline/);
+  assert.equal(leases.entries.size,1);
+  fail=false;
+  await leases.cleanup(owner);
+  assert.equal(leases.entries.size,0);
+});
