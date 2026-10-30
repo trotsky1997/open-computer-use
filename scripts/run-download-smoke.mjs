@@ -22,7 +22,8 @@ const server = createServer((request,response)=>{
   }
 });
 await new Promise(resolve=>server.listen(0,"127.0.0.1",resolve));
-const api = createBrowserApi(()=>({write(){},async emitImage(){}}));
+const disposers = [];
+const api = createBrowserApi(()=>({write(){},async emitImage(){}}),process.env,{onDispose:dispose=>disposers.push(dispose)});
 const uploadDirectory=mkdtempSync(path.join(tmpdir(),"ocu-download-upload-"));
 const uploadFile=path.join(uploadDirectory,"input.txt");writeFileSync(uploadFile,"fixture");
 let tab;
@@ -117,6 +118,7 @@ try {
   console.log("PASS download artifacts, safe filename, repeated path, event timeout, Worker handles, in-flight cancellation, reset/close, context exclusivity, policy restore failure/retry, chooser-triggered download and recovery");
 } finally {
   if(tab) await tab.close();
+  await Promise.all(disposers.map(dispose=>dispose()));
   rmSync(uploadDirectory,{recursive:true,force:true});
   server.closeAllConnections();
   await new Promise(resolve=>server.close(resolve));

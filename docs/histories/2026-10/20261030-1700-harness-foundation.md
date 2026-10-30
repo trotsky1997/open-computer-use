@@ -224,3 +224,32 @@ download and native-free CLI/MCP smoke checks passed. Pre-binding dialog discove
 popup/OOPIF dialogs, system prompts, independent processes/external client races,
 headful and Linux/Windows validation remain open. Future asynchronous page scripts
 remain page-owned; cleanup covers observed active/synchronous dialog continuations.
+
+Browser clipboard read/readText/write/writeText now delegates to Chromium's native
+process-isolated headless clipboard. The host requires verifiable headless and
+automation startup flags before creating a private loopback control page or grant.
+Text/HTML/PNG use the native Clipboard API and editor pipeline, preserving trusted
+paste events, sanitization, image validation and browser normalization. Clipboard
+contents are browser-process state shared across tabs/VMs and survive JS reset.
+
+Native text/HTML paste writes and dispatches in one endpoint queue, validates the
+document loader, and cooperates with owned JavaScript dialogs. macOS copy/cut/paste
+editor commands now accompany the shortcut events. Control pages, private-origin
+permissions, temporary focus and loopback servers are host-owned; public tab
+inventories filter internal targets across in-process controller instances.
+Cancellation prevents queued work and late pre-dispatch writes. Teardown waits
+for started calls, preserves other live observers' permission grants, and retains
+resources on failure until reset retries. Direct source smoke users now dispose
+registered runtime resources. npm/plugin packaging and capability module checks
+include browser-clipboard.mjs.
+
+All 67 Node checks passed, including payload validation, fail-closed isolation
+checks and queued cancellation. Real macOS headless Chrome verified native text,
+HTML and PNG, trusted copy/cut/paste, sanitization, native undo and beforeinput
+cancellation, readonly/maxlength, password copy protection, hidden bridges, shared
+browser contents across VM reset, timeout/close, pre-dispatch cancellation, paste
+dialog cleanup, uncertain focus acquisition and injected cleanup failure/retry. The macOS system clipboard's
+plain-text hash stayed unchanged without printing its contents. Existing browser,
+download, dialog, console and native-free CLI/MCP smokes passed. Headful/CfT
+isolation detection, remote bridge access, incognito concurrency, native app paste,
+host crashes and Linux/Windows coverage remain open.

@@ -1,4 +1,5 @@
 import { BrowserDownloads } from "./browser-downloads.mjs";
+import { BrowserClipboard } from "./browser-clipboard.mjs";
 import { createPlaywrightApi, waitForBrowserEventReady } from "./browser-playwright.mjs";
 import { format } from "node:util";
 
@@ -26,8 +27,9 @@ export function keyEvent(key) {
   const result = {key:entry?.[0] ?? value, windowsVirtualKeyCode:entry?.[1] ?? (/^[a-z0-9]$/iu.test(value) ? value.toUpperCase().charCodeAt(0) : 0), modifiers};
   if (!(modifiers & 7) && ([...value].length === 1 || value === "space")) result.text = modifiers & 8 ? result.key.toUpperCase() : result.key;
   if (/^[a-z]$/iu.test(value)) result.code = `Key${value.toUpperCase()}`;
-  // macOS CDP requires an explicit editor command for the select-all shortcut.
-  if (process.platform === "darwin" && modifiers === 4 && value.toLowerCase() === "a") result.commands = ["selectAll"];
+  // macOS CDP requires explicit editor commands for these shortcuts.
+  const command = {a:"selectAll",c:"copy",x:"cut",v:"paste"}[value.toLowerCase()];
+  if (process.platform === "darwin" && modifiers === 4 && command) result.commands = [command];
   return result;
 }
 
@@ -150,7 +152,7 @@ async function openConnection(url, onEvent = () => {}, onClose = () => {}) {
   }
 }
 
-function browserEndpoint(environment) {
+export function browserEndpoint(environment) {
   if (!environment.OPEN_COMPUTER_USE_CDP_URL) return null;
   const url = new URL(environment.OPEN_COMPUTER_USE_CDP_URL);
   if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.search || url.hash || url.pathname !== "/") {
@@ -406,7 +408,7 @@ export class BrowserDialogs {
 }
 
 
-async function withConnection(url, operation) {
+export async function withConnection(url, operation) {
   const connection = await openConnection(url);
   try { return await operation(connection.send); }
   finally { connection.close(); }
@@ -418,7 +420,7 @@ Tab bindings expose getAXState(), getScreenshot(), getAXStateAndScreenshot(),
 goto(url), back(), forward(), reload(), and close(). Observations emit by default;
 pass {emit:false} to suppress output. AX state uses browser accessibility node IDs.
 Tab input: click(elementIndex, {mouseButton?, clickCount?}), typeText(elementIndexOrNull, text),
-pressKey(elementIndexOrNull, key), paste(elementIndexOrNull, text, {format:"text"}),
+pressKey(elementIndexOrNull, key), paste(elementIndexOrNull, text, {format:"text"|"html"}),
 and scroll(elementIndex, direction, pages). Read fresh AX state after actions.
 Screenshot-only reads invalidate element indices. Navigation invalidates all indices.
 setValue(elementIndex, value) replaces editable text; selectText(elementIndex, text, {prefix?,suffix?,selectionType?}) selects exact text or positions the cursor.
@@ -428,11 +430,16 @@ Chain locator/filter({hasText})/nth/first/last; read count/innerText/textContent
 act with click/dblclick/fill/press/check/uncheck/setChecked/selectOption/hover/scrollIntoViewIfNeeded.
 Playwright resolves fresh elements and waits for actionability; ambiguous matches fail. Default action timeout is 10 seconds.
 Navigation waits: tab.playwright.expectNavigation(async action, {url?,waitUntil?,timeoutMs?}), waitForURL(url, {waitUntil?,timeoutMs?}), waitForLoadState({state?,timeoutMs?}). expectNavigation installs a main-frame watcher before running the action and returns its result after navigation.
-Playwright actions invalidate prior AX and screenshot indices. Read current state afterwards. File chooser events: start tab.playwright.waitForEvent("filechooser", {timeoutMs?}) before clicking, then await the handle and use isMultiple() / setFiles(absolutePaths, {timeoutMs?}). The file handle is one-shot. Downloads: start waitForEvent("download") before clicking, then await download.path({timeoutMs?}) for the completed local artifact. Formatted paste remains unsupported.
+Playwright actions invalidate prior AX and screenshot indices. Read current state afterwards. File chooser events: start tab.playwright.waitForEvent("filechooser", {timeoutMs?}) before clicking, then await the handle and use isMultiple() / setFiles(absolutePaths, {timeoutMs?}). The file handle is one-shot. Downloads: start waitForEvent("download") before clicking, then await download.path({timeoutMs?}) for the completed local artifact.
 Developer logs: await tab.dev.logs({filter?,levels?,limit?}) returns chronological console entries with level/message/timestamp/url. Capture begins at tab binding, continues across calls/navigation, and ends on close/reset/timeout. Levels: debug/info/log/warn/error (warning aliases warn). Default limit 100; retained cap 1000 entries, each at most 16,384 UTF-16 code units. Objects use shallow CDP descriptions; no page getters are executed. Prior console history and out-of-process frame/worker logs are excluded.
-JavaScript dialogs: await tab.getJsDialog() returns undefined or a handle with type. alert/beforeunload support dismiss(); confirm supports accept()/dismiss(); prompt supports accept(text)/dismiss(). Actions return when they open a dialog; answer it before further page reads/input. Handles are scoped to the observed dialog and owning session. Reset/timeout/close dismiss owned active dialogs. Beforeunload dismiss cancels navigation. Created tabs attach observers before loading their URL. A dialog predating first binding may prevent CDP initialization.`;
+JavaScript dialogs: await tab.getJsDialog() returns undefined or a handle with type. alert/beforeunload support dismiss(); confirm supports accept()/dismiss(); prompt supports accept(text)/dismiss(). Actions return when they open a dialog; answer it before further page reads/input. Handles are scoped to the observed dialog and owning session. Reset/timeout/close dismiss owned active dialogs. Beforeunload dismiss cancels navigation. Created tabs attach observers before loading their URL. A dialog predating first binding may prevent CDP initialization.
+Clipboard: tab.clipboard.read()/readText()/write(items)/writeText(text) uses the browser native process clipboard. Items contain entries [{mimeType,text? ,base64?}] and optional presentationStyle. Exactly one payload per entry; native Chrome validates supported formats. Requires verified --headless / --headless=new plus --enable-automation and a browser that can reach the host loopback bridge. Browser clipboard state is shared across tabs/JS sessions and survives js_reset. Internal control tabs are hidden and cleaned up on reset/timeout/close. paste(index,text,{format:"text"|"html"}) writes the isolated clipboard and dispatches trusted native paste atomically; typeText remains clipboard-independent. Headful clipboard APIs fail explicitly.`;
 
-export function createBrowserApi(activeOutput, environment = process.env, {focusLease, downloadRequest, logRequest, dialogRequest, onDispose = () => {}} = {}) {
+export function createBrowserApi(activeOutput, environment = process.env, {focusLease, downloadRequest, logRequest, dialogRequest, clipboardRequest, onDispose = () => {}} = {}) {
+  const clipboard = clipboardRequest ? undefined : new BrowserClipboard(() => endpoint()?.href,withConnection);
+  const clipboardOwner = {};
+  if (clipboard) onDispose(() => clipboard.cleanup(clipboardOwner));
+  const requestClipboard = clipboardRequest ?? (args => clipboard.request(clipboardOwner,args));
   const dialogs = dialogRequest ? undefined : new BrowserDialogs(() => endpoint()?.href);
   const dialogOwner = {};
   if (dialogs) onDispose(() => dialogs.cleanup(dialogOwner));
@@ -475,7 +482,8 @@ export function createBrowserApi(activeOutput, environment = process.env, {focus
   async function targets() {
     const result = await json("/json/list");
     if (!Array.isArray(result)) throw new Error("Invalid browser target list");
-    return result.filter(target => target.type === "page");
+    const hidden = await requestClipboard({method:"targets"});
+    return result.filter(target => target.type === "page" && !hidden.includes(target.id));
   }
   const info = target => ({ id: target.id, providerTabId: target.id, browserId: "cdp", title: target.title, url: target.url });
   function checkBrowser(options = {}) {
@@ -585,6 +593,11 @@ export function createBrowserApi(activeOutput, environment = process.env, {focus
     }
     return Object.freeze({
       ...info(target),
+      clipboard: Object.freeze(Object.fromEntries(["read","readText","write","writeText"].map(method => [method,async value => {
+        if (!(await targets()).some(item=>item.id === target.id)) throw new Error("Tab closed or no longer available");
+        await checkDialog(target.id);
+        return requestClipboard({method,targetId:target.id,value});
+      }]))),
       dev: Object.freeze({async logs(options = {}) {
         await checkDialog(target.id);
         await requestLogs({action:"start",targetId:target.id});
@@ -650,9 +663,13 @@ export function createBrowserApi(activeOutput, environment = process.env, {focus
         await input(async send => { await focus(send, index); await send("Input.insertText", {text}); });
       },
       async paste(index, text, options = {}) {
-        if (Object.keys(options).some(key => key !== "format") || (options.format !== undefined && options.format !== "text")) throw new Error("CDP paste currently supports text format only");
+        if (!options || typeof options !== "object" || Array.isArray(options) || Object.keys(options).some(key => key !== "format") || !["text","html"].includes(options.format ?? "text")) throw new Error("paste format must be text or html");
         if (typeof text !== "string") throw new Error("paste requires text");
-        await input(async send => { await focus(send, index); await send("Input.insertText", {text}); });
+        await input(async send => {
+          await focus(send,index);
+          const frame = (await send("Page.getFrameTree")).frameTree.frame;
+          await requestClipboard({method:"paste",targetId:target.id,loaderId:frame.loaderId,value:[{entries:[{mimeType:options.format === "html" ? "text/html" : "text/plain",text}]}]});
+        });
       },
       async pressKey(index, key) {
         const event = keyEvent(key);

@@ -48,10 +48,11 @@ scroll into view and check that the center is visible and unobstructed before
 sending browser mouse events. Scroll uses the closest scrollable DOM ancestor and
 its client dimensions, so it works without making the browser foreground.
 Keyboard input supports printable characters, standard navigation keys and
-`ctrl`, `alt`, `shift`, `meta`, `super`, `cmd` modifiers; on macOS, `meta+a` sends
-the required select-all editor command. Text insertion uses CDP `Input.insertText`
-and preserves Unicode without touching the system clipboard. Paste currently
-has plain text insertion semantics, with no clipboard or paste event emulation.
+`ctrl`, `alt`, `shift`, `meta`, `super`, `cmd` modifiers; on macOS, select-all,
+copy, cut and paste shortcuts send their required editor commands. typeText uses
+CDP `Input.insertText` and preserves Unicode. paste uses the native isolated
+clipboard with text/HTML support and trusted browser paste events; see its
+headless requirements below.
 Read AX after input and verify the visible result. Asynchronous page handlers may
 need another observation; the smoke uses a combined screenshot/AX observation to
 allow headless rendering of scroll feedback.
@@ -390,3 +391,74 @@ checks real alert/confirm/prompt/beforeunload flows, initial-load and sequential
 dialogs, Unicode and argument validation, stale handles, native/locator/file input,
 shared-observer ownership, active tab close, Worker/direct-session reset, timeout,
 close and cleanup failure/retry against a disposable Chrome and local fixture.
+
+## Browser clipboard and native paste
+
+```js
+await tab.clipboard.writeText("Hello 中文🙂");
+nodeRepl.write(await tab.clipboard.readText());
+await tab.clipboard.write([{entries:[
+  {mimeType:"text/plain", text:"Formatted"},
+  {mimeType:"text/html", text:"<b>Formatted</b>"},
+]}]);
+nodeRepl.write(await tab.clipboard.read());
+await tab.pressKey(elementIndex, "meta+v"); // macOS; ctrl+v on Linux/Windows
+await tab.paste(elementIndex, "<i>Formatted</i>", {format:"html"});
+```
+
+The API uses Chromium's real process-specific virtual clipboard, enabled by
+headless mode. Launch the dedicated browser with `--headless=new` (or `--headless`)
+and `--enable-automation`. Browser.getBrowserCommandLine must confirm that mode
+before a control page or permission grant is created. Ordinary headful browsers,
+including unverified custom configurations, fail explicitly. Native app
+clipboard/paste remains separate work. typeText stays available independently of
+this clipboard support.
+
+Items have `entries` and optional `presentationStyle` (`unspecified`, `inline`,
+`attachment`). Each entry has a MIME type and exactly one `text` string or canonical
+`base64` string. Reads return text for text/* types and base64 for binary types.
+Write payloads and read results are bounded to 16 MiB of decoded content. Chromium
+applies its own MIME/image validation, HTML sanitization, supported item counts
+and native clipboard normalization; read-back metadata/bytes follow the browser's
+representation. Plain text, HTML and valid PNG were tested. Unsupported formats,
+invalid images and multiple-item combinations can be rejected by the native API.
+
+Clipboard state belongs to the browser process, shared across its tabs, contexts
+and JS sessions. Reset/timeout/close dispose control resources and retain browser
+clipboard contents. A new browser process starts its own clipboard. Clipboard
+operations use a hidden, empty loopback control page in the target browser context,
+with a clipboard-read grant scoped to that private origin and temporary emulated
+focus. Public inventories hide control tabs. The browser must be able to reach
+the host's loopback server; remote transport is unverified. The control server
+serves no clipboard data and exposes no HTTP clipboard commands.
+
+paste writes the clipboard and sends native editor paste within one host queue,
+checking the selected document loader before dispatch. Browser paste events are
+trusted and support page cancellation, native undo, maxlength/readonly handling,
+rich content and PNG clipboard files. Native copy/cut shortcuts feed the same
+browser clipboard, including the browser's password-field protections. This uses
+the browser's native clipboard/editor implementation throughout. Page handlers
+remain authoritative over the result; inspect current state after pasting.
+
+Host calls serialize by endpoint. Queued canceled operations stop before browser
+access, and in-flight calls finish before their resources close. Cleanup resets
+the private permission to prompt when its final observer leaves, closes control
+tabs, releases temporary focus and stops the loopback server. Cleanup failure
+retains ownership and prevents session reuse until reset succeeds. Paste-triggered
+dialogs use the existing owned-dialog boundary. Source consumers of createBrowserApi
+must register its `onDispose` callbacks and await them during shutdown, as the
+in-process REPL and smoke scripts do.
+
+`OPEN_COMPUTER_USE_CDP_URL=http://127.0.0.1:9222 node scripts/run-clipboard-smoke.mjs`
+checks real text/HTML/PNG reads and writes, trusted copy/cut/paste, sanitization,
+undo, beforeinput cancellation, readonly/maxlength and password behavior, hidden
+control tabs, shared browser state, queued/pre-dispatch cancellation, paste dialogs,
+reset/timeout/close and cleanup failure/retry. On macOS it also verifies that the
+system clipboard's plain-text hash remains unchanged without logging its contents.
+The general browser smoke now needs the same headless/automation flags for native
+paste. Headful/CfT isolation detection, remote access, incognito concurrency, host
+crashes, Linux and Windows remain open validation.
+
+Primary references: [Chromium's headless clipboard setup](https://raw.githubusercontent.com/chromium/chromium/main/chrome/browser/chrome_for_testing/chrome_browser_main_extra_parts_cft.cc),
+[virtual clipboard design](https://raw.githubusercontent.com/chromium/chromium/main/docs/chrome_for_testing/README.md),
+[Browser.getBrowserCommandLine](https://chromedevtools.github.io/devtools-protocol/tot/Browser/#method-getBrowserCommandLine).

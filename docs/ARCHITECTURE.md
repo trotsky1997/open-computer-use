@@ -290,3 +290,12 @@ connection stays attached until response and cleanup. Response waits for that
 cleanup or yields for the next sequential dialog. Host teardown dismisses owned
 dialogs before releasing focus and other observers, retaining ownership on failure.
 New tabs install observers at about:blank before navigating to their requested URL.
+
+BrowserClipboard owns empty loopback control pages, private-origin permissions
+and temporary focus for verified headless native clipboard access. Browser
+clipboard data stays process-scoped across VM resets; control resources are
+session-owned and disposed. Native paste writes and dispatches in one endpoint
+queue, with document-loader validation. Canceled queued calls never reach the
+browser, and started work settles before teardown. Internal target IDs are shared
+within the host for inventory filtering. Packaging includes the new controller;
+ordinary headed clipboards are rejected until isolation can be verified.

@@ -33,7 +33,8 @@ if (req.url === '/pointer') {
 }
  res.end(`<html><title>OCU ${req.url}</title><body><h1>Browser harness ${req.url}</h1><label>Name<input aria-label="Name"></label><textarea aria-label="Notes"></textarea><div contenteditable="true" role="textbox" aria-label="Rich"><span>head tar</span><b>get tail</b></div><input aria-label="Read only" readonly value="original"><button onclick="this.textContent='Clicked'">Test button</button><div role="region" aria-label="Scroll area" tabindex="0" style="height:100px;overflow:auto" onscroll="document.getElementById('scroll-state').textContent='Scrolled'"><p style="height:1800px">Long content</p></div><p id="scroll-state">Not scrolled</p><div style="position:relative;width:100px;height:40px"><button>Covered button</button><div style="position:absolute;inset:0"></div></div></body></html>`);});
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-const api = createBrowserApi(() => ({write() {}, async emitImage() {}}));
+const disposers = [];
+const api = createBrowserApi(() => ({write() {}, async emitImage() {}}),process.env,{onDispose:dispose=>disposers.push(dispose)});
 async function visibility(tabId) {
   const targets = await (await fetch(new URL('/json/list', process.env.OPEN_COMPUTER_USE_CDP_URL))).json();
   const target = targets.find(item=>item.id===tabId);
@@ -347,6 +348,7 @@ try {
   console.log('PASS browser inventory, create/bind, AX, PNG, click/type/key/paste/scroll/setValue/selectText/coordinate-click/drag/scroll/playwright/cancellation/navigation-waits/filechooser, stale-index rejection, navigation/history/reload, close, worker inventory failure isolation');
 } finally {
   if (tab && (await api.listTabs({emit:false})).some(item=>item.id===tab.id)) await tab.close();
+  await Promise.all(disposers.map(dispose=>dispose()));
   rmSync(fileDirectory,{recursive:true,force:true});
   server.closeAllConnections();
   await new Promise(resolve => server.close(resolve));
