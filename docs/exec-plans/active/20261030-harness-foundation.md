@@ -15,7 +15,7 @@ Build an independent, open computer-use harness on the upstream runtime, using t
 ## Next steps
 
 1. Host-owned focus leases now cover Worker timeout/reset/close/exit and cleanup retry. Continue to establish repeatable, privacy-safe native app scenarios for observation, input, stale indices, failures and session reset; measure behavior with the existing fixture before expanding the surface.
-2. Extend the CDP element-input and Playwright locator providers with full HTML drag-and-drop, isolated read-only evaluation, remote artifact delivery, broader event ownership and host-crash recovery and broader platform coverage. Screenshot-bound coordinate click/scroll and pointer-widget drag are implemented and exercised on real Chrome. Validate stale target handling, focus and native-vs-DOM interaction independently; extend to extension and in-app transports.
+2. Extend the CDP element-input and Playwright locator providers with cross-process/ambiguous frame drag-and-drop, isolated read-only evaluation, remote artifact delivery, broader event ownership and host-crash recovery and broader platform coverage. Screenshot-bound coordinate click/scroll and pointer-widget drag are implemented and exercised on real Chrome. Validate stale target handling, focus and native-vs-DOM interaction independently; extend to extension and in-app transports.
 3. Validate the new output diffs on real multi-window applications, especially native index changes and screenshot-only observations. Full output is available with `disableDiffing: true`.
 4. Add remaining input operations according to observed platform capabilities and test on real desktops. Document unsupported behavior clearly.
 
@@ -33,3 +33,13 @@ remain in the full parity audit; the broader goal and next steps stay active.
 The first change has REPL mock coverage only. Browser discovery/lifecycle/observations were validated on a disposable macOS headless Chrome with a local HTML fixture, including Worker inventory failure isolation. Browser input was exercised on the same headless Chrome: Unicode, select-all replacement, multiline insertion, visible clicks, scroll feedback, and covered/stale index rejection; Worker input also passed. Real native desktop behavior, headful browser focus, Windows and Linux parity remain open. Do not infer capabilities from API shape alone.
 
 The expanded current-reference capability audit is tracked in [harness parity](../../harness-parity.md). It preserves unimplemented browser/host capabilities and validation gaps.
+
+
+## Native drop phase
+
+Host-owned locator.drop now sends trusted HTML/MIME/file data with fresh
+Playwright actionability checks and native frame/document/viewport guards per
+stage. Real Chrome covers protected data mode, default rich editor insertion,
+same-target iframe drops, modal response/reset and action timeout recovery.
+Cross-process and identical sibling frame paths remain explicit gaps; see
+[native drag-and-drop](../../browser-drop.md). The full goal stays active.

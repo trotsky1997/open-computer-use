@@ -1,5 +1,6 @@
 import { BrowserDownloads } from "./browser-downloads.mjs";
 import { BrowserClipboard } from "./browser-clipboard.mjs";
+import {BrowserDrops} from "./browser-drop.mjs";
 import { BrowserViewport, VIEWPORT_DOCUMENTATION } from "./browser-viewport.mjs";
 import { createPlaywrightApi, waitForBrowserEventReady } from "./browser-playwright.mjs";
 import { format } from "node:util";
@@ -182,9 +183,9 @@ export async function openConnection(url, onEvent = () => {}, onClose = () => {}
       socket.addEventListener("error", () => reject(new Error("Browser connection failed")), { once: true });
     });
     clearTimeout(timer);
-    const send = (method, params = {}) => new Promise((resolve, reject) => {
+    const send = (method, params = {}, timeoutMs = TIMEOUT) => new Promise((resolve, reject) => {
       const id = ++nextId;
-      const timeout = setTimeout(() => { pending.delete(id); reject(new Error(`CDP ${method} timed out`)); }, TIMEOUT);
+      const timeout = timeoutMs === 0 ? undefined : setTimeout(() => { pending.delete(id); reject(new Error(`CDP ${method} timed out`)); }, timeoutMs);
       pending.set(id, {
         resolve: value => { clearTimeout(timeout); resolve(value); },
         reject: error => { clearTimeout(timeout); reject(error); },
@@ -482,6 +483,7 @@ click and scroll also accept screenshot pixel pairs. drag(fromPixelPair, toPixel
 tab.playwright exposes locator/getByRole/getByText/getByLabel/getByPlaceholder/getByTestId/getByTitle/getByAltText/frameLocator.
 Chain locator/filter({hasText})/nth/first/last; read count/innerText/textContent/allTextContents/getAttribute/inputValue/isVisible/isEnabled/isChecked/waitFor;
 act with click/dblclick/fill/press/check/uncheck/setChecked/selectOption/hover/scrollIntoViewIfNeeded.
+locator.drop({data?:{mimeType:string},files?:absolutePaths},{position?:{x,y},timeoutMs?}) sends trusted native HTML/file drag-and-drop. Files must be regular files on the browser host. Position uses padding-box CSS pixels. Cross-process and ambiguous identical sibling frame paths fail before delivery. A dialog pauses the action deadline until answered; reset/timeout/close cancel remaining stages. Already dispatched page effects may finish.
 Playwright resolves fresh elements and waits for actionability; ambiguous matches fail. Default action timeout is 10 seconds.
 Navigation waits: tab.playwright.expectNavigation(async action, {url?,waitUntil?,timeoutMs?}), waitForURL(url, {waitUntil?,timeoutMs?}), waitForLoadState({state?,timeoutMs?}). expectNavigation installs a main-frame watcher before running the action and returns its result after navigation.
 Playwright actions invalidate prior AX and screenshot indices. Read current state afterwards. File chooser events: start tab.playwright.waitForEvent("filechooser", {timeoutMs?}) before clicking, then await the handle and use isMultiple() / setFiles(absolutePaths, {timeoutMs?}). The file handle is one-shot. Downloads: start waitForEvent("download") before clicking, then await download.path({timeoutMs?}) for the completed local artifact.
@@ -491,7 +493,7 @@ Clipboard: tab.clipboard.read()/readText()/write(items)/writeText(text) uses the
 Browser capabilities: await browser.capabilities.list(), then get("viewport") and documentation(). viewport.set({width,height}) applies explicit CSS dimensions for responsive tasks; viewport.reset() returns to normal sizing. The host cleans temporary overrides on reset/timeout/close. Competing sessions fail explicitly. Use existing sizing during normal tasks.
 Screenshots: tab.screenshot({fullPage?,clip?}) returns JPEG bytes with no implicit output; use nodeRepl.emitImage(bytes). getScreenshot returns/emits PNG. clip uses CSS pixels relative to the viewport or full-page area. Pixel input maps cropped viewport images back to CSS; full-page images require a new viewport capture before input. Geometry and viewport-revision changes invalidate capture coordinates.`;
 
-export function createBrowserApi(activeOutput, environment = process.env, {focusLease, downloadRequest, logRequest, dialogRequest, clipboardRequest, viewportRequest, onDispose = () => {}} = {}) {
+export function createBrowserApi(activeOutput, environment = process.env, {focusLease, downloadRequest, logRequest, dialogRequest, clipboardRequest, viewportRequest, dropRequest, onDispose = () => {}} = {}) {
   const clipboard = clipboardRequest ? undefined : new BrowserClipboard(() => endpoint()?.href,withConnection);
   const clipboardOwner = {};
   if (clipboard) onDispose(() => clipboard.cleanup(clipboardOwner));
@@ -500,6 +502,10 @@ export function createBrowserApi(activeOutput, environment = process.env, {focus
   const viewportOwner = {};
   if (viewport) onDispose(() => viewport.cleanup(viewportOwner));
   const requestViewport = viewportRequest ?? (args => viewport.request(viewportOwner,args));
+  const drops = dropRequest ? undefined : new BrowserDrops(() => endpoint()?.href,openConnection,withConnection,()=>requestViewport({action:"state"}));
+  const dropOwner = {};
+  if (drops) onDispose(() => drops.cleanup(dropOwner));
+  const requestDrop = dropRequest ?? (args=>drops.request(dropOwner,args));
   const dialogs = dialogRequest ? undefined : new BrowserDialogs(() => endpoint()?.href);
   const dialogOwner = {};
   if (dialogs) onDispose(() => dialogs.cleanup(dialogOwner));
@@ -508,7 +514,7 @@ export function createBrowserApi(activeOutput, environment = process.env, {focus
   async function withDialogAction(targetId, operation) {
     const id = await requestDialog({action:"watch",targetId});
     const opened = requestDialog({action:"wait",id});
-    const work = Promise.resolve().then(operation).finally(() => requestDialog({action:"end",id}));
+    const work = Promise.resolve().then(() => operation(opened)).finally(() => requestDialog({action:"end",id}));
     work.catch(() => {});
     return Promise.race([work,opened.then(result => result.opened ? undefined : work)]);
   }
@@ -665,7 +671,7 @@ export function createBrowserApi(activeOutput, environment = process.env, {focus
         await requestLogs({action:"start",targetId:target.id});
         return requestLogs({action:"read",targetId:target.id,options});
       }}),
-      playwright: createPlaywrightApi(() => { const value = endpoint(); if (!value) throw new Error("No CDP browser configured"); return value.href; }, target.id, invalidate, focusLease, requestDownload, operation => withDialogAction(target.id,operation), () => requestDialog({action:"checkPlaywright",targetId:target.id})),
+      playwright: createPlaywrightApi(() => { const value = endpoint(); if (!value) throw new Error("No CDP browser configured"); return value.href; }, target.id, invalidate, focusLease, requestDownload, operation => withDialogAction(target.id,operation), () => requestDialog({action:"checkPlaywright",targetId:target.id}), requestDrop),
       async getJsDialog() {
         const dialog = await requestDialog({action:"get",targetId:target.id});
         if (!dialog) return undefined;

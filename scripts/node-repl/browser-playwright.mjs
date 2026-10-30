@@ -1,3 +1,4 @@
+import {validateDrop, dropFrames} from "./browser-drop.mjs";
 import { isAbsolute } from "node:path";
 
 export const PLAYWRIGHT_VERSION = "1.64.1";
@@ -6,18 +7,18 @@ export async function waitForBrowserEventReady(endpoint, targetId) {
   for (const event of ["filechooser","download"]) await eventBarriers.get(`${endpoint}|${targetId}|${event}`)?.ready;
 }
 
-export function createPlaywrightApi(endpoint, targetId, invalidate, focusLease, downloadRequest, withAction, checkDialog) {
+export function createPlaywrightApi(endpoint, targetId, invalidate, focusLease, downloadRequest, withAction, checkDialog, dropRequest) {
   const recipes = new WeakMap();
   const selectors = ["locator", "getByRole", "getByText", "getByLabel", "getByPlaceholder", "getByTestId", "getByTitle", "getByAltText", "frameLocator"];
   const chains = [...selectors, "filter", "nth", "first", "last", "and", "or"];
   const reads = ["count", "innerText", "textContent", "allTextContents", "getAttribute", "inputValue", "isVisible", "isEnabled", "isChecked", "waitFor", "ariaSnapshot"];
-  const actions = ["click", "dblclick", "fill", "press", "check", "uncheck", "setChecked", "selectOption", "hover", "scrollIntoViewIfNeeded", "pressSequentially", "type"];
+  const actions = ["click", "dblclick", "fill", "press", "check", "uncheck", "setChecked", "selectOption", "hover", "scrollIntoViewIfNeeded", "pressSequentially", "type", "drop"];
   async function invoke(path, method, args) {
     if (checkDialog) await checkDialog();
-    if (withAction && actions.includes(method)) return withAction(() => perform(path,method,args));
+    if (withAction && actions.includes(method)) return withAction(opened => perform(path,method,args,opened));
     return perform(path,method,args);
   }
-  async function perform(path, method, args) {
+  async function perform(path, method, args, dialogOpened) {
     const {chromium} = await import("playwright-core");
     const browser = await chromium.connectOverCDP(endpoint(), {timeout:10_000, noDefaults:true});
     for (const context of browser.contexts()) context.on("dialog", () => {});
@@ -63,6 +64,25 @@ export function createPlaywrightApi(endpoint, targetId, invalidate, focusLease, 
         invalidate();
       }
       try {
+        if (method === "drop") {
+          if (!dropRequest) throw new Error("Native drop backend unavailable");
+          const [payload,options] = args;
+          const id = await dropRequest({action:"acquire",targetId,payload});
+          let timer;
+          const timeout = options.timeoutMs ?? 10_000;
+          const work = (async () => {
+            for (const type of ["dragEnter","dragOver","drop"]) {
+              const geometry = await nativeDropPoint(locator,page,focusSession,options,dropRequest);
+              await dropRequest({action:"stage",id,type,...geometry});
+            }
+          })();
+          work.catch(()=>{});
+          const expired = new Promise((_,reject)=>{if (timeout) timer=setTimeout(()=>reject(new Error(`Native drop timeout after ${timeout} ms`)),timeout);});
+          dialogOpened?.then(result=>{if(result.opened) clearTimeout(timer);}).catch(()=>{});
+          try {await Promise.race([work,expired]);}
+          finally {clearTimeout(timer);await dropRequest({action:"release",id});}
+          return;
+        }
         if (method === "filechooser") {
           const [options, ready, done] = args;
           const waiting = page.waitForEvent("filechooser", {timeout:options.timeoutMs ?? 10_000});
@@ -180,10 +200,54 @@ export function createPlaywrightApi(endpoint, targetId, invalidate, focusLease, 
     if (path.length) for (const method of [...reads, ...actions]) {
       api[method] = (...args) => invoke(path, method, args);
     }
+    if (path.length) api.drop = (payload,options = {}) => {
+      validateDrop(payload,options);
+      return invoke(path,"drop",[payload,{...options}]);
+    };
     recipes.set(api, path);
     return Object.freeze(api);
   }
   return binding();
+}
+
+
+async function nativeDropPoint(locator,page,session,options,request) {
+  const handle = await locator.elementHandle({timeout:0});
+  if (!handle) throw new Error("Drop target missing");
+  try {
+    await handle.hover({trial:true,timeout:0});
+    const box = await handle.boundingBox();
+    if (!box) throw new Error("Drop target has no visible bounds");
+    const viewport = (await session.send("Page.getLayoutMetrics")).cssVisualViewport;
+    const border = await handle.evaluate(el=>({x:parseFloat(getComputedStyle(el).borderLeftWidth)||0,y:parseFloat(getComputedStyle(el).borderTopWidth)||0}));
+    let left=Math.max(0,box.x), top=Math.max(0,box.y), right=Math.min(viewport.clientWidth,box.x+box.width), bottom=Math.min(viewport.clientHeight,box.y+box.height);
+    const frame = await handle.ownerFrame();
+    for (let current=frame;current?.parentFrame();current=current.parentFrame()) {
+      const element = await current.frameElement();
+      try {
+        const bounds = await element.boundingBox();
+        if (!bounds) throw new Error("Drop frame invisible");
+        left=Math.max(left,bounds.x);top=Math.max(top,bounds.y);right=Math.min(right,bounds.x+bounds.width);bottom=Math.min(bottom,bounds.y+bounds.height);
+      } finally {await element.dispose();}
+    }
+    const point = options.position ? {x:Math.round(box.x+border.x+options.position.x),y:Math.round(box.y+border.y+options.position.y)} : {x:Math.floor((left+right)/2),y:Math.floor((top+bottom)/2)};
+    if (point.x<left || point.x>=right || point.y<top || point.y>=bottom) throw new Error("Drop point outside visible target");
+    await handle.hover({trial:true,timeout:0,position:{x:point.x-box.x-border.x,y:point.y-box.y-border.y}});
+    const after = await handle.boundingBox();
+    if (!after || ["x","y","width","height"].some(key=>Math.abs(after[key]-box[key])>.25)) throw new Error("Drop target moved; resolve again");
+    const frames = dropFrames((await session.send("Page.getFrameTree")).frameTree);
+    const framePath=[];
+    for(let current=frame;current;current=current.parentFrame()) framePath.unshift(current.url());
+    const matching = frames.filter(item=>{
+      const path=[];
+      for(let current=item;current;current=frames.find(parent=>parent.id===current.parentId)) path.unshift(current.url);
+      return JSON.stringify(path)===JSON.stringify(framePath);
+    });
+    // shortcut: identical sibling frame URLs are ambiguous; add native frame binding before supporting them.
+    if(!matching.length) throw new Error("Native drop frame is outside this page CDP target");
+    if(matching.length>1) throw new Error("Native drop frame path is ambiguous");
+    return {point,frames,framePath,geometry:{loaderId:frames[0].loaderId,viewport,revision:await request({action:"revision"})}};
+  } finally {await handle.dispose();}
 }
 
 

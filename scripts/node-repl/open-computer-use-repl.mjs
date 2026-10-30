@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { BrowserDownloads } from "./browser-downloads.mjs";
 import { BrowserClipboard } from "./browser-clipboard.mjs";
+import {BrowserDrops} from "./browser-drop.mjs";
 import { BrowserViewport } from "./browser-viewport.mjs";
 
 import { AsyncLocalStorage } from "node:async_hooks";
@@ -34,6 +35,7 @@ const HOST_BROWSER_LOGS = new BrowserConsoleLogs();
 const HOST_BROWSER_DIALOGS = new BrowserDialogs();
 const HOST_BROWSER_CLIPBOARD = new BrowserClipboard(() => browserEndpoint(process.env)?.href,withConnection);
 const HOST_BROWSER_VIEWPORT = new BrowserViewport(() => browserEndpoint(process.env)?.href,openConnection,withConnection,()=>HOST_BROWSER_CLIPBOARD.internalTargets(),(owner,error)=>BROWSER_FAILURE_HANDLERS.get(owner)?.(error));
+const HOST_BROWSER_DROPS = new BrowserDrops(() => browserEndpoint(process.env)?.href,openConnection,withConnection,()=>HOST_BROWSER_VIEWPORT.request(null,{action:"state"}));
 
 const SERVER_INSTRUCTIONS = `UI automation through a persistent JavaScript REPL using the initialized cua API.
 
@@ -494,6 +496,7 @@ export function createCuaApi(native, activeOutput, onDispose) {
     logRequest: native.browserHost ? args => native.request("browser/logs",args) : undefined,
     dialogRequest: native.browserHost ? args => native.request("browser/dialog",args) : undefined,
     clipboardRequest: native.browserHost ? args => native.request("browser/clipboard",args) : undefined,
+    dropRequest: native.browserHost ? args => native.request("browser/drop",args) : undefined,
     viewportRequest: native.browserHost ? args => native.request("browser/viewport",args) : undefined,
     onDispose,
   });
@@ -699,6 +702,7 @@ export class WorkerJavaScriptSession {
     this.browserLogs = HOST_BROWSER_LOGS;
     this.browserDialogs = HOST_BROWSER_DIALOGS;
     this.browserClipboard = HOST_BROWSER_CLIPBOARD;
+    this.browserDrops = HOST_BROWSER_DROPS;
     this.browserViewport = HOST_BROWSER_VIEWPORT;
     this.stoppingWorkers = new WeakMap();
     this.#start();
@@ -720,11 +724,13 @@ export class WorkerJavaScriptSession {
       this.invalidatedWorkers.add(worker);
       this.browserClipboard.cancel(worker);
       this.browserViewport.cancel(worker);
+      this.browserDrops.cancel(worker);
       for (const pending of this.pending.values()) if (pending.worker === worker) clearTimeout(pending.timer);
       this.native.endSession?.();
       this.stoppingWorkers.set(worker, (async () => {
         await worker.terminate();
         await this.browserDialogs.cleanup(worker);
+        await this.browserDrops.cleanup(worker);
         const cleaned = await Promise.allSettled([this.browserFocusLeases.cleanup(worker),this.browserDownloads.cleanup(worker),this.browserLogs.cleanup(worker),this.browserClipboard.cleanup(worker),this.browserViewport.cleanup(worker)]);
         const failed = cleaned.find(result=>result.status === "rejected");
         if(failed) throw failed.reason;
@@ -774,11 +780,12 @@ export class WorkerJavaScriptSession {
           else throw new Error("Unknown browser logs action");
         } else if(message.method === "browser/dialog") result = await this.browserDialogs.request(worker,message.params);
         else if(message.method === "browser/clipboard") result = await this.browserClipboard.request(worker,message.params);
+        else if(message.method === "browser/drop") result = await this.browserDrops.request(worker,message.params);
         else if(message.method === "browser/viewport") result = await this.browserViewport.request(worker,message.params);
         else result = await this.native.request(message.method, message.params, message.timeoutMs);
         if (this.worker === worker && !this.invalidatedWorkers.has(worker)) worker.postMessage({ type: "native_response", id: message.id, result });
       } catch (error) {
-        if (error?.browserCleanupFailed && ["browser/focus","browser/download","browser/dialog","browser/clipboard","browser/viewport"].includes(message.method)) {
+        if (error?.browserCleanupFailed && ["browser/focus","browser/download","browser/dialog","browser/clipboard","browser/viewport","browser/drop"].includes(message.method)) {
           await this.#workerFailed(worker,error);
           return;
         }

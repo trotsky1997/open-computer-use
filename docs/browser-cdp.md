@@ -86,9 +86,10 @@ inside the CDP target and do not move the system pointer. Layout/content changes
 that preserve loader and viewport geometry still require the agent to verify the
 latest observed UI.
 
-Pointer-widget dragging is verified. HTML drag-and-drop with DataTransfer payloads
-remains open, along with formatted paste,
-extension transports and in-app browser integration remain open work. Native app bindings retain their existing input methods.
+Pointer-widget dragging and native HTML/file payload drops are verified; see
+[native drag-and-drop](browser-drop.md) for the locator API and frame limits.
+Extension transports and in-app browser integration remain open work. Native app
+bindings retain their existing input methods.
 
 `cua.getState()` returns `{apps, browsers, errors?}`; browsers contain their tabs.
 Each inventory can fail independently. `cua.listApps()` only queries native apps.

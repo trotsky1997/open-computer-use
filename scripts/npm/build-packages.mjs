@@ -433,7 +433,7 @@ function copyInstallerScripts(packageRoot) {
     "browser-cdp.mjs",
     "browser-downloads.mjs",
     "browser-clipboard.mjs",
-    "browser-viewport.mjs",
+    "browser-viewport.mjs", "browser-drop.mjs",
     "browser-playwright.mjs",
     "open-computer-use-repl.mjs",
     "open-computer-use-kernel.mjs",
@@ -443,6 +443,10 @@ function copyInstallerScripts(packageRoot) {
       path.join(packageRoot, "scripts", "node-repl", scriptName),
     );
   }
+  cpSync(
+    path.join(repoRoot, "scripts", "node-repl", "browser-drop.mjs"),
+    path.join(packageRoot, "plugins", "open-computer-use", "scripts", "browser-drop.mjs")
+  );
   cpSync(
     path.join(repoRoot, "scripts", "node-repl", "browser-viewport.mjs"),
     path.join(packageRoot, "plugins", "open-computer-use", "scripts", "browser-viewport.mjs")

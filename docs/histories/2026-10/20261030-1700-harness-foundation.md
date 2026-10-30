@@ -281,3 +281,31 @@ close, cleanup failure/retry and idle observer disconnect recovery. Existing
 browser, download, dialog, console, clipboard and native-free CLI/MCP smokes passed.
 Mixed-DPI hardware, browser zoom, headful/Linux/Windows behavior, external-client
 emulation, external-page initial script timing and host crash recovery remain open.
+
+
+### Native MIME / HTML / file drops
+
+Added locator.drop with validated MIME strings, absolute regular files, action
+timeouts and padding-box positions. The host owns an origin-wide drag lease;
+Playwright supplies fresh actionability checks while native CDP events carry
+trusted DataTransfer data. Per-stage native checks cover document loaders,
+receiving frames, viewport metrics and sizing revisions. Dialogs suspend the
+action deadline for later response. Reset/timeout/close stop remaining stages,
+dismiss owned dialogs and cancel dragging before focus restoration. Failed
+cancellation retains ownership and blocks session reuse until a reset retry.
+Already dispatched page effects can finish. No dependency was added.
+
+Packaging/capability fixtures and both plugin copy paths include browser-drop.mjs.
+The focused browser-drop document, runtime API documentation, architecture and
+active parity plan record the API and remaining frame/platform gaps.
+
+All 75 Node checks passed. Real macOS headless Chrome verified trusted mixed
+MIME/file events, protected data before drop, Unicode bytes, explicit positions,
+native rich editor insertion, same-target iframe drops, invalid files,
+covered-target action timeout, dialog response after the action deadline,
+reset/overall timeout/close before delivery, modal ownership, and cleanup failure
+with blocked reuse and reset recovery without replay. Browser, dialog, download,
+console, clipboard, viewport and native-free CLI/MCP regression smokes passed.
+Cross-process frames reject before delivery; identical sibling URL paths remain
+unsupported. Headful/zoom/transformed frames, Linux/Windows, remote file transfer
+and host-crash behavior remain open in the full harness goal.

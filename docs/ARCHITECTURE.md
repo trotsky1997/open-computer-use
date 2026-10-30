@@ -224,7 +224,8 @@ CDP coordinate input retains screenshot pixel dimensions and document/viewport
 geometry, revalidates geometry before dispatch and consumes the snapshot after
 input. Pixel pairs are mapped to CSS coordinates; pointer drags release the mouse
 in a finally block. The browser smoke covers pointer widgets and independent
-binding geometry invalidation; HTML drag-and-drop payloads remain open.
+binding geometry invalidation. Host-owned native HTML/file drops are described
+in [native drag-and-drop](browser-drop.md).
 
 The browser locator layer delegates to pinned Playwright Core over the configured
 CDP endpoint. Recipes retain selectors, not stale element handles. Each operation
@@ -308,3 +309,14 @@ closes observers and gates reuse on success. Viewport revisions invalidate old
 coordinate captures across set/reset cycles. PNG/JPEG regions carry actual raster
 sizes and CSS origins; full-page output is inspection-only for pixel input.
 See [viewport and screenshots](browser-viewport.md) for API and evidence.
+
+
+BrowserDrops holds an origin-wide native drag lease. Playwright resolves and
+trial-checks a fresh target for each dragEnter/dragOver/drop stage; the host checks
+native document loaders, viewport revision and receiving frame before dispatch.
+Cancellation stops later stages and closes blocked dispatch connections. Cleanup
+dismisses owned dialogs, cancels native dragging, then releases focus; failed
+cancellation retains ownership for retry. Input already dispatched may finish.
+Cross-process frames and ambiguous identical sibling frame URL paths fail before
+delivery. Native drop uses browser events rather than the dependency's synthetic
+DataTransfer dispatch. See [native drag-and-drop](browser-drop.md).
