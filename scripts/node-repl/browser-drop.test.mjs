@@ -33,3 +33,35 @@ test("failed native drag cancellation retains browser ownership and retries",asy
  fail=false;await drops.cleanup(owner);assert.equal(drops.leases.size,0);assert.equal(drops.active.has(lease.endpoint),false);
  assert.deepEqual(events,["closed","Input.cancelDragging","closed","Input.cancelDragging","closed"]);
 });
+
+test("native child hit testing uses document scroll and child layout dimensions",async()=>{
+ const drops=new BrowserDrops();
+ const points=[];
+ const send=async(method,params,timeout,session)=>{
+   if(method==='Page.getLayoutMetrics') return {cssLayoutViewport:session?{pageX:7,pageY:200,clientWidth:200,clientHeight:100}:{pageX:20,pageY:100},cssVisualViewport:{clientWidth:800,clientHeight:600}};
+   if(method==='DOM.getNodeForLocation') {points.push({session,x:params.x,y:params.y});return {backendNodeId:session?2:1,frameId:session?'inner':'root'};}
+   if(method==='DOM.describeNode') return {node:session?{nodeName:'BUTTON'}:{nodeName:'IFRAME',frameId:'child'}};
+   if(method==='DOM.getBoxModel') return {model:{content:[100,50,300,50,300,150,100,150]}};
+   throw Error(`Unexpected ${method}`);
+ };
+ assert.equal(await drops.hitFrame(send,new Map([['child','child-session']]),{x:110,y:80}),'inner');
+ assert.deepEqual(points,[{session:undefined,x:130,y:180},{session:'child-session',x:17,y:230}]);
+ await assert.rejects(drops.hitFrame(send,new Map(),{x:110,y:80}),/unbound child/);
+});
+
+test("native drag rejects a child session whose frame identity changed before dispatch",async()=>{
+ const events=[];
+ const send=async(method)=>{
+   events.push(method);
+   if(method==='Target.getTargetInfo') return {targetInfo:{type:'iframe'}};
+   if(method==='Target.attachToTarget') return {sessionId:'child-session'};
+   if(method==='Page.getFrameTree') return {frameTree:{frame:{id:events.length===1?'main':'different-child',loaderId:'loader',url:'http://fixture/'}}};
+   throw Error(`Unexpected ${method}`);
+ };
+ const drops=new BrowserDrops(),owner={};
+ const lease={id:1,owner,stage:0,ready:Promise.resolve(),sessions:new Map(),connection:{send,close(){}}};
+ drops.leases.set(1,lease);
+ await assert.rejects(drops.request(owner,{action:'stage',id:1,type:'dragEnter',frameTargets:[{targetId:'child',frameId:'expected-child'}]}),/frame target changed/);
+ assert.equal(events.some(method=>method.startsWith('Input.')),false);
+ await drops.cleanup(owner);
+});

@@ -385,7 +385,8 @@ known active dialog emits its type instead of requesting blocked AX data. Consol
 startup for that new observer is deferred until a successful dev.logs call after
 dialog resolution. A dialog that predates the first harness binding can block
 Page.enable; resolve it through existing browser/native controls before binding.
-Dialogs in popups/out-of-process frames, system permission prompts, headful and
+A prompt during a cross-process frame drop has real Chrome coverage. Dialogs in
+popups and broader frame flows, system permission prompts, headful and
 cross-platform behavior remain open validation. Independent host processes and
 external browser clients are not coordinated by the in-process identity guard.
 

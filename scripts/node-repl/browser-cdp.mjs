@@ -183,14 +183,14 @@ export async function openConnection(url, onEvent = () => {}, onClose = () => {}
       socket.addEventListener("error", () => reject(new Error("Browser connection failed")), { once: true });
     });
     clearTimeout(timer);
-    const send = (method, params = {}, timeoutMs = TIMEOUT) => new Promise((resolve, reject) => {
+    const send = (method, params = {}, timeoutMs = TIMEOUT, sessionId) => new Promise((resolve, reject) => {
       const id = ++nextId;
       const timeout = timeoutMs === 0 ? undefined : setTimeout(() => { pending.delete(id); reject(new Error(`CDP ${method} timed out`)); }, timeoutMs);
       pending.set(id, {
         resolve: value => { clearTimeout(timeout); resolve(value); },
         reject: error => { clearTimeout(timeout); reject(error); },
       });
-      try { socket.send(JSON.stringify({ id, method, params })); }
+      try { socket.send(JSON.stringify({ id, method, params, ...(sessionId ? {sessionId} : {}) })); }
       catch (error) { pending.delete(id); clearTimeout(timeout); reject(error); }
     });
     return {send, close() { fail(new Error("Browser operation ended")); socket.close(); }};
@@ -483,7 +483,7 @@ click and scroll also accept screenshot pixel pairs. drag(fromPixelPair, toPixel
 tab.playwright exposes locator/getByRole/getByText/getByLabel/getByPlaceholder/getByTestId/getByTitle/getByAltText/frameLocator.
 Chain locator/filter({hasText})/nth/first/last; read count/innerText/textContent/allTextContents/getAttribute/inputValue/isVisible/isEnabled/isChecked/waitFor;
 act with click/dblclick/fill/press/check/uncheck/setChecked/selectOption/hover/scrollIntoViewIfNeeded.
-locator.drop({data?:{mimeType:string},files?:absolutePaths},{position?:{x,y},timeoutMs?}) sends trusted native HTML/file drag-and-drop. Files must be regular files on the browser host. Position uses padding-box CSS pixels. Cross-process and ambiguous identical sibling frame paths fail before delivery. A dialog pauses the action deadline until answered; reset/timeout/close cancel remaining stages. Already dispatched page effects may finish.
+locator.drop({data?:{mimeType:string},files?:absolutePaths},{position?:{x,y},timeoutMs?}) sends trusted native HTML/file drag-and-drop. Files must be regular files on the browser host. Position uses padding-box CSS pixels. Cross-process frames bind native target/frame IDs and support nested frame hit testing. Ambiguous same-process sibling URL paths fail before delivery. A dialog pauses the action deadline until answered; reset/timeout/close cancel remaining stages. Already dispatched page effects may finish.
 Playwright resolves fresh elements and waits for actionability; ambiguous matches fail. Default action timeout is 10 seconds.
 Navigation waits: tab.playwright.expectNavigation(async action, {url?,waitUntil?,timeoutMs?}), waitForURL(url, {waitUntil?,timeoutMs?}), waitForLoadState({state?,timeoutMs?}). expectNavigation installs a main-frame watcher before running the action and returns its result after navigation.
 Playwright actions invalidate prior AX and screenshot indices. Read current state afterwards. File chooser events: start tab.playwright.waitForEvent("filechooser", {timeoutMs?}) before clicking, then await the handle and use isMultiple() / setFiles(absolutePaths, {timeoutMs?}). The file handle is one-shot. Downloads: start waitForEvent("download") before clicking, then await download.path({timeoutMs?}) for the completed local artifact.

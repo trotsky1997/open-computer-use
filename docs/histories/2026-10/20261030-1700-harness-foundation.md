@@ -309,3 +309,30 @@ console, clipboard, viewport and native-free CLI/MCP regression smokes passed.
 Cross-process frames reject before delivery; identical sibling URL paths remain
 unsupported. Headful/zoom/transformed frames, Linux/Windows, remote file transfer
 and host-crash behavior remain open in the full harness goal.
+
+
+### Cross-process native drop routing
+
+Extended native drops to bind separate frame targets through public Playwright
+CDP sessions and host-owned flat CDP attachments. Each stage merges native frame
+metadata for the selected ancestry and checks the exact receiving frame ID.
+Native hit testing descends iframe content quads into child layout viewports;
+DOM hit-test coordinates include each document's scroll offsets. Child visual
+viewport dimensions can describe the top-level view, so layout dimensions are
+used for the conversion. Native main/receiver loaders and main viewport are
+checked again after hit testing. Session resources share the drag connection's
+existing cancellation and failed-cleanup retry lifecycle.
+
+All 77 Node checks passed, including child scroll/session routing and rejection
+of a changed native child identity before input. Real macOS headless Chrome at
+native 1x and verified forced 2x passed the extended drop smoke: cross-process
+Unicode file/MIME delivery, same-process children inside separate targets,
+nested separate targets, scrolling, identical-URL independently hosted siblings,
+and prompt response inside a cross-process drop. Existing action timeout,
+reset/close, modal ownership and failed-cleanup recovery checks passed. Browser,
+dialog and viewport regression smokes also passed. Runtime documentation,
+architecture and the active parity audit now record the supported frame cases.
+
+Ambiguous same-process sibling URL ancestry, frame transforms/zoom, headful and
+native desktop/platform verification, remote artifacts and host integration
+remain open; the full harness goal stays active.

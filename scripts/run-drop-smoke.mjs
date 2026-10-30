@@ -4,13 +4,23 @@ import {mkdtemp,writeFile,rm} from "node:fs/promises";
 import {tmpdir} from "node:os";
 import path from "node:path";
 import {WorkerJavaScriptSession} from "./node-repl/open-computer-use-repl.mjs";
-import {withConnection} from "./node-repl/browser-cdp.mjs";
+import {withConnection,imageDimensions} from "./node-repl/browser-cdp.mjs";
 
 const endpoint=process.env.OPEN_COMPUTER_USE_CDP_URL;
 if(!endpoint) throw new Error("Set OPEN_COMPUTER_USE_CDP_URL to disposable headless Chrome");
 const server=createServer((req,res)=>{
   res.setHeader("Content-Type","text/html; charset=utf-8");
-  res.end(`<!doctype html><style>#zone{width:200px;height:100px;background:#acf;margin:30px;border:3px solid}iframe{width:400px;height:250px}</style><div id="zone">Drop here</div><div id="edit" contenteditable style="width:200px;height:40px;border:1px solid">Editor</div><output id="result">[]</output><button id="cover" onclick="zone.style.pointerEvents='none'">Cover</button>${req.url.startsWith("/frame")?'':`<iframe src="${req.url==="/cross"?`http://localhost:${server.address().port}/frame`:"/frame"}"></iframe>`}<script>
+  const sources={
+    '/cross-dialog':[`http://localhost:${server.address().port}/frame?dialog`],
+    '/cross':[`http://localhost:${server.address().port}/frame`],
+    '/nested':[`http://localhost:${server.address().port}/frameshell`],
+    '/frameshell':['/frame'],
+    '/double':[`http://localhost:${server.address().port}/frameshell2`],
+    '/frameshell2':[`http://127.0.0.1:${server.address().port}/frame`],
+    '/cross-dupe':[`http://localhost:${server.address().port}/frame`,`http://localhost:${server.address().port}/frame`]
+  };
+  const sourcesForPage=sources[req.url] ?? (req.url.startsWith('/frame')?[]:['/frame']);
+  res.end(`<!doctype html><style>#zone{width:200px;height:100px;background:#acf;margin:30px;border:3px solid}iframe{width:400px;height:250px}</style><div id="zone">Drop here</div><div id="edit" contenteditable style="width:200px;height:40px;border:1px solid">Editor</div><output id="result">[]</output><button id="cover" onclick="zone.style.pointerEvents='none'">Cover</button>${sourcesForPage.map(src=>`<iframe src="${src}"></iframe>`).join("")}<script>
   let events=[];
   for(const type of ['dragenter','dragover','drop']) zone.addEventListener(type,async e=>{
     e.preventDefault();events.push({type:e.type,trusted:e.isTrusted,text:e.dataTransfer.getData('text/plain'),files:e.dataTransfer.files.length});
@@ -31,8 +41,13 @@ const session=new WorkerJavaScriptSession({native});
 const other=new WorkerJavaScriptSession({native});
 async function run(source,target=session,timeout=30000){const result=await target.run(source,timeout);assert.equal(result.isError,false,JSON.stringify(result.content));return JSON.parse(result.content.at(-1).text);}
 const ids=[];
+let rasterScale;
 try{
  const id=await run(`var tab=await cua.createBrowserTab("cdp",${JSON.stringify(url)},{visible:false});nodeRepl.write(JSON.stringify(tab.id));`);ids.push(id);
+ const target=(await(await fetch(new URL('/json/list',endpoint))).json()).find(target=>target.id===id);
+ const viewport=await withConnection(target.webSocketDebuggerUrl,async send=>(await send('Page.getLayoutMetrics')).cssVisualViewport);
+ const png=Buffer.from(await run(`nodeRepl.write(JSON.stringify(Buffer.from(await tab.getScreenshot({emit:false})).toString('base64')));`),'base64');
+ rasterScale=imageDimensions(png,'png').width/viewport.clientWidth;
  await run(`await tab.playwright.locator('#zone').drop({data:{'text/plain':'你好 🙂','text/html':'<b>rich</b>'},files:${JSON.stringify(file)}},{position:{x:20,y:20}});nodeRepl.write(JSON.stringify(true));`);
  const result=JSON.parse(await run(`nodeRepl.write(JSON.stringify(await tab.playwright.locator('#result').innerText()));`));
  assert.equal(result.events[0].type,'dragenter');assert.equal(result.events.at(-1).type,'drop');assert.ok(result.events.slice(1,-1).every(e=>e.type==='dragover'));assert.ok(result.events.every(e=>e.trusted));
@@ -43,13 +58,24 @@ try{
  await run(`await tab.playwright.frameLocator('iframe').locator('#zone').drop({data:{'text/plain':'frame'}});nodeRepl.write(JSON.stringify(true));`);
  assert.equal(JSON.parse(await run(`nodeRepl.write(JSON.stringify(await tab.playwright.frameLocator('iframe').locator('#result').innerText()));`)).events.at(-1).trusted,true);
  const cross=await run(`var cross=await cua.createBrowserTab('cdp',${JSON.stringify(url+'cross')},{visible:false});nodeRepl.write(JSON.stringify(cross.id));`);ids.push(cross);
- const crossDrop=await session.run(`await cross.playwright.frameLocator('iframe').locator('#zone').drop({data:{'text/plain':'must not arrive'}});`);
- assert.equal(crossDrop.isError,true);assert.match(crossDrop.content.at(-1).text,/outside this page CDP target/);
- assert.equal(await run(`nodeRepl.write(JSON.stringify(await cross.playwright.frameLocator('iframe').locator('#result').innerText()));`),'[]');
+ await run(`await cross.playwright.frameLocator('iframe').locator('#zone').drop({data:{'text/plain':'cross process'},files:${JSON.stringify(file)}});nodeRepl.write(JSON.stringify(true));`);
+ const crossResult=JSON.parse(await run(`nodeRepl.write(JSON.stringify(await cross.playwright.frameLocator('iframe').locator('#result').innerText()));`));
+ assert.equal(crossResult.events.at(-1).trusted,true);assert.equal(crossResult.data[0][1],'cross process');
+ assert.deepEqual(crossResult.files,[{name:'你好.txt',text:'native file bytes 🙂'}]);
+ for(const [route,locator] of [['nested',"frameLocator('iframe').frameLocator('iframe')"],['double',"frameLocator('iframe').frameLocator('iframe')"],['cross-dupe',"frameLocator('iframe').nth(1)"]]) {
+   const nested=await run(`var nested=await cua.createBrowserTab('cdp',${JSON.stringify(url)}+${JSON.stringify(route)},{visible:false});nodeRepl.write(JSON.stringify(nested.id));`);ids.push(nested);
+   await run(`await nested.playwright.${locator}.locator('#zone').drop({data:{'text/plain':${JSON.stringify(route)}}});nodeRepl.write(JSON.stringify(true));`);
+   const result=JSON.parse(await run(`nodeRepl.write(JSON.stringify(await nested.playwright.${locator}.locator('#result').innerText()));`));
+   assert.equal(result.events.at(-1).trusted,true);assert.equal(result.data[0][1],route);
+ }
  for(const payload of [{files:'relative.txt'},{files:dir},{files:path.join(dir,'missing')},{data:{'invalid':'x'}}]) assert.equal((await session.run(`await tab.playwright.locator('#zone').drop(${JSON.stringify(payload)});`)).isError,true);
  await run(`await tab.playwright.locator('#cover').click();nodeRepl.write(JSON.stringify(true));`);
  assert.equal((await session.run(`await tab.playwright.locator('#zone').drop({data:{'text/plain':'blocked'}},{timeoutMs:100});`)).isError,true);
  await run(`nodeRepl.write(JSON.stringify(await tab.playwright.locator('#zone').count()));`);
+ const crossDialog=await run(`var crossDialog=await cua.createBrowserTab('cdp',${JSON.stringify(url+'cross-dialog')},{visible:false});await crossDialog.playwright.frameLocator('iframe').locator('#zone').drop({data:{'text/plain':'cross prompt'}});nodeRepl.write(JSON.stringify(crossDialog.id));`);ids.push(crossDialog);
+ assert.equal(await run(`nodeRepl.write(JSON.stringify((await crossDialog.getJsDialog()).type));`),'prompt');
+ await run(`await (await crossDialog.getJsDialog()).dismiss();nodeRepl.write(JSON.stringify(true));`);
+ assert.equal(JSON.parse(await run(`nodeRepl.write(JSON.stringify(await crossDialog.playwright.frameLocator('iframe').locator('#result').innerText()));`)).data[0][1],'cross prompt');
  const accepted=await run(`var accepted=await cua.createBrowserTab('cdp',${JSON.stringify(url+'?dialog')},{visible:false});await accepted.playwright.locator('#zone').drop({data:{'text/plain':'resumed'}},{timeoutMs:2000});nodeRepl.write(JSON.stringify(accepted.id));`);ids.push(accepted);
  await run(`var outsider=await cua.getTab(${JSON.stringify(id)});nodeRepl.write(JSON.stringify(outsider.id));`,other);
  const exclusive=await other.run(`await outsider.playwright.frameLocator('iframe').locator('#zone').drop({data:{'text/plain':'competing'}});`);
@@ -80,7 +106,7 @@ try{
  const closeTab=await run(`var closeTab=await cua.createBrowserTab('cdp',${JSON.stringify(url+'?dialog')},{visible:false});await closeTab.playwright.locator('#zone').drop({data:{'text/plain':'closed'}});nodeRepl.write(JSON.stringify(closeTab.id));`);ids.push(closeTab);
  await session.close();
  assert.equal(await run(`var closedTab=await cua.getTab(${JSON.stringify(closeTab)});nodeRepl.write(JSON.stringify(await closedTab.playwright.locator('#result').innerText()));`,other),'[]');
- console.log('Native drop smoke passed: trusted mixed MIME/file data, protected mode, iframe, invalid files, covered target timeout, prompt response/reset/timeout/close and reuse, browser exclusivity, cross-process frame rejection, cleanup failure/retry without replay');
+ console.log(`Native drop smoke passed at raster scale ${rasterScale}: trusted mixed MIME/file data, protected mode, iframe, invalid files, covered target timeout, prompt response/reset/timeout/close and reuse, browser exclusivity, nested cross-process frame delivery and prompts, same-URL separate targets, cleanup failure/retry without replay`);
 }finally{
  await Promise.allSettled([session.close(),other.close()]);
  const version=await(await fetch(new URL('/json/version',endpoint))).json();

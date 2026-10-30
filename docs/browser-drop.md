@@ -21,10 +21,14 @@ Completion means dispatch finished; inspect the page to verify its own result.
 
 Each native stage resolves and checks the target again. The host validates main
 and receiving-frame loaders, hit-frame ancestry, viewport metrics and revision.
-Targets must be in the page's own CDP frame tree. Cross-process frames and
-identical sibling frame URL paths fail before delivery. Native browser/frame
-binding is needed to extend these cases. Scaled/rotated frame transforms, zoom,
-headful browsers and other platforms need additional evidence.
+Cross-process frame sessions bind the native target/frame identity explicitly.
+Native hit testing descends through iframe content quads into each child layout
+viewport, including document scroll offsets. Nested process boundaries and
+identical-URL independently hosted frames are supported. Same-process sibling
+frames still require unique URL ancestry; ambiguous paths fail before delivery.
+Scaled/rotated/perspective frame transforms, zoom, headful browsers and other
+platforms need additional evidence. A final native loader/viewport check precedes
+each dispatch; document changes fail without replaying the drag.
 
 One session owns native dragging for the browser origin at a time. Action timeout
 cancels native dragging and preserves the JS session when cleanup succeeds. A
@@ -44,11 +48,18 @@ OPEN_COMPUTER_USE_CDP_URL=http://127.0.0.1:9222 node scripts/run-drop-smoke.mjs
 ```
 
 Use a disposable local Chromium with remote debugging enabled. Real macOS
-headless Chrome checks trusted events, protected text/file data before drop,
+headless Chrome at native 1× and forced 2× checks trusted events, protected text/file data before drop,
 Unicode MIME and file bytes, native rich editor insertion, same-target iframe
-input, cross-process frame rejection without delivery, invalid paths and
-covered-target action timeout, dialog response beyond the action deadline,
+input, cross-process MIME/file delivery, nested cross-process and same-process
+children with scrolling, identical-URL independently hosted siblings, invalid paths and
+covered-target action timeout, cross-process frame prompt response, dialog response beyond the action deadline,
 reset/timeout/close before delivery, modal ownership, failed cancellation with
 blocked reuse and successful reset retry without replay. Unit
 checks exercise trust-boundary validation, canceled startup, browser lease
 exclusion and failed cancellation ownership/retry.
+
+The distinction between viewport coordinates for native input and document
+coordinates for DOM.getNodeForLocation follows Chromium's
+[DOM agent implementation](https://chromium.googlesource.com/chromium/src/+/HEAD/third_party/blink/renderer/core/inspector/inspector_dom_agent.cc).
+Child hit tests use the child layout viewport dimensions; its reported visual
+viewport can carry top-level dimensions.

@@ -317,6 +317,10 @@ native document loaders, viewport revision and receiving frame before dispatch.
 Cancellation stops later stages and closes blocked dispatch connections. Cleanup
 dismisses owned dialogs, cancels native dragging, then releases focus; failed
 cancellation retains ownership for retry. Input already dispatched may finish.
-Cross-process frames and ambiguous identical sibling frame URL paths fail before
+Separate frame targets attach through flat CDP sessions owned by the drag lease.
+Hit testing descends native content quads using child layout viewport dimensions
+and document scroll offsets. Main and receiver loaders are checked again after
+hit testing. Nested process boundaries and identical-URL separate targets have
+real Chrome evidence; ambiguous same-process sibling URL paths fail before
 delivery. Native drop uses browser events rather than the dependency's synthetic
 DataTransfer dispatch. See [native drag-and-drop](browser-drop.md).

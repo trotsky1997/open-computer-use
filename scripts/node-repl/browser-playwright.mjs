@@ -236,17 +236,34 @@ async function nativeDropPoint(locator,page,session,options,request) {
     const after = await handle.boundingBox();
     if (!after || ["x","y","width","height"].some(key=>Math.abs(after[key]-box[key])>.25)) throw new Error("Drop target moved; resolve again");
     const frames = dropFrames((await session.send("Page.getFrameTree")).frameTree);
+    const frameTargets=[];
+    let nearest;
+    for(let current=frame;current && current!==page.mainFrame();current=current.parentFrame()) {
+      let child;
+      try {child=await page.context().newCDPSession(current);}
+      catch(error) {
+        if(!error.message.includes("does not have a separate CDP session")) throw error;
+        continue;
+      }
+      try {
+        const tree=dropFrames((await child.send("Page.getFrameTree")).frameTree);
+        const {targetInfo}=await child.send("Target.getTargetInfo");
+        nearest ??= tree[0].id;
+        frameTargets.push({frameId:tree[0].id,targetId:targetInfo.targetId});
+        for(const item of tree) if(!frames.some(existing=>existing.id===item.id)) frames.push(item);
+      } finally {await child.detach();}
+    }
+    nearest ??= frames[0].id;
     const framePath=[];
     for(let current=frame;current;current=current.parentFrame()) framePath.unshift(current.url());
     const matching = frames.filter(item=>{
-      const path=[];
-      for(let current=item;current;current=frames.find(parent=>parent.id===current.parentId)) path.unshift(current.url);
-      return JSON.stringify(path)===JSON.stringify(framePath);
+      const path=[], ids=[];
+      for(let current=item;current;current=frames.find(parent=>parent.id===current.parentId)) {path.unshift(current.url);ids.push(current.id);}
+      return ids.includes(nearest) && JSON.stringify(path)===JSON.stringify(framePath);
     });
-    // shortcut: identical sibling frame URLs are ambiguous; add native frame binding before supporting them.
-    if(!matching.length) throw new Error("Native drop frame is outside this page CDP target");
-    if(matching.length>1) throw new Error("Native drop frame path is ambiguous");
-    return {point,frames,framePath,geometry:{loaderId:frames[0].loaderId,viewport,revision:await request({action:"revision"})}};
+    // shortcut: identical same-process sibling URLs need an additional native owner binding.
+    if(matching.length!==1) throw new Error("Native drop frame path is ambiguous or changed");
+    return {point,frames,framePath,frameTargets,frameId:matching[0].id,geometry:{loaderId:frames[0].loaderId,viewport,revision:await request({action:"revision"})}};
   } finally {await handle.dispose();}
 }
 
