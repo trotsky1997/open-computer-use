@@ -380,3 +380,14 @@ abortable and checked again before dispatch. Cancellation closes pending readers
 and debugger agents. Source and Worker hosts share this controller. Inner command
 deadlines preserve REPL bindings; only the actual JS execution-budget timer
 requests a reset. See [tab CDP capability](browser-debugger.md) for policy/limits.
+
+
+## Page asset inventories and export
+
+Tab `pageAssets` discovery maps native DOM snapshots, computed styles and loaded
+resource trees into turn-owned inventories. Source and Worker sessions dispatch
+to the same host export service. HTTP(S) files use credentialed frame-scoped
+Chrome network streams; data/blob URLs have explicit paths. Navigation and turn
+cleanup fence exports; partial directories are removed while completed artifacts
+survive. Module distribution follows the shared CLI/plugin support-module lists.
+See [rendered page assets](browser-assets.md) for selection, lifecycle and limits.

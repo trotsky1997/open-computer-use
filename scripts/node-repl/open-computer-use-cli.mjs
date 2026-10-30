@@ -66,7 +66,7 @@ export function inspectCapabilities({
   };
   const adapter = { available: existsSync(paths.adapterPath), path: paths.adapterPath };
   const kernel = { available: existsSync(paths.kernelPath), path: paths.kernelPath };
-  const supportModules = ["ocu-config.mjs","browser-cdp.mjs","browser-playwright.mjs","browser-downloads.mjs","browser-clipboard.mjs","browser-viewport.mjs","browser-input.mjs", "browser-tabs.mjs", "browser-debugger.mjs","browser-drop.mjs"].map(name => {
+  const supportModules = ["ocu-config.mjs","browser-cdp.mjs","browser-playwright.mjs","browser-downloads.mjs","browser-clipboard.mjs","browser-viewport.mjs","browser-input.mjs", "browser-tabs.mjs", "browser-debugger.mjs","browser-assets.mjs","browser-drop.mjs"].map(name => {
     const modulePath = path.join(path.dirname(paths.adapterPath),name);
     return {name,path:modulePath,available:existsSync(modulePath)};
   });

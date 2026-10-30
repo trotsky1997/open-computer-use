@@ -90,3 +90,14 @@ state so inner command timeouts preserve bindings. Continue the broader command
 policy/provider matrix, read-only evaluation, other capabilities and crash/native
 verification. See [tab CDP capability](../../browser-debugger.md). The full goal
 remains active.
+
+
+## Page assets phase
+
+Rendered asset inventory and local directory bundles are implemented through a
+shared source/Worker host service. Inventory membership, frame navigation and
+turn cleanup fence exports; authenticated network streams, data/blob resources
+and per-file failure reporting have real Chrome fixtures. Continue asset fidelity,
+provider/transport coverage, read-only evaluation, content export, crash handling
+and native desktop validation. See [page assets](../../browser-assets.md). The
+full goal remains active.

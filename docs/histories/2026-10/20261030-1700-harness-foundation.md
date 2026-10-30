@@ -660,3 +660,37 @@ Full command-policy/provider coverage, shared/service-worker edge cases, ordinar
 read-only page/locator evaluation, other browser capabilities/transports, renderer
 and host-crash recovery, native desktop and wider platform validation remain open.
 Full harness alignment remains active.
+
+## Page asset inventory and local bundles
+
+Added the discovered tab `pageAssets` capability with `list()` and
+`bundle({inventoryId,kinds?,assetIds?})`. Native DOM snapshots, computed CSS URLs,
+resource trees and inline SVG markup feed host-owned, tab/turn-private
+inventories. Returned inventory objects are detached from saved membership.
+Root and cross-origin frame routes preserve browser credentials during resource
+export. HTTP(S) files stream through Chrome; data/blob URLs have explicit export
+paths. Bundles return individual failures, safe filenames and a JSON manifest.
+Navigation fences collection/export, canceled exports remove their directories,
+and completed artifacts survive turn/reset/close. Cleanup waits for writes and
+connections and retains failed disconnects for retry. Source/Worker dispatch,
+capability docs, CLI/plugin packaging lists, architecture and parity tracking
+were updated together. CDP error diagnostics now include the failing method.
+
+All 106 Node checks passed. Disposable macOS headless Chrome passed asset
+workflows in both session types: computed background images, cross-origin frames,
+inline SVG nesting, cold credentialed resources, image/font/stylesheet/media URL
+bytes, data/blob streams, default/union selectors, detached inventory mutation,
+invalid membership, missing files, stale/during-export navigation, in-flight
+turn cancellation, retained completed artifacts and reset. Both turn-lifecycle
+smokes and the native-free CLI/MCP smoke passed. Installer/build-script syntax
+and whitespace checks passed. The smoke's final cleanup now checks fresh tab
+inventory before closing surviving fixture tabs, so already-collected tabs are
+not closed twice. A focused missing-target response probe also passed. No new
+CI or dependency was added.
+
+An unnecessarily broad native release build was started by the package command
+and stopped before completion; native release packaging is unverified this phase.
+Media/font fixtures check exported bytes without codec/font rendering claims.
+Streaming/DRM media, recursive CSS/unloaded srcset discovery, full provider and
+platform coverage, crash recovery, content export and the remaining native/host
+capabilities stay open. The full harness goal remains active.
