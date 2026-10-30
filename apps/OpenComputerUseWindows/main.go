@@ -38,7 +38,7 @@ const (
 //go:embed runtime.ps1
 var windowsRuntimeScript string
 
-const serverInstructions = "Computer Use tools let you interact with Windows apps by performing UI actions.\n\nBegin by calling `get_app_state` every turn you want to use Computer Use to get the latest state before acting. The available tools are list_apps, get_app_state, click, perform_secondary_action, scroll, drag, type_text, press_key, and set_value.\n\nPrefer element-targeted interactions over coordinate clicks when an index for the targeted element is available. Screenshot-coordinate actions require get_app_state to return a usable image; hidden, minimized, cloaked, off-screen, or degenerate windows may return only the accessibility tree. Windows actions use UI Automation patterns first and fall back to window messages when an app does not expose the needed pattern. The Windows runtime does not auto-launch apps, perform SetFocus, or use UIA text fallback by default, so background-capable actions do not intentionally steal the user's foreground focus. Setting OPEN_COMPUTER_USE_ALLOW_GLOBAL_POINTER_FALLBACKS=1 enables click_method 'global' plus real-pointer scroll/drag fallbacks; real keyboard input additionally requires press_key key_method=global. Physical input may move the system pointer and change foreground focus; leave the environment flag unset to keep every action on UI Automation patterns and window messages. Auto press_key always uses window messages. Global input verifies the observed process/window, current geometry, foreground and pointer hit target, and refuses delivery if these cannot be confirmed."
+const serverInstructions = "Computer Use tools let you interact with Windows apps by performing UI actions.\n\nUse launch_app only for an explicitly requested application start; it accepts one literal executable name/path without arguments. The started application outlives this native session. Verify its readiness with get_app_state.\n\nBegin by calling `get_app_state` every turn you want to use Computer Use to get the latest state before acting. The available tools are launch_app, list_apps, get_app_state, click, perform_secondary_action, scroll, drag, type_text, press_key, and set_value.\n\nPrefer element-targeted interactions over coordinate clicks when an index for the targeted element is available. Screenshot-coordinate actions require get_app_state to return a usable image; hidden, minimized, cloaked, off-screen, or degenerate windows may return only the accessibility tree. Windows actions use UI Automation patterns first and fall back to window messages when an app does not expose the needed pattern. The Windows runtime does not auto-launch apps, perform SetFocus, or use UIA text fallback by default, so background-capable actions do not intentionally steal the user's foreground focus. Setting OPEN_COMPUTER_USE_ALLOW_GLOBAL_POINTER_FALLBACKS=1 enables click_method 'global' plus real-pointer scroll/drag fallbacks; real keyboard input additionally requires press_key key_method=global. Physical input may move the system pointer and change foreground focus; leave the environment flag unset to keep every action on UI Automation patterns and window messages. Auto press_key always uses window messages. Global input verifies the observed process/window, current geometry, foreground and pointer hit target, and refuses delivery if these cannot be confirmed."
 
 type toolDefinition struct {
 	Name        string         `json:"name"`
@@ -263,6 +263,8 @@ func newService() *service {
 
 func (s *service) callTool(name string, args map[string]any) toolCallResult {
 	switch name {
+	case "launch_app":
+		return launchApplication(args)
 	case "list_apps":
 		return s.listApps()
 	case "get_app_state":
@@ -928,6 +930,12 @@ func globalPointerFallbacksEnabled() bool {
 
 func toolDefinitions() []toolDefinition {
 	return []toolDefinition{
+		{
+			Name:        "launch_app",
+			Description: "Explicitly launch one application executable by its literal name or path. Arguments, command lines and shell syntax are not accepted. The application persists after the automation session ends. Observe it with get_app_state before acting.",
+			Annotations: defaultAnnotations(),
+			InputSchema: objectSchema(map[string]any{"app": stringProperty("Executable name on PATH or executable path; a single literal value")}, []string{"app"}),
+		},
 		{
 			Name:        "click",
 			Description: "Click an element by index or pixel coordinates from screenshot. This tool is part of plugin `Computer Use`.",

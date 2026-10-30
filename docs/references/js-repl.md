@@ -268,3 +268,13 @@ registers reverse releases before dispatch. The SDK verifies native schema
 support before forwarding `duration_ms`. Linux/Windows reject explicit duration
 until timed native key delivery is implemented. See
 [native held input](../native-held-clicks.md) for supported routes and validation.
+
+
+## Native platform and launch
+
+`cua.computer.target` reports the local Node executor platform (`mac`, `linux`,
+`windows`) without loading native MCP. Linux/Windows expose
+`await cua.computer.launch_app({app})` for a literal executable name/path, backed
+by an advertised native tool. Observe the resulting app before input; started
+processes survive REPL cleanup. macOS keeps launch in `getApp` and omits the
+optional explicit method. See [native lifecycle](../native-lifecycle.md).

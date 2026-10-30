@@ -1,6 +1,6 @@
 # 架构总览
 
-这个仓库当前已经从模板收敛成一个本地 `computer-use` 项目。主线仍是 Swift 实现的 macOS automation MCP server，同时新增了实验性的 Windows 和 Linux runtime，用独立 Go 二进制暴露同一组 9 个 native Computer Use tools；Codex plugin 再在 native MCP 之上增加持久 Node.js REPL，向模型暴露 `js` / `js_reset`。
+这个仓库当前已经从模板收敛成一个本地 `computer-use` 项目。主线仍是 Swift 实现的 macOS automation MCP server，同时新增了实验性的 Windows 和 Linux runtime，用独立 Go 二进制暴露同一组 9 个 native Computer Use 核心 tools，并支持显式 launch_app；Codex plugin 再在 native MCP 之上增加持久 Node.js REPL，向模型暴露 `js` / `js_reset`。
 
 ## 当前目录结构
 
@@ -125,7 +125,7 @@
 - Go runtime 通过 `go:embed` 带上 `runtime.ps1`，执行 tool call 时临时落盘并调用 Windows PowerShell。PowerShell bridge 使用 `System.Windows.Automation` 做 app/window/element discovery、tree rendering、UIA pattern action、ValuePattern set value 和 ScrollPattern scroll；当目标 app 不暴露对应 pattern 时，fallback 到 `PostMessage` / `SendMessage` 形式的 Win32 window message。PowerShell 进程启动时会通过 `SetProcessDpiAwarenessContext` / `SetThreadDpiAwarenessContext` 对齐到物理坐标空间，因为操作文件里的 `windowBounds` 和 UIA frame 都是物理像素，而 DPI-unaware 进程的 `GetSystemMetrics` / `GetWindowRect` 返回的是虚拟化尺度。
 - Windows runtime 默认只连接已经运行的 app，不会在 `get_app_state` 找不到进程时自动 `Start-Process`，也不会默认允许 `SetFocus` secondary action；这两条前台抢占路径分别需要 `OPEN_COMPUTER_USE_WINDOWS_ALLOW_APP_LAUNCH=1` 和 `OPEN_COMPUTER_USE_WINDOWS_ALLOW_FOCUS_ACTIONS=1` 显式打开。`type_text` 默认优先对可写文本控件的 child HWND 发送 `EM_SETSEL` / `EM_REPLACESEL`，不再默认走可能触发前台激活的 UIA `ValuePattern.SetValue` fallback；需要旧行为时必须设置 `OPEN_COMPUTER_USE_WINDOWS_ALLOW_UIA_TEXT_FALLBACK=1`。UIA pattern 和 Win32 message fallback 本身仍是 best-effort：很多控件可以在后台响应，但 Windows 没有一套对所有 GUI toolkit 都等价于 macOS AX 的后台键鼠输入模型。
 - Windows screenshot 会先检查主窗口可见、未最小化、未被 DWM cloaked、与 virtual screen 相交，并要求窗口宽高至少 64 像素且面积至少 20,000 像素；`list_apps` 也只列出通过这组可捕获性检查的窗口。PowerShell bridge 通过后，Go 层还会解码 PNG header 并用同一尺寸门槛复核。任一检查失败时 snapshot 仍可返回 UI Automation tree，但省略 MCP `image` block；coordinate click / drag 会明确失败，element-targeted action 仍可尝试。实现不会为退化窗口放大、补边或生成占位截图。窗口与 virtual screen 的交集判断在物理坐标下进行，因此在 125% / 150% 缩放且窗口完全位于虚拟化屏幕之外时不会误判为不可捕获。
-- 这 9 个 tool 的协议面与 macOS 主线保持一致：`list_apps`、`get_app_state`、`click`、`perform_secondary_action`、`scroll`、`drag`、`type_text`、`press_key`、`set_value`。其中 element-targeted action 会优先复用上一轮 `get_app_state` 的 runtime id / automation metadata，coordinate action 使用 screenshot/window-relative 坐标。
+- 这 9 个核心 tool 的协议面与 macOS 主线保持一致：`list_apps`、`get_app_state`、`click`、`perform_secondary_action`、`scroll`、`drag`、`type_text`、`press_key`、`set_value`。其中 element-targeted action 会优先复用上一轮 `get_app_state` 的 runtime id / automation metadata，coordinate action 使用 screenshot/window-relative 坐标。
 - Windows `click_method=accessibility` 使用 UIA，`app_post` 始终使用 HWND 消息。`click_method=global` 要求 `OPEN_COMPUTER_USE_ALLOW_GLOBAL_POINTER_FALLBACKS=1`；开启后，auto 点击及 scroll 的 UIA 失败回退、drag 也可使用真实指针。`press_key` 的 auto 始终使用窗口消息，真实按键需显式 `key_method=global` 及同一环境开关。物理输入通过 SendInput 检查返回值、finally 释放按键 / 鼠标，核对观察的 PID / HWND、最新几何、前台及坐标命中窗口；普通 SetForegroundWindow 失败就拒绝，不模拟 Alt 强行抢前台。macOS-only sky_click / sky_key 继续明确拒绝。见 [Windows 输入说明](windows-input.md)。
 - Windows UI Automation 需要运行在已登录用户的桌面 session 里。通过 SSH 作为脱离桌面的后台进程运行时，PowerShell 可以启动并返回 JSON，但系统可能不给它暴露顶层窗口；这种情况下 `list_apps` 会是空，`get_app_state` 可能返回 `appNotFound(...)`。
 - Windows 已有独立 WPF 观察 fixture 和 Windows PR smoke，覆盖观察、滚动、物理输入及截图边界。其余工具 / toolkit 覆盖，以及 visual cursor overlay、installer/onboarding、code signing 仍待补齐。后续 TODO 记录在 `docs/exec-plans/active/20260422-windows-computer-use-runtime.md`。
@@ -486,3 +486,15 @@ cleanup for retry. Browser navigation/context destruction invalidates collection
 The public tab capability prints untrusted metadata and preserves native result
 strings; the ordinary host action/confirmation policy still applies. Installer,
 CLI readiness and npm copy lists include the host module. See [WebMCP](browser-webmcp.md).
+
+
+## Native platform and application launch
+
+The JS computer binding reports the local executor platform without starting the
+native peer. Linux/Windows dispatch explicit launch_app calls after native
+capability discovery; macOS retains getApp's launch behavior. The Go runtimes
+resolve a single literal executable, discard protocol stdio and start an
+independent application process/session. Started apps persist across automation
+cleanup; the peer reaps child exits while alive. Source/Worker Linux GTK fixtures
+verify startup, AX observation and turn/native/reset/close persistence. See
+[native lifecycle](native-lifecycle.md) for limits and platform evidence.

@@ -31,7 +31,7 @@ var windowPlacementValues = []string{"keep", "agent_display", "restore"}
 //go:embed runtime.py
 var linuxRuntimeScript string
 
-const serverInstructions = "Computer Use tools let you interact with Linux desktop apps by performing UI actions.\n\nBegin by calling `get_app_state` every turn you want to use Computer Use to get the latest state before acting. The available tools are list_apps, get_app_state, click, perform_secondary_action, scroll, drag, type_text, press_key, and set_value.\n\nPrefer element-targeted interactions over coordinate clicks when an index for the targeted element is available. Linux actions use AT-SPI2 semantic actions and editable text APIs first. Coordinate mouse and key synthesis are best-effort fallbacks and are not a universal Wayland background input model."
+const serverInstructions = "Computer Use tools let you interact with Linux desktop apps by performing UI actions.\n\nUse launch_app only for an explicitly requested application start; it accepts one literal executable name/path without arguments. The started application outlives this native session. Verify its readiness with get_app_state.\n\nBegin by calling `get_app_state` every turn you want to use Computer Use to get the latest state before acting. The available tools are launch_app, list_apps, get_app_state, click, perform_secondary_action, scroll, drag, type_text, press_key, and set_value.\n\nPrefer element-targeted interactions over coordinate clicks when an index for the targeted element is available. Linux actions use AT-SPI2 semantic actions and editable text APIs first. Coordinate mouse and key synthesis are best-effort fallbacks and are not a universal Wayland background input model."
 
 type toolDefinition struct {
 	Name        string         `json:"name"`
@@ -200,6 +200,8 @@ func newService() *service {
 
 func (s *service) callTool(name string, args map[string]any) toolCallResult {
 	switch name {
+	case "launch_app":
+		return launchApplication(args)
 	case "list_apps":
 		return s.listApps()
 	case "get_app_state":
@@ -1280,6 +1282,12 @@ func globalPointerFallbacksEnabled() bool {
 
 func toolDefinitions() []toolDefinition {
 	return []toolDefinition{
+		{
+			Name:        "launch_app",
+			Description: "Explicitly launch one application executable by its literal name or path. Arguments, command lines and shell syntax are not accepted. The application persists after the automation session ends. Observe it with get_app_state before acting.",
+			Annotations: defaultAnnotations(),
+			InputSchema: objectSchema(map[string]any{"app": stringProperty("Executable name on PATH or executable path; a single literal value")}, []string{"app"}),
+		},
 		{
 			Name:        "click",
 			Description: "Click an element by index or pixel coordinates from screenshot. This tool is part of plugin `Computer Use`.",

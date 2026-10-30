@@ -965,3 +965,28 @@ read-only echo probes verified description/opaque-name/raw-string shape, and
 temporary reference tabs were closed. Automatic tool notifications, real consent
 interaction, headful/platform/crash/external-site WebMCP coverage, transport,
 claims/takeover and native desktop work remain open. Keep the full goal active.
+
+
+## Native computer platform and explicit launch
+
+Added local computer.target and the optional Linux/Windows
+computer.launch_app({app}) JS method, leaving macOS launch in getApp as inspected
+in the reference API. The property does not start native MCP. The new native Go
+tool is advertised through Linux/Windows schemas and accepts one literal
+executable name/path, with bounded validation and direct process execution.
+Unknown options and command-line inputs fail. Linux starts an independent session
+with desktop environment discovery; Windows selects detached/new-group process
+flags. Stdio stays outside the MCP pipe, and launched apps outlive native/REPL
+cleanup. Child exits are reaped while the peer is alive. Backend errors and missing
+advertised capability propagate explicitly, without launch replay. Native core
+tool counts/docs/fixtures were updated. No dependency or CI was added.
+
+All 139 Node checks passed. The Linux Go suite passed natively in an arm64 Ubuntu
+VM; a host macOS attempt hit existing Linux-only bridge checks. Private D-Bus/Xvfb
+source/Worker GTK tests verified exact spaces/Unicode/$() executable paths, zero
+extra arguments, stdout isolation, independent session, AX readiness and survival
+through turn end, native replacement, reset and final close. Test apps and private
+desktop resources were cleaned up. Windows common Go tests passed on macOS and
+amd64/arm64 Windows binaries compiled; real Windows UI/job/console persistence
+remains unverified. Desktop IDs/display-name launch, remote native executor
+identity, window-ID binding and remaining native/harness/platform work stay open.

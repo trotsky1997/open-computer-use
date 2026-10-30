@@ -116,7 +116,7 @@ async function releaseResources(services,owner,stopped=Promise.resolve()) {
 
 const SERVER_INSTRUCTIONS = `UI automation through a persistent JavaScript REPL using the initialized cua API.
 
-On the first call after startup or js_reset, bind the requested app with await cua.getApp("Example App"), or call await cua.getState() only when an app inventory is actually needed. On macOS, use getApp(name, { initialState: false }) followed by app.query({ text, role }) for targeted lookup without an initial snapshot. App bindings persist across js calls. Batch deterministic actions and the resulting getAXState() in one js call, then verify the returned UI state. Use nodeRepl.write(value) for additional text and await nodeRepl.emitImage(image) for additional images. Ask the user before destructive or externally visible actions such as sending, deleting, or purchasing.`;
+On the first call after startup or js_reset, bind the requested running app with await cua.getApp("Example App"), or call await cua.getState() only when an app inventory is actually needed. For explicitly requested Linux/Windows application startup, use await cua.computer.launch_app({app: executableNameOrPath}) and then bind/observe the app before input. macOS getApp keeps its existing launch behavior. On macOS, use getApp(name, { initialState: false }) followed by app.query({ text, role }) for targeted lookup without an initial snapshot. App bindings persist across js calls. Batch deterministic actions and the resulting getAXState() in one js call, then verify the returned UI state. Use nodeRepl.write(value) for additional text and await nodeRepl.emitImage(image) for additional images. Ask the user before destructive or externally visible actions such as sending, deleting, or purchasing.`;
 
 const JS_DESCRIPTION = `Run JavaScript in a persistent Node.js REPL with top-level await and an initialized asynchronous cua API for Open Computer Use. Use this for all desktop interactions. Bind an app with let app = await cua.getApp("Example App"); then call await app.click(...), await app.typeText(...), and await app.getAXState(). Top-level bindings persist until js_reset, so prefer top-level var for names that may be assigned again. Batch deterministic actions and the resulting state read in one call to reduce round trips. Use nodeRepl.write(value) for extra text and await nodeRepl.emitImage(image) for extra images. If timeout_ms is omitted, execution times out after 30000 ms.`;
 
@@ -127,6 +127,7 @@ const COMPUTER_USE_GUIDANCE = `## Open Computer Use JavaScript API
 The runtime exposes an asynchronous app-bound API:
 
 - \`await cua.getState({ emit? })\`: list apps and configured browsers with tabs; inventory failures are reported in errors.
+- \`cua.computer.target\`: local executor platform (mac, linux or windows). Linux/Windows expose \`await cua.computer.launch_app({app})\` for one literal executable name/path; no command-line arguments or shell expansion. A successful start persists after reset/turn end; use getApp and observe readiness before acting. macOS launches through getApp.
 - \`await cua.listApps({ emit? })\`: list current apps.
 - CDP browser: configure OPEN_COMPUTER_USE_CDP_URL, then use cua.listBrowsers(), cua.listTabs(), cua.getBrowser({id:"cdp"}), cua.getTab(id or {url}), and cua.createBrowserTab("cdp", url). Binding a tab emits provider documentation and initial AX state.
 - \`await cua.getApp(nameOrBundleID, { initialState? })\`: bind an app; initialState defaults to true. Use false for a lightweight binding before query.
@@ -484,7 +485,7 @@ function optionsToKeyArgs(options = {},held=false) {
   return args;
 }
 
-export function createCuaApi(native, activeOutput, onDispose, {tabRequest}={}) {
+export function createCuaApi(native, activeOutput, onDispose, {tabRequest,platform=process.platform}={}) {
   let docsEmitted = false;
   const observations = new Map();
   if(native.endSession) onDispose?.(()=>native.endSession());
@@ -645,8 +646,17 @@ export function createCuaApi(native, activeOutput, onDispose, {tabRequest}={}) {
     viewportRequest: native.browserHost ? args => native.request("browser/viewport",args) : undefined,
     onDispose,
   });
+  const target={darwin:'mac',linux:'linux',win32:'windows'}[platform];
+  const computer=Object.freeze({target,...(['linux','windows'].includes(target)?{async launch_app(input){
+    if(!isPlainObject(input)||Object.keys(input).some(key=>key!=='app')||typeof input.app!=='string'||!input.app.trim()||Buffer.byteLength(input.app)>4096||/[\0\r\n]/u.test(input.app))throw Error('launch_app requires {app: executable name or path} (max 4096 bytes)');
+    await emitDocs();
+    const tool=(await native.request('tools/list',{}))?.tools?.find(tool=>tool.name==='launch_app');
+    if(!tool?.inputSchema?.properties?.app)throw Error('Native runtime does not advertise explicit application launch');
+    await call('launch_app',{app:input.app});
+  }}:{})});
   const api = {
     ...browserApi,
+    computer,
     async getState(options = {}) {
       await emitDocs();
       const [appsResult, browsersResult] = await Promise.allSettled([

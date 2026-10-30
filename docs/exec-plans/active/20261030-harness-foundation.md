@@ -233,3 +233,24 @@ headful/platform/crash/external workflows and the wider goal remain open.
 
 All 137 Node checks passed. Native-free CLI/MCP and both session modes' read-only
 evaluation regression (including renderer-crash cleanup) passed on Chrome 158.
+
+## Native platform and explicit application launch
+
+Exposed the local executor's computer.target and the Linux/Windows optional
+computer.launch_app({app}) interface. macOS keeps getApp's existing launch path.
+Dispatch to an advertised native launch_app tool, validate before launch, pass a
+single literal executable/name without a shell or argument parsing, detach its
+session/console and discard inherited protocol stdio. Accepted application
+processes must survive native peer/REPL cleanup. Preserve existing observation
+behavior and ship updated native schemas/docs. Verify Linux through an owned
+isolated desktop; compile/check Windows and record the limits of its evidence.
+Window-ID binding, paste/input and other native/platform parity remain open.
+
+All 139 Node checks passed. The native Linux Go suite passed in an arm64 Ubuntu
+VM. A private D-Bus/Xvfb GTK fixture verified source/Worker startup, literal
+spaces/Unicode/$() paths, protocol stdio isolation, independent Linux session,
+AX readiness and survival through turn/native replacement/reset/final close.
+Windows common Go checks passed on macOS; both Windows architectures compiled.
+Real Windows desktop/job/console cases, desktop/AppUserModelID resolution, remote
+native identity, window-ID targeting and broader input/platform work remain open.
+See [native lifecycle](../../native-lifecycle.md). Keep the full goal active.
