@@ -69,6 +69,9 @@ and clips target polygons through each frame viewport before selecting a visible
 point. Native hits and exact frame-local hits recheck before each press. Mirrored
 and CSS perspective frames are supported; folded, singular or horizon-crossing
 transforms and covered targets fail explicitly.
+Root indexed clicks use this same native polygon and document-bound hit path,
+including nested closed-shadow targets. External overlays refuse input; fresh
+observations recover after the overlay is removed.
 Held input still uses the host ownership and cancellation/release path. Native
 input can have admitted effects before cancellation; inspect current state.
 

@@ -123,20 +123,26 @@ test('AX click preparation owns scrolling and cancellation before any press',asy
   const geometry={loaderId:'old',viewport:{clientWidth:320,clientHeight:240,pageY:0},contentSize:{width:320,height:2000},viewportRevision:0};
   const input=new BrowserInputs(()=>endpoint,async()=>({close(){},async send(method,args){
    calls.push({method,args});
-   if(method==='Page.getFrameTree')return {frameTree:{frame:{id:'root',loaderId:mode==='navigation'&&scrolled?'new':'old'}}};
-   if(method==='Page.getLayoutMetrics')return {cssVisualViewport:{...geometry.viewport,pageY:scrolled?800:0},cssContentSize:geometry.contentSize};
+   if(method==='Page.getFrameTree')return {frameTree:{frame:{id:'root',loaderId:mode==='navigation'&&scrolled?'new':'old',url:endpoint}}};
+   if(method==='Target.getTargets')return {targetInfos:[]};
+   if(method==='Runtime.evaluate')return {result:{value:true}};
+   if(method==='DOM.getBoxModel')return {model:{border:[10,20,30,20,30,40,10,40]}};
+   if(method==='DOM.getNodeForLocation')return {frameId:'root',backendNodeId:9};
+   if(method==='DOM.describeNode')return {node:{nodeName:'BUTTON'}};
+   if(method==='Page.getLayoutMetrics')return {cssLayoutViewport:{clientWidth:320,clientHeight:240,pageX:0,pageY:800},cssVisualViewport:{...geometry.viewport,pageY:scrolled?800:0},cssContentSize:geometry.contentSize};
    if(method==='Accessibility.getPartialAXTree')return {nodes:[{backendDOMNodeId:9,role:{value:'button'},name:{value:mode==='changed'||mode==='hover-name'&&hovered?'Changed':'Target'}}]};
    if(method==='DOM.scrollIntoViewIfNeeded'){scrolled=true;ready();await gate;}
-   if(method==='Page.createIsolatedWorld'){assert.deepEqual(args,{frameId:'root',worldName:'ocu-pointer'});return mode==='world-missing'?{}:{executionContextId:17};}
+   if(method==='Page.createIsolatedWorld'){assert.deepEqual(args,{frameId:'root',worldName:'ocu-native-ax'});return mode==='world-missing'?{}:{executionContextId:17};}
    if(method==='DOM.resolveNode'){assert.equal(args.executionContextId,17);return {object:{objectId:'node'}};}
-   if(method==='Runtime.callFunctionOn'){assert.deepEqual(args.arguments,[{value:hovered?{x:20,y:30}:null}]);return mode==='hover-covered'&&hovered?{exceptionDetails:{}}:{result:{value:{x:20,y:30}}};}
+   if(method==='Runtime.callFunctionOn'){return mode==='hover-covered'&&hovered&&args.arguments?{exceptionDetails:{}}:{result:{value:true}};}
    if(method==='Input.dispatchMouseEvent'&&args.type==='mouseMoved')hovered=true;
    return {};
   }}),()=>0);
   input.supported=async()=>{};input.target=async()=>({webSocketDebuggerUrl:'page'});
-  const args={targetId:'tab',element:{backendNodeId:9,role:'button',name:'Target'},geometry};
+  const args={targetId:'tab',element:{backendNodeId:9,role:'button',name:'Target',framePath:[{id:'root',loaderId:'old',url:endpoint}]},geometry};
+  await assert.rejects(input.request(owner,{...args,element:{...args.element,framePath:undefined}}),/Invalid browser element target/);
   const work=input.request(owner,args);work.catch(()=>{});
-  if(mode==='changed')await assert.rejects(work,/Element changed/);
+  if(mode==='changed'||mode==='world-missing')await assert.rejects(work,mode==='changed'?/Element changed/:/world unavailable/);
   else {
    await started;
    assert.equal(input.leases.get(endpoint).owner,owner);
@@ -146,8 +152,8 @@ test('AX click preparation owns scrolling and cancellation before any press',asy
    if(mode==='normal')await work;else await assert.rejects(work,mode.includes('cancel')?/canceled/:mode==='world-missing'?/isolated world/:mode==='hover-name'?/changed/:mode==='hover-covered'?/covered/:/document|viewport/);
   }
   assert.equal(calls.filter(call=>call.args?.type==='mousePressed').length,mode==='normal'?1:0);
-  assert.equal(calls.filter(call=>call.method==='DOM.scrollIntoViewIfNeeded').length,mode==='changed'?0:1);
-  assert.equal(calls.filter(call=>call.method==='Runtime.releaseObject').length,mode==='normal'||mode==='hover-covered'?2:mode==='hover-name'?1:0);
+  assert.equal(calls.filter(call=>call.method==='DOM.scrollIntoViewIfNeeded').length,['changed','world-missing'].includes(mode)?0:1);
+  assert.equal(calls.filter(call=>call.method==='Runtime.releaseObject').length,calls.filter(call=>call.method==='DOM.resolveNode').length);
   assert.equal(input.leases.size,0);assert.equal(browserPointerLeases.has(endpoint),false);
  }
 });

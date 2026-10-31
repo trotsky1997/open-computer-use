@@ -2496,3 +2496,29 @@ The final frozen-code Linux source-relocated browser-only install pipeline exits
 successfully, including both geometry/native frame hosts, standalone/managed MCP,
 isolated headful visibility, text/HTML/PNG clipboard with GTK interop, retained
 private profiles, lazy launch and shutdown. Physical desktop/Windows remain open.
+
+
+## Root indexed-pointer geometry and shadow targeting
+
+Reuse the native frame polygon/hit path for root indexed pointer input. Current
+root bounding-box midpoint targeting misses clipped diagonal controls and uses a
+document-only hit test for shadow descendants. Keep exact AX identity, pristine
+world document binding, native/frame-local hit checks and pre-press rechecks.
+Extend the existing owned AX-state controller with a clipped root target, nested
+closed shadow roots, trusted receiver events and overlay no-input/recovery proof.
+Secondary AX action execution still needs an appropriate native transport; the
+current CDP Accessibility domain supplies observation commands.
+
+
+Root pointer payloads now always retain the observed root frame descriptor. The
+native host requires it for indexed pointer input, accepts a one-document path,
+and uses the existing polygon/document/native-hit path. The root-only midpoint
+implementation is deleted; keyboard and screenshot-coordinate paths retain their
+existing contracts. The old runtime fails the owned clipped diagonal fixture.
+Both JS hosts pass source and source-relocated current-code installation on
+macOS/Linux Chrome 158: clipped root, two nested closed shadows, trusted events,
+external cover refusal with no new receiver events, and restored operation.
+Node: 217/217 macOS, 216/217 Linux with one platform-only skip; the focused input
+suite passes the added missing-document-path rejection. macOS generic browser
+regression passes; seven production modules match both packed runtime copies.
+Broader provider/IME/shadow/zoom/DPI and atomic final-dispatch proof remain open.

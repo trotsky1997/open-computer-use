@@ -1050,7 +1050,7 @@ export function createBrowserApi(activeOutput, environment = process.env, {runti
           if(!position) {
             const node=elements.get(String(index));
             if(!node || !documentId)throw new Error("Unknown or stale element index; read AX state again");
-            elementTarget={backendNodeId:node.backendDOMNodeId,role:node.role?.value,name:node.name?.value,...(node.framePath.length>1?{framePath:node.framePath}:{})};
+            elementTarget={backendNodeId:node.backendDOMNodeId,role:node.role?.value,name:node.name?.value,framePath:node.framePath};
           }
           const current=await geometry(send);
           if(elementTarget && current.loaderId!==observedLoaderId)throw new Error("Page navigated; read AX state again");

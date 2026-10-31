@@ -139,3 +139,12 @@ Linux 移走源码后的最终安装模块已逐字节核对，两个宿主均�
 
 冻结代码的完整 Linux 安装回归通过，涵盖 standalone/managed MCP、隔离 headful、
 text/HTML/PNG 剪贴板与 GTK 互通、profile 恢复、按需启动及关闭清理。
+
+
+根文档索引点击现复用原生框架多边形/文档绑定/命中路径，删除原有 bounding-box
+中心分支。macOS/Linux Chrome 158 源码及移走源码后的当前安装版双宿主均覆盖
+裁剪斜向目标、两层 closed shadow 控件的可信输入、外层遮挡无输入拒绝及恢复；
+AX 差分与初始弹窗输出归属检查仍通过。Node 为 217/217、216/217（一个平台专属
+跳过）；输入专项覆盖缺失文档路径拒绝和取消/hover/身份变化，常规 macOS 浏览器
+回归通过。七个模块在 npm 两份运行时中逐字节一致。广泛 Shadow/provider/IME、
+混合 zoom/DPI、原子最终派发、物理桌面/Windows 与 secondary AX 传输继续待补。

@@ -3179,3 +3179,28 @@ The final frozen-code Linux source-relocated browser-only install pipeline exits
 successfully, including both geometry/native frame hosts, standalone/managed MCP,
 isolated headful visibility, text/HTML/PNG clipboard with GTK interop, retained
 private profiles, lazy launch and shutdown. Physical desktop/Windows remain open.
+
+
+## Root indexed-pointer geometry and closed shadow roots
+
+Root indexed click now carries its observed native root frame descriptor and
+uses the existing frame polygon/document/native-hit path. Removed the root-only
+bounding-box midpoint branch, which failed a clipped diagonal control, and its
+document-only hit check, which could not address shadow descendants. The native
+pointer boundary requires a document path and accepts the root-only descriptor;
+keyboard and screenshot-coordinate paths retain their existing contracts.
+
+The existing owned AX controller reproduces the old clipped-root failure and now
+passes both JS hosts in source and source-relocated current-runtime installations
+on macOS/Linux Chrome 158. It proves trusted clicks on the clipped control and
+two nested closed shadow roots, external cover refusal without receiver input,
+and restored operation. AX semantic/diff and initial-dialog output-owner checks
+also pass. Node: 217/217 macOS, 216/217 Linux with one platform-only skip; focused
+input validation covers missing document paths and cancellation/hover/identity
+refusal. macOS generic browser regression passes. Seven production modules match
+both packed runtime copies. No dependency, release or CI work.
+
+Secondary AX actions still require an appropriate native action transport; the
+current CDP Accessibility surface provides observation commands. Broad shadow/
+provider/IME, mixed zoom/DPI, atomic final dispatch, physical desktop and Windows
+remain open; full harness parity stays active.

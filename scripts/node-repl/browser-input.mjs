@@ -126,39 +126,6 @@ export class BrowserInputs {
     // shortcut: focus can change after this check; strict binding needs a browser-side atomic target dispatch.
   }
   async elementPoint(record,element,position) {
-    if(record.framePath)return this.frameElementPoint(record,element,position);
-    const send=async(method,params={})=>{this.check(record);const result=await record.connection.send(method,params,0);this.check(record);return result;};
-    await this.elementNode(record,element);
-    await this.guard(record);
-    // Rechecks keep the admitted point; scrolling again would silently retarget.
-    if(!position)await send("DOM.scrollIntoViewIfNeeded",{backendNodeId:element.backendNodeId});
-    const frame=(await send("Page.getFrameTree")).frameTree.frame,loaderId=frame.loaderId;
-    if(!position) {
-      const metrics=await send("Page.getLayoutMetrics"),viewportRevision=await this.revision();
-      this.check(record);
-      if(loaderId!==record.geometry.loaderId || viewportRevision!==record.geometry.viewportRevision || !['clientWidth','clientHeight','scale','zoom','offsetX','offsetY'].every(key=>metrics.cssVisualViewport[key]===record.geometry.viewport[key]))throw new Error("Browser pointer document or viewport changed during preparation");
-      record.geometry={loaderId,viewport:metrics.cssVisualViewport,contentSize:metrics.cssContentSize,viewportRevision};
-    }
-    const {executionContextId}=await send("Page.createIsolatedWorld",{frameId:frame.id,worldName:"ocu-pointer"});
-    if(!Number.isInteger(executionContextId) || executionContextId<=0)throw new Error("Browser pointer isolated world unavailable");
-    const {object}=await send("DOM.resolveNode",{backendNodeId:element.backendNodeId,executionContextId});
-    try {
-      const result=await send("Runtime.callFunctionOn",{objectId:object.objectId,returnByValue:true,arguments:[{value:position ?? null}],functionDeclaration:`function(position) {
-        if(this.ownerDocument!==document)throw new Error("Element outside the main document");
-        const r=this.getBoundingClientRect();
-        const x=position ? position.x : Math.max(0,r.left)+(Math.min(innerWidth,r.right)-Math.max(0,r.left))/2;
-        const y=position ? position.y : Math.max(0,r.top)+(Math.min(innerHeight,r.bottom)-Math.max(0,r.top))/2;
-        const hit=this.ownerDocument.elementFromPoint(x,y);
-        if(!this.isConnected || r.width<=0 || r.height<=0 || !(hit===this || this.contains(hit)))throw new Error("Element is covered or not visible");
-        return {x,y};
-      }`});
-      if(result.exceptionDetails)throw new Error("Element is covered or not visible in the main document; read state again");
-      const {x,y}=result.result.value ?? {};
-      if(![x,y].every(Number.isFinite) || x<0 || y<0 || x>=record.geometry.viewport.clientWidth || y>=record.geometry.viewport.clientHeight)throw new Error("Invalid browser input position");
-      return {x,y};
-    } finally {await send("Runtime.releaseObject",{objectId:object.objectId});}
-  }
-  async frameElementPoint(record,element,position) {
     await this.elementNode(record,element);
     const send=record.connection.send,scoped=record.frames.match(record.framePath),frameId=record.framePath.at(-1).id;
     if(!position){
@@ -211,8 +178,8 @@ export class BrowserInputs {
     if(this.closedOwners.has(owner)) throw new Error("Browser input session closed");
     if(active.has(endpoint)) throw new Error("A native input action already owns this browser");
     const {x,y}=args.position ?? {},viewport=args.geometry?.viewport;
-    if(args.element!==undefined && (args.action==='drag' || args.position!==undefined || args.backendNodeId!==undefined || !args.geometry?.loaderId || !Number.isInteger(args.element?.backendNodeId) || args.element.backendNodeId<=0 || !['role','name'].every(key=>args.element[key]===undefined || typeof args.element[key]==='string')))throw new Error("Invalid browser element target");
-    if(args.element?.framePath!==undefined && (!Array.isArray(args.element.framePath)||args.element.framePath.length<2||args.element.framePath.some(frame=>!frame||!['id','loaderId','url'].every(key=>typeof frame[key]==='string'&&frame[key]))))throw Error("Invalid browser frame target");
+    if(args.element!==undefined && (!keyboard&&!args.element?.framePath || args.action==='drag' || args.position!==undefined || args.backendNodeId!==undefined || !args.geometry?.loaderId || !Number.isInteger(args.element?.backendNodeId) || args.element.backendNodeId<=0 || !['role','name'].every(key=>args.element[key]===undefined || typeof args.element[key]==='string')))throw new Error("Invalid browser element target");
+    if(args.element?.framePath!==undefined && (!Array.isArray(args.element.framePath)||args.element.framePath.length<1||args.element.framePath.some(frame=>!frame||!['id','loaderId','url'].every(key=>typeof frame[key]==='string'&&frame[key]))))throw Error("Invalid browser frame target");
     if(!keyboard && args.element===undefined && (![x,y].every(Number.isFinite) || x<0 || y<0 || x>=viewport?.clientWidth || y>=viewport?.clientHeight || !viewport)) throw new Error("Invalid browser input position");
     if(args.action==='drag' && (![args.end?.x,args.end?.y].every(Number.isFinite) || args.end.x<0 || args.end.y<0 || args.end.x>=viewport.clientWidth || args.end.y>=viewport.clientHeight)) throw new Error("Invalid browser drag destination");
     if(keyboard && (!args.geometry?.loaderId || args.backendNodeId!==undefined)) throw new Error("Invalid browser key target");

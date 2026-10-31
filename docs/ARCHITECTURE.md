@@ -240,9 +240,14 @@ with parent/owner proof, including OOP targets missing from root frame trees.
 Frame AX trees join under native iframe owners; monotonic indices are stable for
 live frame/loader/AX identities and never alias a different node in that binding.
 Captured ancestry is revalidated before native input and after isolated-world
-node resolution. Editing, focus, selection and scrolling use the owning agent;
-indexed pointer polygons cross projective OOP boundaries, clip through same-
-process owner quads and each agent viewport, and verify native/frame-local hits. Root and remote widget rendering barriers precede presses. The same frame
+node resolution. Editing, focus, selection and scrolling use the owning agent.
+Root and child indexed pointer input share the exact native frame/document
+binding and hit path; root-only bounding-box targeting is removed. Native hits
+and isolated-root hit checks cover nested closed shadow descendants and refuse
+external overlays. Indexed pointer polygons cross projective OOP boundaries,
+clip through same-process owner quads and each agent viewport, and verify
+native/frame-local hits. Root and remote widget rendering barriers precede
+presses. The same frame
 flattening/hit-test code serves drops, preserving integer drop routing while
 indexed pointer checks retain subpixel precision. Convex native content quads
 support perspective and mirrors; folded, singular and horizon-crossing transforms

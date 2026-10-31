@@ -12,6 +12,8 @@ const server=createServer((_request,response)=>{response.setHeader('Content-Type
 async function run(session,code){const result=await session.run(code,30000);assert.equal(result.isError,false,result.content.at(-1)?.text);return result;}
 function value(result){return JSON.parse(result.content.at(-1).text);}
 function state(result){return result.content.findLast(item=>item.type==='text' && /^Accessibility state|^\s*\[-?\d+\]/m.test(item.text))?.text;}
+async function rootEval(session,id,expression){const entry=[...session.browserDialogs.targets.values()].find(entry=>entry.targetId===id);assert.ok(entry);const result=await entry.connection.send('Runtime.evaluate',{expression,returnByValue:true});assert.ok(!result.exceptionDetails,JSON.stringify(result.exceptionDetails));return result.result.value;}
+async function index(session,name){const text=value(await run(session,'nodeRepl.write(JSON.stringify(await tab.getAXState({emit:false})));')),line=text.split('\n').find(line=>line.includes(' checkbox '+JSON.stringify(name)));assert.ok(line,text);return Number(line.match(/\[(\d+)\]/)[1]);}
 try{
  let executable=path.resolve(binary);if(process.platform==='linux'){const quoted="'"+executable.replaceAll("'","'\\''")+"'";executable=path.join(scratch,'owned-chrome');await writeFile(executable,`#!/bin/sh\nexec ${quoted} --no-sandbox "$@"\n`,{mode:0o700});}
  process.env.OPEN_COMPUTER_USE_BROWSER_EXECUTABLE=executable;process.env.OPEN_COMPUTER_USE_BROWSER_MODE='headless';delete process.env.OPEN_COMPUTER_USE_CDP_URL;
@@ -64,6 +66,19 @@ try{
      console.log(`${Session.name} PASS initial AX delayed-native-reply/dialog response across JS output owners`);
     }finally{globalThis.WebSocket=WebSocket;release?.();}
    }
+   const id=value(await run(session,'nodeRepl.write(JSON.stringify(tab.id));'));
+   await rootEval(session,id,`{const log=document.createElement('output');log.id='owned-point-events';document.body.append(log);const events=[];
+    const input=(parent,name,style)=>{const node=document.createElement('input');node.type='checkbox';node.setAttribute('aria-label',name);node.style=style;for(const type of ['mousedown','click'])node.addEventListener(type,event=>{events.push({type,trusted:event.isTrusted,name,checked:node.checked});log.textContent=JSON.stringify(events);});parent.append(node);return node;};
+    input(document.body,'Clipped root','position:fixed;left:-50px;top:50px;width:141.421356px;height:14.142136px;margin:0;padding:0;border:0;transform-origin:0 0;transform:rotate(-45deg)');
+    const host=document.createElement('div');document.body.append(host);const inner=document.createElement('div');host.attachShadow({mode:'closed'}).append(inner);input(inner.attachShadow({mode:'closed'}),'Closed root','position:fixed;left:20px;top:100px;width:80px;height:40px;margin:0');
+   }`);
+   const clipped=await index(session,'Clipped root');await run(session,`await tab.click(${clipped});`);
+   const closed=await index(session,'Closed root');await run(session,`await tab.click(${closed});`);
+   const events=JSON.parse(await rootEval(session,id,"document.getElementById('owned-point-events').textContent"));for(const name of ['Clipped root','Closed root']){assert.ok(events.some(e=>e.name===name&&e.type==='mousedown'&&e.trusted));assert.ok(events.some(e=>e.name===name&&e.type==='click'&&e.trusted&&e.checked));}
+   const covered=await index(session,'Closed root');await rootEval(session,id,`{const cover=document.createElement('div');cover.id='owned-point-cover';cover.style='position:fixed;z-index:999999;left:20px;top:100px;width:80px;height:40px;background:red';document.body.append(cover);}`);
+   const refused=await session.run(`await tab.click(${covered});`);assert.equal(refused.isError,true);assert.match(refused.content.at(-1).text,/covered|different frame/i);assert.deepEqual(JSON.parse(await rootEval(session,id,"document.getElementById('owned-point-events').textContent")),events);
+   await rootEval(session,id,"document.getElementById('owned-point-cover').remove()");const recovered=await index(session,'Closed root');await run(session,`await tab.click(${recovered});`);assert.equal(JSON.parse(await rootEval(session,id,"document.getElementById('owned-point-events').textContent")).at(-1).checked,false);
+   console.log(`${Session.name} PASS clipped root polygon, nested closed-shadow native trusted input, cover refusal without input and recovery`);
    console.log(`${Session.name} PASS AX semantic states, compact diffs/full values, unseen reads, screenshots, failed reads/actions, invalid options and navigation baselines`);
   }finally{await session.close();}
  }
