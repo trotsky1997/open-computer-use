@@ -158,12 +158,12 @@ opaque names and raw string results. Temporary reference tabs were closed.
 
 A disposable testing profile used Chrome's test keychain flag because the new
 browser's real keychain read blocked; process-stack
-sampling identified that wait. No normal profile/keychain settings were changed. All 166 Node checks pass on macOS; Linux passes 165 with the macOS-only virtual-display check skipped;
+sampling identified that wait. No normal profile/keychain settings were changed. All 169 Node checks pass on macOS; Linux passes 168 with the macOS-only virtual-display check skipped;
 native-free CLI/MCP and both sessions’ read-only evaluation regressions also
 passed on Chrome 158, including renderer-crash cleanup.
 The test runtime came from the official Chrome for Testing channel metadata.
 Browser-wide discovery of unbound tabs, real user-interaction/consent dialogs, headful and
-Windows behavior, whole-browser process death and broader external-site workflows remain
+Windows behavior, unidentified/remote browser process death and broader external-site workflows remain
 unverified. Full transport/claims/native desktop parity remains an active goal.
 
 Turn-owned discovery also passes both sessions on Chrome 158: initial tools
@@ -215,3 +215,48 @@ input/navigation/file-chooser and dialog controllers also pass on both platforms
 Chrome 156 still passes explicit unsupported-WebMCP behavior. Native disconnect
 cleanup waits for its close callback with a bound and retains failed ownership
 for retry; a focused check withholds that callback to verify the fence.
+
+## Confirmed local browser exit
+
+A loopback browser can supply local exit evidence through its native command
+line and process snapshot. The host matches its explicit profile's
+DevToolsActivePort port/browser route, verifies that the reported browser PID
+owns that exact listening socket, and matches its loaded executable with the
+native command line. This requires an absolute executable/profile, available
+native command-line metadata and macOS/Linux lsof. Missing or mismatched evidence
+leaves cancellation unconfirmed. The helper sends only process-status probes.
+
+After connection loss, WebMCP waits within its existing cancellation bound for
+every captured process to exit. Confirmed exit releases the destroyed caller
+with an explicit browser-exited error. A living browser retains unacknowledged
+invocations and failed-cleanup ownership. Tab metadata uses confirmed browser-PID
+exit to retire dead instances and uncertain creations. Rebinding a changed
+browser route with unresolved tab ownership fails explicitly. Fresh-browser
+recovery uses reset and newly fetched handles; accepted external effects still
+require inspection before retrying.
+
+The owned controller launches disposable Chrome 158 profiles and tests main/OOP
+reads after a completed native DOM read, main/OOP waiting tools, SIGKILL, preserved
+JS bindings until reset, cleanup and fresh-browser reads/tools. It also drops a
+collection socket while Chrome stays alive: the provider receives no abort,
+ownership remains, and cleanup refuses an unconfirmed release. Actual process
+exit then permits retrying cleanup. Fresh documents confirm no replay. Both JS
+hosts pass all five scenarios on macOS and Ubuntu arm64. The current native-free
+CLI/npm checks include the helper in staged runtimes.
+
+```sh
+# Set OCU_TEST_CHROME_EXECUTABLE to a Chrome 158+ executable.
+node scripts/run-browser-exit-smoke.mjs
+```
+
+Unidentified/default profiles, remote/proxied process identity, Windows/headful
+exit, other in-flight capability types and recovery while the original browser
+stays alive remain open. The controller kills only the Chrome children it starts.
+
+The combined Linux regression has a timing-dependent fixture registration
+failure: a current frame's native registration Promise can remain pending past
+the five-second readiness bound. A baseline-only 50 ms scheduling perturbation
+also reproduced it. The owned exit controller passes independently; the combined
+Linux WebMCP regression remains open. The smoke controller includes target/frame
+diagnostics and retains its readiness assertion. See the active foundation plan
+for the failed controls and next investigation.

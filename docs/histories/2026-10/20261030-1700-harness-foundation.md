@@ -2027,3 +2027,63 @@ client can itself pause new OOP targets. Independent external debugger
 interference, Windows/headful, whole-browser death and broader provider
 recovery remain open. Owned profiles/processes are disposable. No CI or release
 was added. Full harness parity remains active.
+
+## Confirmed local browser exit recovery
+
+Owned Chrome SIGKILL reproduced dead-endpoint failures from retained tab
+ownership. Added a shared optional local identity snapshot: loopback endpoint,
+native command line, absolute executable/profile, matching DevToolsActivePort
+port/browser route, actual listener PID, matching loaded executable and native
+process IDs. lsof is bounded and read-only; PID checks use signal zero. Missing,
+remote or mismatched evidence leaves the old uncertainty fence in place.
+
+Tab cleanup retires dead local instances and uncertain creation markers only
+with browser-PID exit evidence. Reconnection fences a changed browser route with
+unresolved metadata. WebMCP releases a lost invocation only after every captured
+process exits within its cancellation budget, and reports browser exit explicitly.
+A live-process disconnect retains cancellation failure and ownership for retry.
+The snapshot precedes final frame-crash reconciliation, preserving atomic
+publication of healthy tools. CLI readiness, installer, CLI fixtures and both npm
+copy lists include the new module; no dependency, CI or registry release is added.
+
+All 169 Node checks pass on macOS; Linux passes 168 with one macOS-only skip.
+Focused checks cover actual listener/executable matching, foreign endpoints,
+instance mismatch, invalid PIDs, browser-vs-renderer exit, uncertain creation,
+changed-instance fencing and explicit disconnected-call failure. The owned
+Chrome 158 controller passes both JS hosts on macOS and Ubuntu arm64: completed
+native main/OOP reads, waiting main/OOP tools, SIGKILL, bounded failure, unrelated
+JS-binding survival, reset cleanup, fresh-browser reads/tools and no replay.
+A separate socket-drop scenario keeps Chrome alive, verifies no provider abort,
+retains the active call and rejected cleanup, then confirms physical exit permits
+cleanup retry. No normal profile is used. The read-only evaluator is unchanged.
+
+Unidentified/default profiles, remote/proxied identity, live-browser reconnect
+cancellation, Windows/headful and other active capability types remain open.
+Full harness parity remains active.
+
+Validation follow-up: existing macOS WebMCP/read/input controllers and Chrome
+156 unsupported-WebMCP checks pass. Installed standalone MCP checks pass on both
+systems; Linux installed browser/input/QuickJS checks also pass. The macOS
+installer run omitted its live-browser phase.
+
+The combined Linux WebMCP controller still has an unresolved native fixture
+registration timeout. The failing frame belongs to the active document and its
+registration Promise remains pending. Baseline commit 46b4ecb also reproduces the
+same readiness timeout when only 50 ms waits are inserted at the new probe
+positions; the unchanged baseline passed. Per-context waits, releasing the
+fixture's Playwright connection, debugger-start release, background scheduling
+flags and activating the page did not resolve it. Those experiments stay outside
+production code. The controller now reports the target/frame tree on failure;
+its readiness assertion and five-second bound remain. Root cause is open, and
+this slice does not claim a green combined Linux WebMCP regression. Next work is
+a minimal registration-timing reproduction and fixture/harness interaction
+isolation. Full harness parity remains active.
+
+The Linux read-only evaluation controller passes both hosts. The generic browser
+controller times out in Page.captureScreenshot after the read/crash controller
+and in a fresh browser, with and without the WebMCP launch flag. Unchanged
+baseline 46b4ecb reproduces the same screenshot timeout in a fresh browser.
+This additional regression remains open alongside fixture registration timing;
+the exit controller's passing evidence is scoped to its pending reads/tools and
+fresh-browser read/tool recovery, without screenshots. Raw failed controls and
+launchers were retained outside the source checkout for the next investigation.

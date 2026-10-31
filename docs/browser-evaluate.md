@@ -104,3 +104,10 @@ connections without pausing newly created OOP targets. This fixes their observed
 interference with fresh Playwright navigation/load waits. The evaluation
 cancellation implementation is unchanged. Owned macOS/Linux Chrome 158 runs pass
 both JS hosts, including nested child reads after each navigation.
+
+The browser-exit controller also kills an owned Chrome process during pending
+main-frame and OOP-frame evaluations after an actual native DOM read completes.
+Both hosts reject the pending read, preserve unrelated JS bindings until reset,
+and recover reads and fresh tools against a new browser on macOS/Linux. This
+adds whole-process evidence to the existing renderer-only checks; the read-only
+evaluator implementation is unchanged.

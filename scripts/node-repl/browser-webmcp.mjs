@@ -1,3 +1,4 @@
+import {browserExitProof} from './browser-process.mjs';
 import {randomUUID} from 'node:crypto';
 import {EventEmitter} from 'node:events';
 import {bounded} from './browser-assets.mjs';
@@ -211,7 +212,7 @@ export class BrowserWebMcp {
      for(const info of targets.values())if(info.parentFrameId===frameId)pending.push({tree:{frame:{id:info.targetId,url:info.url}},session:nativeSession});
     }catch(error){check();if(next.main)throw error;unavailableFrames.push({frameId,url:tree.frame.url,status:'unavailable',error:String(error?.message??error).slice(0,512)});}
    }
-   check();
+   entry.exitProof=await browserExitProof(entry.endpoint,webSocketDebuggerUrl,browserSession.send);check();
    for(const frame of frames)if(frame.watcher.crashed&&!unavailableFrames.some(item=>item.frameId===frame.frameId))unavailableFrames.push({frameId:frame.frameId,url:frame.url,status:'unavailable',error:'Native renderer crashed'});
    const tools=metadata.filter(tool=>!entry.tools.get(tool.name).watcher.crashed);
    for(const [name,record] of entry.tools)if(record.watcher.crashed)entry.tools.delete(name);
@@ -231,6 +232,7 @@ export class BrowserWebMcp {
    if(result!==null)entry.check();return resultBudget(result);
   }catch(error){
    if(!acknowledged)await this.stop(state,active);
+   if(entry.processExited)throw Error('WebMCP browser process exited; inspect state after reconnecting before retrying',{cause:error});
    if(!state.closed&&!entry.crashed&&entry.stale&&active.contextGone&&!entry.pageClosed)return null;
    throw error;
   }
@@ -239,14 +241,19 @@ export class BrowserWebMcp {
  async stop(state,active){
   if(!active.stop){
    active.stop=(async()=>{
-    if(active.record.watcher?.crashed||(active.entry.rootCrashed&&active.record.root)){active.contextGone=true;active.stopped=true;return;}
+    if(active.entry.processExited||active.record.watcher?.crashed||(active.entry.rootCrashed&&active.record.root)){active.contextGone=true;active.stopped=true;return;}
+    // Socket loss alone cannot confirm that an accepted tool stopped.
+    if(!active.entry.connected&&active.entry.exitProof){
+     const deadline=Date.now()+10000;while(!active.entry.exitProof.processesGone()&&Date.now()<deadline)await new Promise(resolve=>setTimeout(resolve,25));
+     if(active.entry.exitProof.processesGone()){active.entry.processExited=true;active.contextGone=true;active.stopped=true;return;}
+    }
     try{value(await bounded(active.record.session.send('Runtime.callFunctionOn',{objectId:active.record.objectId,functionDeclaration:'function(id){return this.cancel(id)}',arguments:[{value:active.id}],awaitPromise:true,returnByValue:true}),'WebMCP cancellation'));}
     catch(error){
      if(!active.entry.pageClosed){
       let gone=false;
       try{await bounded(active.record.session.send('Runtime.evaluate',{contextId:active.record.contextId,expression:'true',returnByValue:true}),'WebMCP context check');}
       catch(contextError){gone=/Cannot find context with specified id|Execution context was destroyed/iu.test(contextError.message);}
-      if(!gone)throw error;active.contextGone=true;
+      if(!gone){if(active.entry.connected===false)throw Error('WebMCP connection lost; cancellation was not confirmed; inspect state before retrying',{cause:error});throw error;}active.contextGone=true;
      }
     }
     active.stopped=true;

@@ -128,3 +128,14 @@ test('acknowledged close waits for target disappearance without resending close'
  entry.connection.send=async(method,args)=>{if(method==='Target.closeTarget'){closes++;setTimeout(()=>live.delete(args.targetId),35);return {success:true};}return send(method,args);};
  await tabs.end(owner);assert.equal(closes,1);assert.equal(live.has(targetId),false);
 });
+
+test('confirmed browser exit clears uncertain metadata and permits a fresh instance at the same endpoint',async()=>{
+ const f=fixture(),owner={};let gone=false,closed=0;f.entry.creating.set('unconfirmed',owner);f.entry.exitProof={browserGone:()=>gone};f.entry.connection.close=()=>{closed++;};
+ await assert.rejects(f.tabs.end(owner),/outcome.*unknown/);assert.equal(f.entry.creating.size,1);
+ gone=true;await f.tabs.end(owner);assert.equal(f.tabs.browsers.size,0);assert.equal(f.entry.creating.size,0);assert.equal(closed,1);
+ const {createServer}=await import('node:http');const server=createServer((req,res)=>res.end(JSON.stringify({webSocketDebuggerUrl:'ws://owned/new-browser'})));await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+ const endpoint=`http://127.0.0.1:${server.address().port}`,tabs=new BrowserTabs(()=>endpoint,async url=>{assert.equal(url,'ws://owned/new-browser');return {close(){},async send(method){if(method==='Target.getTargets')return {targetInfos:[{targetId:'new-user',type:'page',url:'about:blank'}]};if(method==='Target.setDiscoverTargets')return {};throw Error('Unsupported identity probe');}};});
+ const old={endpoint,ready:Promise.resolve(),error:Error('Socket lost'),browserId:'/devtools/browser/old',exitProof:{browserGone:()=>gone},connection:{close(){closed++;}},tabs:new Map(),lineage:new Map(),creating:new Map([['old-marker',owner]])};gone=false;tabs.browsers.set(endpoint,old);
+ try{await assert.rejects(tabs.browser(endpoint),/instance changed.*unconfirmed/);assert.equal(tabs.browsers.get(endpoint),old);assert.equal(old.creating.size,1);gone=true;const fresh=await tabs.browser(endpoint);assert.notEqual(fresh,old);assert.equal(fresh.creating.size,0);assert.equal(fresh.tabs.size,0);assert.equal(closed,3);tabs.idle(fresh);}
+ finally{server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}
+});

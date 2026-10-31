@@ -39,6 +39,7 @@ async function fixtureReady(page){
   for(const info of targetInfos.filter(info=>selected.has(info.targetId)&&['page','iframe'].includes(info.type))){
    const {sessionId}=await send('Target.attachToTarget',{targetId:info.targetId,flatten:true});
    try{const result=await send('Runtime.evaluate',{expression:`(async function ready(w){try{await w.fixture.ready;}catch(error){if(error.name==='SecurityError')return;throw error;}for(let i=0;i<w.frames.length;i++)await ready(w.frames[i]);})(window)`,awaitPromise:true,returnByValue:true},5000,sessionId);assert.equal(result.exceptionDetails,undefined,JSON.stringify(result.exceptionDetails));}
+   catch(error){throw Error('Owned fixture readiness failed: '+JSON.stringify({root:page.url(),target:info,tree:await send('Page.getFrameTree',{},1000,sessionId).catch(error=>error.message)}),{cause:error});}
    finally{await send('Target.detachFromTarget',{sessionId});}
   }
  });

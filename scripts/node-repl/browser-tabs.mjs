@@ -1,3 +1,4 @@
+import {browserExitProof} from './browser-process.mjs';
 import {randomUUID} from "node:crypto";
 
 export class BrowserTabs {
@@ -47,18 +48,21 @@ export class BrowserTabs {
   }
   async browser(endpoint) {
     let entry=this.browsers.get(endpoint);
+    if(entry?.exitProof?.browserGone()){entry.connection?.close();this.browsers.delete(endpoint);entry=undefined;}
     if(entry?.ready && !entry.error) {await entry.ready;return entry;}
     if(!entry) {entry={endpoint,tabs:new Map(),lineage:new Map(),creating:new Map()};this.browsers.set(endpoint,entry);}
     entry.error=undefined;
     entry.ready=(async()=>{
       const response=await fetch(new URL('/json/version',endpoint),{signal:AbortSignal.timeout(10000),redirect:'error'});
       if(!response.ok) throw new Error(`Tab discovery failed: HTTP ${response.status}`);
-      const {webSocketDebuggerUrl}=await response.json();
+      const {webSocketDebuggerUrl}=await response.json(),browserId=new URL(webSocketDebuggerUrl).pathname;
+      if(entry.browserId&&entry.browserId!==browserId&&(entry.tabs.size||entry.lineage.size||entry.creating.size))throw Error('Browser instance changed; previous tab cleanup is unconfirmed; reconnect the original browser');
+      entry.browserId=browserId;
       let connection;connection=await this.open(webSocketDebuggerUrl,event=>{
         if(event.method==='Target.targetCreated') this.inherit(entry,event.params.targetInfo);
         if(event.method==='Target.targetDestroyed') entry.tabs.delete(event.params.targetId);
       },error=>{if(connection && entry.connection===connection)entry.error=error ?? new Error('Browser tab observer closed');});
-      entry.connection=connection;
+      entry.connection=connection;entry.exitProof=await browserExitProof(endpoint,webSocketDebuggerUrl,connection.send);
       await entry.connection.send('Target.setDiscoverTargets',{discover:true});
       await this.snapshot(entry);
     })().catch(error=>{entry.error=error;entry.connection?.close();throw error;});
@@ -116,6 +120,7 @@ export class BrowserTabs {
       await Promise.allSettled([...state.pending]);
       for(const entry of this.browsers.values()) {
         if(![...entry.lineage.values(),...entry.creating.values()].includes(owner)) continue;
+        if(entry.exitProof?.browserGone()){entry.tabs.clear();entry.lineage.clear();entry.creating.clear();entry.connection?.close();this.browsers.delete(entry.endpoint);continue;}
         await this.browser(entry.endpoint);
         for(let pass=0;pass<16;pass++) {
           await this.snapshot(entry);

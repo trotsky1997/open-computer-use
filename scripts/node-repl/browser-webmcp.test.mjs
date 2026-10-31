@@ -185,3 +185,8 @@ test('native discovery attaches explicitly and routes inventories and notices to
   assert.ok(calls.some(call=>call.method==='Page.createIsolatedWorld'&&call.params.frameId==='same'));
  }finally{holdClose=false;disconnect?.();try{await host.cleanup(owner);}finally{disconnect?.();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}}
 });
+
+test('confirmed captured-process exit releases a disconnected invocation with an explicit failure',async()=>{
+ const f=fixture(()=>Promise.reject(Error('Browser connection closed'))),entry=f.state.collections.get('collection');entry.connected=false;entry.exitProof={processesGone:()=>true};
+ await assert.rejects(f.host.request(f.owner,f.args),/browser process exited/);assert.equal(entry.processExited,true);assert.equal(f.state.active.size,0);await f.host.cleanup(f.owner);assert.equal(f.closed(),1);
+});

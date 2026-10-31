@@ -233,7 +233,7 @@ fi
 if [[ ! -f "${repl_source_root}/open-computer-use-repl.mjs" ]]; then
   repl_source_root="${plugin_source_root}/scripts"
 fi
-for repl_file in open-computer-use-repl.mjs open-computer-use-kernel.mjs ocu-config.mjs browser-cdp.mjs browser-playwright.mjs browser-downloads.mjs browser-clipboard.mjs browser-viewport.mjs browser-drop.mjs browser-input.mjs browser-tabs.mjs browser-debugger.mjs browser-assets.mjs browser-webmcp.mjs browser-content.mjs browser-chrome.mjs browser-evaluate.mjs browser-evaluate-dom.mjs browser-evaluate-worker.mjs runtime-dependencies.mjs; do
+for repl_file in open-computer-use-repl.mjs open-computer-use-kernel.mjs ocu-config.mjs browser-cdp.mjs browser-playwright.mjs browser-downloads.mjs browser-clipboard.mjs browser-viewport.mjs browser-drop.mjs browser-input.mjs browser-tabs.mjs browser-process.mjs browser-debugger.mjs browser-assets.mjs browser-webmcp.mjs browser-content.mjs browser-chrome.mjs browser-evaluate.mjs browser-evaluate-dom.mjs browser-evaluate-worker.mjs runtime-dependencies.mjs; do
   if [[ ! -f "${repl_source_root}/${repl_file}" ]]; then
     echo "Missing JS REPL runtime at ${repl_source_root}/${repl_file}" >&2
     exit 1
@@ -292,6 +292,7 @@ cp "${repl_source_root}/open-computer-use-kernel.mjs" "${plugin_install_root}/sc
 mkdir -p "${plugin_install_root}/node_modules"
 node "${repl_source_root}/runtime-dependencies.mjs" "${repo_root}" "${plugin_install_root}"
 cp "${repl_source_root}/browser-input.mjs" "${plugin_install_root}/scripts/browser-input.mjs"
+cp "${repl_source_root}/browser-process.mjs" "${plugin_install_root}/scripts/browser-process.mjs"
 cp "${repl_source_root}/browser-tabs.mjs" "${plugin_install_root}/scripts/browser-tabs.mjs"
 mkdir -p "${plugin_install_root}/scripts/chrome-browser-extension"
 for bridge_file in manifest.json bridge.html bridge.js background.mjs management.mjs policy.mjs history.mjs options.html options.js; do

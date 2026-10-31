@@ -516,6 +516,15 @@ strings; the ordinary host action/confirmation policy still applies. Installer,
 CLI readiness and npm copy lists include the host module. See [WebMCP](browser-webmcp.md).
 
 
+Local browser exit identity is shared by tab ownership and WebMCP. Native
+command-line/process metadata, the matching DevToolsActivePort instance, socket
+owner PID and loaded executable establish a local snapshot. Tab cleanup may
+retire metadata after its browser PID exits; accepted WebMCP calls require every
+captured process to exit. Socket loss keeps cancellation unconfirmed while those
+processes live. Endpoint reuse with an unresolved different browser route is
+fenced. CLI readiness, installer copies and npm payloads include the helper.
+
+
 ## Native platform and application launch
 
 The JS computer binding reports the local executor platform without starting the
