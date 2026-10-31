@@ -3150,3 +3150,32 @@ source-relocated pipeline, including both hosts, frame-native controller,
 standalone/managed MCP, isolated headful visibility, text/HTML/PNG clipboard and
 GTK interop, private-profile recovery and shutdown. Seven production modules
 match both built npm runtime copies. No physical desktop or Windows claim.
+
+## Projective native frame geometry
+
+Native frame content quads now use a validated projective map and inverse,
+including mirrors. Convex target polygons clip through same-process frame owner
+quads and each remote/root viewport before selecting an interior input point.
+Native and exact frame-local hit checks and document/lease fences stay in place.
+Folded, singular and horizon-crossing geometry refuses; ancestor quads validate
+before Chromium scrolling, which can stall on a zero-width frame.
+
+The existing native frame controller now checks two transformed OOP boundaries,
+perspective plus mirrors, a clipped diagonal target whose bounding-box center
+misses, root occlusion under perspective, and zero-width refusal without receiver
+input followed by restored operation. macOS Chrome 158 relocated current-runtime
+installation passes both JS hosts, including all prior frame/document/reset
+regressions. The exact final runtime also passes both hosts in the Linux
+source-relocated installation, including all new geometry cases. Native drop adds a two-OOP perspective fixture and passes the macOS
+trusted receiver/MIME/file regression. Node: 217/217 macOS; 216/217 Linux with one
+platform-only skip. Seven production modules match both packed npm runtime copies.
+
+Mixed DPI/zoom, broader 3D/provider/crash/IME/shadow cases, atomic final dispatch,
+secondary browser AX actions, physical desktop and Windows remain open. Full
+harness parity remains active. No new dependencies, release or CI work.
+
+
+The final frozen-code Linux source-relocated browser-only install pipeline exits
+successfully, including both geometry/native frame hosts, standalone/managed MCP,
+isolated headful visibility, text/HTML/PNG clipboard with GTK interop, retained
+private profiles, lazy launch and shutdown. Physical desktop/Windows remain open.

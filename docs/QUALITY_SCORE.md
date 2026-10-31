@@ -124,3 +124,18 @@ expectNavigation、URL/load 等待可交还弹窗控制；回调动作保持等�
 冻结代码的完整 Linux 源码移走后安装流程通过，覆盖双宿主 iframe 原生流程、
 standalone/managed MCP、隔离 headful、剪贴板/GTK 互通、profile 恢复与关闭；
 七个生产模块在 npm 的两份运行时中均与源码逐字节一致。
+
+
+原生 iframe 输入现支持经过凸性/非奇异性检查的透视与镜像 content quad，目标
+多边形逐层裁剪后取内部可见点，并保留原生及框架内命中、文档和租约检查。祖先
+几何在 Chromium 滚动前检查，零宽框架直接拒绝。macOS 当前代码安装版双宿主
+覆盖多层透视/镜像、斜向边缘裁剪、透视遮挡和退化拒绝后恢复，原生拖放覆盖两层
+透视跨进程投递。Node 为 217/217、216/217（一个平台专属跳过）；七个生产模块
+在 npm 两份运行时中逐字节一致。混合 DPI/zoom、广泛 3D/provider/crash/IME/
+Shadow、最终原子派发、secondary AX 动作及物理桌面/Windows 证据继续待补。
+
+Linux 移走源码后的最终安装模块已逐字节核对，两个宿主均通过新增几何与既有
+原生框架全流程。
+
+冻结代码的完整 Linux 安装回归通过，涵盖 standalone/managed MCP、隔离 headful、
+text/HTML/PNG 剪贴板与 GTK 互通、profile 恢复、按需启动及关闭清理。

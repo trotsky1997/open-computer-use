@@ -3,20 +3,56 @@ export function flattenFrameTree(tree,parentId) {
  const frame=tree.frame;
  return [{id:frame.id,parentId:frame.parentId??parentId,loaderId:frame.loaderId,url:frame.url+(frame.urlFragment??'')},...(tree.childFrames??[]).flatMap(child=>flattenFrameTree(child,frame.id))];
 }
-function affine(quad) {
- const [x,y]=quad,ax=quad[2]-x,ay=quad[3]-y,bx=quad[6]-x,by=quad[7]-y,det=ax*by-ay*bx;
- if(!quad.every(Number.isFinite)||!det||Math.abs(quad[4]-(quad[2]+quad[6]-x))>.25||Math.abs(quad[5]-(quad[3]+quad[7]-y))>.25)throw Error('Native frame transform unsupported');
- return {x,y,ax,ay,bx,by,det};
+const EPS=1e-10;
+function quadPoints(quad){
+ if(!Array.isArray(quad)||quad.length!==8||!quad.every(Number.isFinite))throw Error('Native frame transform unsupported');
+ const points=Array.from({length:4},(_,i)=>({x:quad[2*i],y:quad[2*i+1]})),scale=Math.max(...points.map(p=>Math.max(Math.abs(p.x-points[0].x),Math.abs(p.y-points[0].y))));
+ if(!scale)throw Error('Native frame transform degenerate');
+ let sign;
+ for(let i=0;i<4;i++){
+  const a=points[i],b=points[(i+1)%4],c=points[(i+2)%4],cross=((b.x-a.x)/scale)*((c.y-b.y)/scale)-((b.y-a.y)/scale)*((c.x-b.x)/scale);
+  if(Math.abs(cross)<=EPS||sign!==undefined&&Math.sign(cross)!==sign)throw Error('Native frame transform degenerate or folded');sign=Math.sign(cross);
+ }
+ return points;
 }
-export function parentFramePoint(quad,viewport,point) {
- const {x,y,ax,ay,bx,by}=affine(quad),u=point.x/viewport.clientWidth,v=point.y/viewport.clientHeight;
- if(![u,v].every(Number.isFinite)||viewport.clientWidth<=0||viewport.clientHeight<=0)throw Error('Invalid native frame viewport');
- return {x:x+u*ax+v*bx,y:y+u*ay+v*by};
+function projective(quad){
+ const points=quadPoints(quad),origin=points[0],scale=Math.max(...points.map(p=>Math.max(Math.abs(p.x-origin.x),Math.abs(p.y-origin.y))));
+ const [,p1,p2,p3]=points.map(p=>({x:(p.x-origin.x)/scale,y:(p.y-origin.y)/scale})),dx=p2.x-p1.x-p3.x,dy=p2.y-p1.y-p3.y;
+ let g=0,h=0;
+ if(Math.max(Math.abs(dx),Math.abs(dy))>EPS){
+  const x1=p1.x-p2.x,x2=p3.x-p2.x,y1=p1.y-p2.y,y2=p3.y-p2.y,det=x1*y2-x2*y1;
+  if(Math.abs(det)<=EPS)throw Error('Native frame transform degenerate');
+  g=(dx*y2-x2*dy)/det;h=(x1*dy-dx*y1)/det;
+ }
+ const a=p1.x*(1+g),b=p3.x*(1+h),d=p1.y*(1+g),e=p3.y*(1+h);
+ if(![a,b,d,e,g,h].every(Number.isFinite)||Math.abs(a*e-b*d)<=EPS||Math.min(1,1+g,1+h,1+g+h)<=EPS)throw Error('Native frame transform crosses a horizon or is degenerate');
+ return {origin,scale,a,b,d,e,g,h};
 }
-export function childFramePoint(quad,viewport,point) {
- const {x,y,ax,ay,bx,by,det}=affine(quad),px=point.x-x,py=point.y-y,u=(px*by-py*bx)/det,v=(ax*py-ay*px)/det;
- if(u<0||u>=1||v<0||v>=1)throw Error('Native point outside frame content');
+function viewportSize(viewport){if(!viewport||![viewport.clientWidth,viewport.clientHeight].every(value=>Number.isFinite(value)&&value>0))throw Error('Invalid native frame viewport');}
+export function parentFramePoint(quad,viewport,point){
+ viewportSize(viewport);const {origin,scale,a,b,d,e,g,h}=projective(quad),u=point.x/viewport.clientWidth,v=point.y/viewport.clientHeight,w=g*u+h*v+1;
+ if(![u,v,w].every(Number.isFinite)||w<=EPS)throw Error('Native point crosses frame horizon');
+ const result={x:origin.x+scale*(a*u+b*v)/w,y:origin.y+scale*(d*u+e*v)/w};
+ if(![result.x,result.y].every(Number.isFinite))throw Error('Invalid native frame point');return result;
+}
+export function childFramePoint(quad,viewport,point){
+ viewportSize(viewport);const {origin,scale,a,b,d,e,g,h}=projective(quad),x=(point.x-origin.x)/scale,y=(point.y-origin.y)/scale,A=a-x*g,B=b-x*h,D=d-y*g,E=e-y*h,det=A*E-B*D,u=(x*E-B*y)/det,v=(A*y-x*D)/det;
+ if(![u,v,det].every(Number.isFinite)||Math.abs(det)<=EPS||u<0||u>=1||v<0||v>=1)throw Error('Native point outside frame content');
  return {x:u*viewport.clientWidth,y:v*viewport.clientHeight};
+}
+export function clipFramePolygon(polygon,quad){
+ const clip=quadPoints(quad),a=clip[0],b=clip[1],c=clip[2],sign=Math.sign((b.x-a.x)*(c.y-b.y)-(b.y-a.y)*(c.x-b.x));
+ if(!polygon.every(p=>Number.isFinite(p.x)&&Number.isFinite(p.y)))throw Error('Invalid native frame polygon');
+ for(let i=0;i<4&&polygon.length;i++){
+  const a=clip[i],b=clip[(i+1)%4],side=p=>sign*((b.x-a.x)*(p.y-a.y)-(b.y-a.y)*(p.x-a.x)),output=[];
+  let previous=polygon.at(-1),before=side(previous);
+  for(const current of polygon){const after=side(current);
+   if((before>=0)!==(after>=0)){const t=before/(before-after);output.push({x:previous.x+t*(current.x-previous.x),y:previous.y+t*(current.y-previous.y)});}
+   if(after>=0)output.push(current);previous=current;before=after;
+  }
+  polygon=output;
+ }
+ return polygon;
 }
 export async function hitBrowserFrame(send,agents,point,timeout=10000,roundChildPoints=false) {
  let sessionId;const visited=new Set();
@@ -90,17 +126,31 @@ export class FrameConnections {
   const result=await this.sendFor(id)('Runtime.evaluate',{contextId:executionContextId,expression:'({clientWidth:innerWidth,clientHeight:innerHeight})',returnByValue:true});
   if(result.exceptionDetails)throw Error('Native frame viewport unavailable');return childFramePoint(model.content,result.result.value,point);
  }
- async pointToRoot(id,point){
-  let frame=this.frames.get(id);if(!frame)throw Error('Native frame detached');frame=this.frames.get(frame.agent);
-  const seen=new Set();
-  while(frame.parentId){
-   if(seen.has(frame.id))throw Error('Native frame ancestry cycle');seen.add(frame.id);
-   const parent=this.frames.get(frame.parentId),send=this.sendFor(parent.id),{backendNodeId}=await send('DOM.getFrameOwner',{frameId:frame.id}),{model}=await send('DOM.getBoxModel',{backendNodeId});
-   const viewport=(await this.sendFor(frame.id)('Page.getLayoutMetrics')).cssLayoutViewport;
-   point=parentFramePoint(model.content,viewport,point);frame=this.frames.get(parent.agent);
+ async validateGeometry(id){
+  for(const frame of this.path(id).slice(1)){
+   const send=this.sendFor(frame.parentId),{backendNodeId}=await send('DOM.getFrameOwner',{frameId:frame.id}),{model}=await send('DOM.getBoxModel',{backendNodeId});
+   projective(model.content);
   }
-  return point;
  }
+ async polygonToRoot(id,polygon,rootViewport){
+  let frame=this.frames.get(id);const seen=new Set();
+  while(frame){
+   if(seen.has(frame.id))throw Error('Native frame ancestry cycle');seen.add(frame.id);
+   if(frame.id===frame.agent){
+    const viewport=frame.id===this.root?rootViewport:(await this.sendFor(frame.id)('Page.getLayoutMetrics')).cssLayoutViewport;viewportSize(viewport);
+    polygon=clipFramePolygon(polygon,[0,0,viewport.clientWidth,0,viewport.clientWidth,viewport.clientHeight,0,viewport.clientHeight]);
+    if(!frame.parentId)return polygon;
+    const parent=this.frames.get(frame.parentId),send=this.sendFor(parent.id),{backendNodeId}=await send('DOM.getFrameOwner',{frameId:frame.id}),{model}=await send('DOM.getBoxModel',{backendNodeId});
+    polygon=polygon.map(point=>parentFramePoint(model.content,viewport,point));frame=parent;
+   }else{
+    const parent=this.frames.get(frame.parentId),send=this.sendFor(parent.id),{backendNodeId}=await send('DOM.getFrameOwner',{frameId:frame.id}),{model}=await send('DOM.getBoxModel',{backendNodeId});
+    polygon=clipFramePolygon(polygon,model.content);frame=parent;
+   }
+   if(!polygon.length)return polygon;
+  }
+  throw Error('Native frame detached');
+ }
+
  hit(point){return hitBrowserFrame(this.send,new Map([[this.root,undefined],...[...this.sessions].filter(([id])=>this.frames.has(id))]),point,this.timeout);}
 }
 

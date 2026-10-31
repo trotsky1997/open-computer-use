@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {FrameConnections,parentFramePoint,childFramePoint,readFrameAX,hitBrowserFrame} from './browser-frames.mjs';
+import {FrameConnections,parentFramePoint,childFramePoint,readFrameAX,hitBrowserFrame,clipFramePolygon} from './browser-frames.mjs';
 
 test('frame agents require native owned ancestry and frame identity; AX IDs stay distinct and stable',async()=>{
  const attached=[];let transient=true,backend=21;
@@ -23,11 +23,24 @@ test('frame agents require native owned ancestry and frame identity; AX IDs stay
  await assert.rejects(readFrameAX(async()=>{throw Error('Permission denied');},ids),/Permission denied/);
 });
 
-test('native frame transforms preserve affine points and reject ambiguous perspective/outside hits',()=>{
- const quad=[10,20,210,60,180,160,-20,120],viewport={clientWidth:400,clientHeight:200},point={x:120,y:80};
- const parent=parentFramePoint(quad,viewport,point),child=childFramePoint(quad,viewport,parent);assert.ok(Math.abs(child.x-point.x)<1e-8);assert.ok(Math.abs(child.y-point.y)<1e-8);
- assert.throws(()=>parentFramePoint([10,20,210,60,190,170,-20,120],viewport,point),/transform unsupported/);
- assert.throws(()=>childFramePoint(quad,viewport,{x:1000,y:1000}),/outside frame/);
+test('native frame transforms preserve affine, mirrored and independently projected perspective points',()=>{
+ const viewport={clientWidth:400,clientHeight:200},point={x:120,y:80};
+ const project=(u,v)=>({x:(200*u+30*v+10)/(1+.4*u+.2*v),y:(10*u+100*v+20)/(1+.4*u+.2*v)});
+ const perspective=[[0,0],[1,0],[1,1],[0,1]].flatMap(([u,v])=>{const p=project(u,v);return [p.x,p.y];});
+ for(const quad of [[10,20,210,60,180,160,-20,120],perspective,perspective.map((x,i)=>i%2?x:200-x)]){
+  const parent=parentFramePoint(quad,viewport,point),child=childFramePoint(quad,viewport,parent);assert.ok(Math.abs(child.x-point.x)<1e-8);assert.ok(Math.abs(child.y-point.y)<1e-8);
+ }
+ const expected=project(.3,.4),actual=parentFramePoint(perspective,viewport,point);assert.ok(Math.abs(actual.x-expected.x)<1e-8);assert.ok(Math.abs(actual.y-expected.y)<1e-8);
+ for(const quad of [[0,0,1,1,0,1,1,0],[0,0,1,0,2,0,3,0],[0,0,NaN,0,1,1,0,1]])assert.throws(()=>parentFramePoint(quad,viewport,point),/degenerate|folded|unsupported/);
+ assert.throws(()=>childFramePoint(perspective,viewport,{x:1000,y:1000}),/outside frame/);
+ assert.throws(()=>childFramePoint(perspective,{clientWidth:0,clientHeight:1},point),/viewport/);
+});
+
+test('frame clipping selects the visible polygon rather than its unclipped bounds',()=>{
+ const polygon=[{x:-5,y:5},{x:5,y:-5},{x:6,y:-4},{x:-4,y:6}],viewport=[0,0,10,0,10,10,0,10],clipped=clipFramePolygon(polygon,viewport);
+ assert.ok(clipped.length>=3);assert.ok(clipped.every(p=>p.x>=0&&p.y>=0&&p.x+p.y<=2+1e-8));
+ const center={x:clipped.reduce((s,p)=>s+p.x,0)/clipped.length,y:clipped.reduce((s,p)=>s+p.y,0)/clipped.length};assert.ok(center.x>0&&center.y>0&&center.x+center.y<2);
+ assert.deepEqual(clipFramePolygon(polygon,[20,20,30,20,30,30,20,30]),[]);
 });
 
 test('nested native hit testing retains subpixel points while drop keeps its integer routing',async()=>{

@@ -2470,3 +2470,29 @@ source-relocated pipeline, including both hosts, frame-native controller,
 standalone/managed MCP, isolated headful visibility, text/HTML/PNG clipboard and
 GTK interop, private-profile recovery and shutdown. Seven production modules
 match both built npm runtime copies. No physical desktop or Windows claim.
+
+## Projective native frame geometry
+
+Replace affine-only frame mapping with a validated projective map of native
+content quads. Preserve mirrored/affine cases and reject folded, singular or
+horizon-crossing geometry. Clip pointer polygons through frame viewports before
+selecting a root point, then retain native/frame-local hit checks and ownership
+fencing. Verify actual trusted receivers under nested CSS perspective, clipping,
+mirroring, occlusion and degeneracy in source and relocated installed runtimes.
+
+
+Implemented projective mapping/inverse and convex target clipping through every
+owner/agent viewport. Native ancestor geometry now validates before scrolling to
+reject zero-width frames without waiting for Chromium readiness. Existing frame
+controller covers nested perspective/mirrors, clipped diagonal input, perspective
+occlusion and collapsed-frame no-input/refusal/recovery. macOS current relocated
+installation passes both hosts; native two-OOP perspective drop passes. Node:
+217/217 macOS, 216/217 Linux with one platform skip. Seven production modules match
+both packed runtime copies. Linux relocated installed controllers also pass both
+hosts with the exact final production modules, including all new geometry cases.
+
+
+The final frozen-code Linux source-relocated browser-only install pipeline exits
+successfully, including both geometry/native frame hosts, standalone/managed MCP,
+isolated headful visibility, text/HTML/PNG clipboard with GTK interop, retained
+private profiles, lazy launch and shutdown. Physical desktop/Windows remain open.

@@ -64,9 +64,11 @@ Indexed click, text/key/paste, editing/selection and scrolling route to the exac
 frame document. Loader/URL/ancestor changes and frame removal refuse stale
 indices; fresh observations recover after process swaps. Editing/selection and
 DOM target checks use isolated native worlds. Pointer preparation waits for
-rendering across the root and remote widgets, maps affine content quads, and
-rechecks native hits and exact frame-local hits before each press. Unsupported
-perspective/degenerate frame transforms and covered targets fail explicitly.
+rendering across the root and remote widgets, maps projective content quads,
+and clips target polygons through each frame viewport before selecting a visible
+point. Native hits and exact frame-local hits recheck before each press. Mirrored
+and CSS perspective frames are supported; folded, singular or horizon-crossing
+transforms and covered targets fail explicitly.
 Held input still uses the host ownership and cancellation/release path. Native
 input can have admitted effects before cancellation; inspect current state.
 

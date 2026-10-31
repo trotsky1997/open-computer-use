@@ -21,12 +21,14 @@ const server=createServer((req,res)=>{
     '/cross':[`http://localhost:${server.address().port}/frame`],
     '/nested':[`http://localhost:${server.address().port}/frameshell`],
     '/frameshell':['/frame'],
+    '/perspective':[`http://localhost:${server.address().port}/perspective-inner`],
+    '/perspective-inner':[`http://127.0.0.1:${server.address().port}/frame`],
     '/double':[`http://localhost:${server.address().port}/frameshell2`],
     '/frameshell2':[`http://127.0.0.1:${server.address().port}/frame`],
     '/cross-dupe':[`http://localhost:${server.address().port}/frame`,`http://localhost:${server.address().port}/frame`]
   };
   const sourcesForPage=sources[req.url] ?? (req.url.startsWith('/frame')?[]:['/frame']);
-  res.end(`<!doctype html><style>#zone{width:200px;height:100px;background:#acf;margin:30px;border:3px solid}iframe{width:400px;height:250px}</style><div id="zone">Drop here</div><div id="edit" contenteditable style="width:200px;height:40px;border:1px solid">Editor</div><output id="result">[]</output><button id="reorder" onclick="document.body.moveBefore(document.querySelector('iframe'),null)">Reorder frames</button><button id="cover" onclick="zone.style.pointerEvents='none'">Cover</button>${sourcesForPage.map(src=>`<iframe src="${src}"></iframe>`).join("")}<script>
+  res.end(`<!doctype html><style>#zone{width:200px;height:100px;background:#acf;margin:30px;border:3px solid}iframe{width:400px;height:250px}${req.url.startsWith('/perspective')?'iframe{transform:perspective(700px) rotateY(24deg) rotateX(7deg)}':''}</style><div id="zone">Drop here</div><div id="edit" contenteditable style="width:200px;height:40px;border:1px solid">Editor</div><output id="result">[]</output><button id="reorder" onclick="document.body.moveBefore(document.querySelector('iframe'),null)">Reorder frames</button><button id="cover" onclick="zone.style.pointerEvents='none'">Cover</button>${sourcesForPage.map(src=>`<iframe src="${src}"></iframe>`).join("")}<script>
   ${req.url==='/shadow-dupe'?`const host=document.createElement('div');host.id='shadow';document.body.append(host);host.attachShadow({mode:'open'}).innerHTML='<iframe src="/frame"></iframe><iframe src="/frame"></iframe>';`:''}
   ${req.url==='/shadow-twins'?`const host=document.createElement('div');host.id='twins';host.innerHTML='<iframe name="light-target" src="/frame"></iframe>';document.body.append(host);host.attachShadow({mode:'open'}).innerHTML='<iframe name="shadow-target" src="/frame"></iframe><slot></slot>';Element.prototype.getRootNode=function(){throw Error('Main-world owner walk forbidden');};`:''}
   let events=[];
@@ -73,7 +75,7 @@ try{
  const crossResult=JSON.parse(await run(`nodeRepl.write(JSON.stringify(await cross.playwright.frameLocator('iframe').locator('#result').innerText()));`));
  assert.equal(crossResult.events.at(-1).trusted,true);assert.equal(crossResult.data[0][1],'cross process');
  assert.deepEqual(crossResult.files,[{name:'你好.txt',text:'native file bytes 🙂'}]);
- for(const [route,locator] of [['shadow-twins',"frameLocator('#twins iframe[name=shadow-target]')"],['same-dupe',"frameLocator('iframe').nth(1)"],['same-nested',"frameLocator('iframe').nth(1).frameLocator('iframe').nth(1)"],['shadow-dupe',"frameLocator('#shadow iframe').nth(1)"],['nested',"frameLocator('iframe').frameLocator('iframe')"],['double',"frameLocator('iframe').frameLocator('iframe')"],['cross-dupe',"frameLocator('iframe').nth(1)"]]) {
+ for(const [route,locator] of [['shadow-twins',"frameLocator('#twins iframe[name=shadow-target]')"],['same-dupe',"frameLocator('iframe').nth(1)"],['same-nested',"frameLocator('iframe').nth(1).frameLocator('iframe').nth(1)"],['shadow-dupe',"frameLocator('#shadow iframe').nth(1)"],['nested',"frameLocator('iframe').frameLocator('iframe')"],['double',"frameLocator('iframe').frameLocator('iframe')"],['perspective',"frameLocator('iframe').frameLocator('iframe')"],['cross-dupe',"frameLocator('iframe').nth(1)"]]) {
    const nested=await run(`var nested=await cua.createBrowserTab('cdp',${JSON.stringify(url)}+${JSON.stringify(route)},{visible:false});nodeRepl.write(JSON.stringify(nested.id));`);ids.push(nested);routeIds.set(route,nested);
    await run(`await nested.playwright.${locator}.locator('#zone').drop({data:{'text/plain':${JSON.stringify(route)}},files:${JSON.stringify(file)}});nodeRepl.write(JSON.stringify(true));`);
    const result=JSON.parse(await run(`nodeRepl.write(JSON.stringify(await nested.playwright.${locator}.locator('#result').innerText()));`));

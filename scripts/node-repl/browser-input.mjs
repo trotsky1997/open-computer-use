@@ -162,16 +162,18 @@ export class BrowserInputs {
     await this.elementNode(record,element);
     const send=record.connection.send,scoped=record.frames.match(record.framePath),frameId=record.framePath.at(-1).id;
     if(!position){
+      await record.frames.validateGeometry(frameId);
       await scoped("DOM.scrollIntoViewIfNeeded",{backendNodeId:element.backendNodeId});
       await record.frames.rendered(frameId);this.check(record);
       const loaderId=(await send("Page.getFrameTree",{},0)).frameTree.frame.loaderId,metrics=await send("Page.getLayoutMetrics",{},0),viewportRevision=await this.revision();this.check(record);
       if(loaderId!==record.geometry.loaderId||viewportRevision!==record.geometry.viewportRevision||!['clientWidth','clientHeight','scale','zoom','offsetX','offsetY'].every(key=>metrics.cssVisualViewport[key]===record.geometry.viewport[key]))throw Error("Browser pointer document or viewport changed during preparation");
       record.geometry={loaderId,viewport:metrics.cssVisualViewport,contentSize:metrics.cssContentSize,viewportRevision};
       await record.frames.refresh();record.frames.match(record.framePath);
-      const {model}=await scoped("DOM.getBoxModel",{backendNodeId:element.backendNodeId}),points=[];
-      for(let i=0;i<8;i+=2)points.push(await record.frames.pointToRoot(frameId,{x:model.border[i],y:model.border[i+1]}));
-      const left=Math.max(0,Math.min(...points.map(p=>p.x))),right=Math.min(record.geometry.viewport.clientWidth,Math.max(...points.map(p=>p.x))),top=Math.max(0,Math.min(...points.map(p=>p.y))),bottom=Math.min(record.geometry.viewport.clientHeight,Math.max(...points.map(p=>p.y)));
-      if(right<=left||bottom<=top)throw Error("Element is covered or not visible");position={x:(left+right)/2,y:(top+bottom)/2};
+      const {model}=await scoped("DOM.getBoxModel",{backendNodeId:element.backendNodeId}),polygon=Array.from({length:4},(_,i)=>({x:model.border[2*i],y:model.border[2*i+1]}));
+      const points=await record.frames.polygonToRoot(frameId,polygon,record.geometry.viewport);
+      let area=0;for(let i=1;i<points.length-1;i++)area+=(points[i].x-points[0].x)*(points[i+1].y-points[0].y)-(points[i].y-points[0].y)*(points[i+1].x-points[0].x);
+      if(points.length<3||!Number.isFinite(area)||Math.abs(area)<1e-8)throw Error("Element is covered or not visible");
+      position={x:points.reduce((sum,p)=>sum+p.x,0)/points.length,y:points.reduce((sum,p)=>sum+p.y,0)/points.length};
     }else{await record.frames.rendered(frameId);this.check(record);}
     await this.guard(record);
     const hit=await record.frames.hit(position);

@@ -241,11 +241,12 @@ Frame AX trees join under native iframe owners; monotonic indices are stable for
 live frame/loader/AX identities and never alias a different node in that binding.
 Captured ancestry is revalidated before native input and after isolated-world
 node resolution. Editing, focus, selection and scrolling use the owning agent;
-indexed pointer points cross affine OOP boundaries and verify native/frame-local
-hits. Root and remote widget rendering barriers precede presses. The same frame
+indexed pointer polygons cross projective OOP boundaries, clip through same-
+process owner quads and each agent viewport, and verify native/frame-local hits. Root and remote widget rendering barriers precede presses. The same frame
 flattening/hit-test code serves drops, preserving integer drop routing while
-indexed pointer checks retain subpixel precision. Unsupported transforms fail
-explicitly. Broader dynamic/frame/provider races and atomic final dispatch remain
+indexed pointer checks retain subpixel precision. Convex native content quads
+support perspective and mirrors; folded, singular and horizon-crossing transforms
+fail explicitly. Broader dynamic/frame/provider races and atomic final dispatch remain
 open; Playwright frame locators and snapshots remain available.
 Browser locators and screenshot coordinate input have dedicated paths; full
 extension/in-app transports remain open. See [CDP browser](browser-cdp.md)
