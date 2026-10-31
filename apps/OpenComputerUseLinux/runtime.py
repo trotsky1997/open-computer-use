@@ -421,59 +421,32 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT, m
     return records, lines
 
 
-def capture_window_png(bounds):
-    if Gdk is None or bounds is None:
+def capture_bound_window_png(app, window, bounds):
+    if bounds is None or os.environ.get("XDG_SESSION_TYPE") == "wayland":
         return None
     try:
-        screen = Gdk.Screen.get_default()
-        if screen is None:
+        from x11_capture import capture_visible_window
+        identity = window_identity(window)
+        def validate():
+            if child_count(app) > MAX_ELEMENTS:
+                return False
+            candidates, active = [], []
+            for _index, candidate in app_windows(app):
+                candidate.clear_cache_single()
+                candidate_identity = window_identity(candidate)
+                if extents(candidate) == bounds:
+                    candidates.append(candidate_identity)
+                if state_contains(candidate, Atspi.StateType.ACTIVE):
+                    active.append(candidate_identity)
+            return candidates == [identity] and active == [identity] and window_identity(window) == identity
+        if not validate():
             return None
-        root = screen.get_root_window()
-        pixbuf = Gdk.pixbuf_get_from_window(
-            root,
-            int(round(bounds["x"])),
-            int(round(bounds["y"])),
-            max(1, int(round(bounds["width"]))),
-            max(1, int(round(bounds["height"]))),
-        )
-        if pixbuf is None:
+        image = capture_visible_window(identity["pid"], bounds)
+        if not validate():
             return None
-        if pixbuf_looks_black(pixbuf):
-            return None
-        ok, data = pixbuf.save_to_bufferv("png", [], [])
-        if not ok:
-            return None
-        return base64.b64encode(bytes(data)).decode("ascii")
+        return base64.b64encode(image).decode("ascii")
     except Exception:
         return None
-
-
-def pixbuf_looks_black(pixbuf):
-    try:
-        pixels = pixbuf.get_pixels()
-        channels = pixbuf.get_n_channels()
-        rowstride = pixbuf.get_rowstride()
-        width = pixbuf.get_width()
-        height = pixbuf.get_height()
-        if width <= 0 or height <= 0 or channels < 3:
-            return True
-        step_x = max(1, width // 16)
-        step_y = max(1, height // 16)
-        checked = 0
-        for y in range(0, height, step_y):
-            row = y * rowstride
-            for x in range(0, width, step_x):
-                offset = row + (x * channels)
-                if (
-                    pixels[offset] > 3
-                    or pixels[offset + 1] > 3
-                    or pixels[offset + 2] > 3
-                ):
-                    return False
-                checked += 1
-        return checked > 0
-    except Exception:
-        return False
 
 
 def focus_details(window, text_limit=DEFAULT_TEXT_LIMIT, max_nodes=MAX_ELEMENTS, max_depth=MAX_DEPTH):
@@ -542,9 +515,11 @@ def build_snapshot(query, text_limit=DEFAULT_TEXT_LIMIT, max_tree_nodes=MAX_ELEM
         focus, selection, focus_truncated = focus_details(window, text_limit, max_tree_nodes, max_tree_depth)
         if focus_truncated:
             lines.append("[Focus search incomplete: node/depth budget reached.]")
-    if include_screenshot and query.startswith(WINDOW_PREFIX):
-        # shortcut: enable images after exact native window capture is verified.
-        lines.append("Exact window screenshot capture is unavailable for this AT-SPI binding.")
+    image = None
+    if include_screenshot:
+        image = capture_bound_window_png(app, window, bounds)
+        if image is None:
+            lines.append("Verified X11 window screenshot unavailable: requires an unambiguous active, fully exposed native frame on a local noncomposited display.")
     pid = node_pid(app)
     return {
         "app": {
@@ -554,7 +529,7 @@ def build_snapshot(query, text_limit=DEFAULT_TEXT_LIMIT, max_tree_nodes=MAX_ELEM
         },
         "windowTitle": limit_text(node_name(window), text_limit=text_limit),
         "windowBounds": bounds,
-        "screenshotPngBase64": capture_window_png(bounds) if include_screenshot and not query.startswith(WINDOW_PREFIX) else None,
+        "screenshotPngBase64": image,
         "treeLines": lines,
         "focusedSummary": focus,
         "selectedText": selection,

@@ -35,6 +35,9 @@ var windowPlacementValues = []string{"keep", "agent_display", "restore"}
 //go:embed runtime.py
 var linuxRuntimeScript string
 
+//go:embed x11_capture.py
+var x11CaptureScript string
+
 const serverInstructions = "Computer Use tools let you interact with Linux desktop apps by performing UI actions.\n\nUse launch_app only for an explicitly requested application start; it accepts one literal executable name/path without arguments. The started application outlives this native session. Verify its readiness with get_app_state.\n\nBegin by calling `get_app_state` every turn you want to use Computer Use to get the latest state before acting. The available tools are list_windows, bind_window, launch_app, list_apps, get_app_state, click, perform_secondary_action, scroll, drag, type_text, type_characters, select_text, paste, press_key, and set_value.\n\nPrefer element-targeted interactions over coordinate clicks when an index for the targeted element is available. Linux actions use AT-SPI2 semantic actions and editable text APIs first. Coordinate mouse and key synthesis are best-effort fallbacks and are not a universal Wayland background input model."
 
 type toolDefinition struct {
@@ -715,6 +718,9 @@ func runPython(request linuxRequest) (*linuxResponse, error) {
 	scriptPath := filepath.Join(tempDir, "runtime.py")
 	operationPath := filepath.Join(tempDir, "operation.json")
 	if err := os.WriteFile(scriptPath, []byte(linuxRuntimeScript), 0o600); err != nil {
+		return nil, err
+	}
+	if err := os.WriteFile(filepath.Join(tempDir, "x11_capture.py"), []byte(x11CaptureScript), 0o600); err != nil {
 		return nil, err
 	}
 	operationData, err := json.Marshal(request)

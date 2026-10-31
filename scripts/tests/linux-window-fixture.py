@@ -12,6 +12,7 @@ GLib.set_prgname(name)
 GLib.set_application_name(name)
 windows, entries, notes, keys = {}, {}, {}, {}
 clipboard_data = []
+image_windows = []
 
 def state(*_args):
     with open(root + '/state.tmp', 'w', encoding='utf-8') as output:
@@ -48,6 +49,16 @@ def create(key, value):
     view.get_buffer().connect('changed', state)
     notes[key] = view
     box.pack_start(view, True, True, 0)
+    def black_image(_button):
+        black = Gtk.Window(title=name + ' black image')
+        black.set_decorated(False)
+        black.set_default_size(160, 120)
+        black.move(200, 200)
+        black.override_background_color(Gtk.StateFlags.NORMAL, Gdk.RGBA(0, 0, 0, 1))
+        image_windows.append(black)
+        black.show_all()
+        black.present()
+        black.get_window().focus(Gdk.CURRENT_TIME)
     def focus(_button):
         window.present()
         entries[key].grab_focus()
@@ -58,6 +69,10 @@ def create(key, value):
     key_area.set_can_focus(True)
     key_area.add_events(Gdk.EventMask.KEY_PRESS_MASK | Gdk.EventMask.KEY_RELEASE_MASK)
     key_area.set_size_request(100, 24)
+    color = '#ff0000' if key == 'A' else '#0000ff'
+    marker = Gtk.Label()
+    marker.set_markup('<span background="' + color + '" foreground="' + color + '">window image marker</span>')
+    box.pack_start(marker, False, False, 0)
     key_area.get_accessible().set_name('Key surface ' + key)
     def got_html(_clipboard, data, _unused):
         clipboard_data.append({'target': data.get_target().name(), 'data': bytes(data.get_data()).decode('utf-8') if data.get_length() >= 0 else None})
@@ -84,6 +99,11 @@ def create(key, value):
              ('Prepare selection', lambda _b: entries[key].select_region(1, 4)),
              ('Select notes', select_notes), ('Focus entry', focus),
              ('Read only', lambda _b: entries[key].set_editable(False)), ('Focus keys', focus_keys),
+             ('Separate windows', lambda _b: (windows['A'].move(10, 10), windows['B'].move(520, 10))),
+             ('Black image', black_image),
+             ('Close black', lambda _b: [window.destroy() for window in image_windows]),
+             ('Offscreen A', lambda _b: windows['A'].move(-10, 10)),
+             ('Occlude A', lambda _b: (windows['B'].move(20, 20), windows['B'].get_window().raise_())),
              ('Copy external', lambda _b: Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD).set_text('external-owned', -1)),
              ('Focus notes', lambda _b: (window.present(), notes[key].grab_focus(), window.get_window().focus(Gdk.CURRENT_TIME)))]
     def replace(_button):

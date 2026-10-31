@@ -48,11 +48,13 @@ inspect fresh windows before another action and never replay the close blindly.
 
 ## Image and physical-input limits
 
-This phase implements AX observation and targeted native semantic actions. Linux's
-existing screenshot implementation crops the desktop and cannot prove the pixels
-belong to an occluded selected window. These new bindings therefore return no
-image, and `getScreenshot()` reports unavailability. Exact native window image
-capture remains required work. String app bindings retain their prior behavior.
+AX/semantic bindings now also support verified visible-window images on local,
+noncomposited X11 displays. Capture cross-checks the selected active AT-SPI window
+against native focus ancestry, PID, frame geometry and stacking before reading
+pixels. Background, occluded, offscreen, shaped, composited and unsupported
+windows return no image. Both window-ID and string bindings use this route;
+the unchecked legacy desktop crop was removed. See [window images](linux-window-images.md)
+for budgets, evidence and remaining backing-store/Wayland work.
 
 Physical pointer/drag fallback for bound windows fails before input until native
 window hit routing is verified. Semantic accessibility click/set-value actions
@@ -72,19 +74,19 @@ GTK_MODULES=gail:atk-bridge NO_AT_BRIDGE=0 GDK_BACKEND=x11 \
   node scripts/tests/linux-window-js-smoke.mjs /path/to/open-computer-use-linux
 ```
 
-All 140 Node checks, 39 Python checks and 46 native Linux Go checks passed.
+The initial identity phase passed 140 Node checks, 39 Python checks and 46 native Linux Go checks.
 Existing source/Worker launch/lifecycle GTK regressions passed as well.
 
 Owned Ubuntu arm64 GTK checks in both source and Worker sessions cover two
 same-title windows in one process, equal element indexes with independent writes,
 a replaced same-name widget, window closure, child-index reordering, recreation,
 old-handle rejection, stable discovery across peer replacement and reset/rebind.
-Unavailable bound screenshots do not invalidate a sibling window's cached input
+Unavailable screenshots do not invalidate a sibling window's cached input
 indexes. Fixtures and their private desktop are cleaned up. Node, Python and
 native Go checks cover invalid arguments, duplicate metadata, selector identity,
 cache casing/isolation, bounded traversal and rejection before global synthesis.
 
 This is GTK/AT-SPI evidence. Qt, Chromium/Electron, LibreOffice, headful desktop,
 Wayland, permission-denied/transient provider and multi-seat cases remain
-unverified. Windows binding, native screenshot/physical routing and full harness
+unverified. Windows binding, broader native image/physical routing and full harness
 transport/claims/native parity remain open; keep the broader goal active.

@@ -282,5 +282,6 @@ optional explicit method. See [native lifecycle](../native-lifecycle.md).
 
 Linux additionally exposes `cua.listWindows({emit?})` and
 `cua.getApp({windowId}, {initialState?})` for AT-SPI window identity. This route
-provides AX/semantic actions and rejects unverified image/physical routing. See
+provides AX/semantic actions and verified exposed-window images on a local
+noncomposited X11 display; other image/physical routes remain open. See
 [native window binding](../native-window-binding.md) for the provider evidence.

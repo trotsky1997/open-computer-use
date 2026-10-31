@@ -421,3 +421,47 @@ clipboard-manager behavior, external focus races and hard-kill/platform failure
 coverage remain limited. Full native images/physical routing, other native
 platforms and remaining harness requirements stay active. See
 [Linux paste](../../linux-paste.md).
+
+## Verified visible X11 window images
+
+Enable bound images only after AT-SPI active-window identity and native focused
+client PID/frame geometry agree. Reject ambiguous same-process geometry,
+background/offscreen/occluded targets and unavailable native evidence. Use a
+private Xlib connection and a bounded server-grab read to keep stacking stable
+between visibility checks and XGetImage; release it before PNG encoding. Verify
+known receiving-window pixels, same-title isolation, overlap refusal, black
+content and stale/replaced windows. Background backing-store capture, Wayland,
+other providers and full native/physical parity remain in the active goal.
+
+
+## Verified visible-window X11 screenshots
+
+Added native focus/PID/frame/stacking verification and RGB PNG capture for local
+noncomposited X11 windows. The selected AT-SPI object/process identity, unique
+geometry and sole active-window state are checked before/after capture. A private
+Xlib connection freezes stacking only while checking/copying pixels, then frees
+native allocations and releases the server before PNG encoding. Node/depth/pixel
+and between-request time budgets reject excessive work. Composited, shaped,
+mixed-depth, ambiguous, background, occluded, offscreen and unsupported routes
+return no image. Blocking native requests still use the bridge's outer timeout.
+
+Both ID and string bindings now use these checks. Removed the unchecked legacy
+desktop crop and black-content heuristic, allowing valid all-black window PNGs.
+No focus or stacking transfer is performed to obtain an image. The GTK/AT-SPI
+probe and upstream source confirmed no native XID mapping via window attributes
+or Accessible.get_id, so background/backing-store and compositor/Wayland capture
+remain explicit requirements under the full active goal.
+
+Passed 145 Node checks, 55 Python checks (47 runtime, 5 X11, 3 clipboard), and
+Linux Go's 43 top-level checks plus 8 subchecks on arm64 Ubuntu. Both REPLs read
+actual red/blue pixels from same-title native windows, reject background,
+occluded/offscreen/closed handles, recover after exposure and accept an all-black
+window. Focus/PID/compositor/shape/depth checks, server release, allocation free,
+PNG channels/CRC, ambiguous provider geometry and changed state have targeted
+checks. Existing paste, text/key/selection, window identity and launch/lifecycle
+GTK flows also passed. Owned fixtures and private VM work files were cleaned up.
+No package dependency or CI added; X11/Shape shared libraries are prerequisites.
+
+Headful/decorated/composited desktops, Qt/Electron, backing-store images, Wayland,
+other native platforms and physical routing remain open. See
+[verified window images](../../linux-window-images.md).

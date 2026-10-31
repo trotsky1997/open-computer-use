@@ -227,7 +227,7 @@ class RuntimeSelectiveObservationTests(unittest.TestCase):
             "node_name": "Editor",
             "render_tree": ([{"index": 7}], ["tree"]),
             "focus_details": ("focus", "selection", False),
-            "capture_window_png": "png",
+            "capture_bound_window_png": "png",
         }.items():
             patch = mock.patch.object(self.runtime, name, return_value=value)
             self.patches.append(patch)
@@ -254,7 +254,7 @@ class RuntimeSelectiveObservationTests(unittest.TestCase):
         state = self.runtime.build_snapshot("Editor", include_screenshot=False)
         self.assertEqual(state["treeLines"], ["tree"])
         self.assertIsNone(state["screenshotPngBase64"])
-        self.runtime.capture_window_png.assert_not_called()
+        self.runtime.capture_bound_window_png.assert_not_called()
 
     def test_ax_only_preserves_bounded_focus_reporting(self):
         self.runtime.focus_details.return_value = (None, None, True)
@@ -262,7 +262,7 @@ class RuntimeSelectiveObservationTests(unittest.TestCase):
                                             max_tree_depth=1, include_screenshot=False)
         self.runtime.focus_details.assert_called_once_with(self.window, 20, 2, 1)
         self.assertIn("[Focus search incomplete: node/depth budget reached.]", state["treeLines"])
-        self.runtime.capture_window_png.assert_not_called()
+        self.runtime.capture_bound_window_png.assert_not_called()
 
     def test_tool_forwards_explicit_observation_flags(self):
         state = self.runtime.perform_operation({"tool": "get_app_state", "app": "Editor", "include_ax": False})
@@ -453,7 +453,7 @@ class FocusDetailsTests(unittest.TestCase):
              mock.patch.object(self.runtime, "focus_details", return_value=(None, None, True)) as focus, \
              mock.patch.object(self.runtime, "node_pid", return_value=42), \
              mock.patch.object(self.runtime, "node_name", return_value="Editor"), \
-             mock.patch.object(self.runtime, "capture_window_png"):
+             mock.patch.object(self.runtime, "capture_bound_window_png"):
             state = self.runtime.build_snapshot("Editor", max_tree_nodes=5, max_tree_depth=2)
         self.assertIn("incomplete", state["treeLines"][0])
         self.assertEqual(focus.call_args.args[2:], (5, 2))
@@ -553,6 +553,23 @@ class WindowBindingTests(unittest.TestCase):
                 runtime.find_element(object(), {"objectPath": "/old", "runtimeId": [0]}, window=object(), strict=True)
         with mock.patch.object(runtime, "iter_all", return_value=[old]):
             self.assertIs(runtime.find_element(object(), {"objectPath": "/old"}, window=object(), strict=True), old)
+
+
+class BoundImageTests(unittest.TestCase):
+    def test_identity_and_state_are_verified_around_pixels(self):
+        runtime = load_runtime()
+        node, app, bounds = mock.Mock(), mock.Mock(), {"x": 0, "y": 0, "width": 2, "height": 1}
+        provider = types.SimpleNamespace(capture_visible_window=mock.Mock(return_value=b"png"))
+        identity = {"pid": 42, "path": "owned"}
+        with mock.patch.dict(sys.modules, {"x11_capture": provider}), mock.patch.dict(runtime.os.environ, {"XDG_SESSION_TYPE": "x11"}), mock.patch.object(runtime, "child_count", return_value=1), mock.patch.object(runtime, "window_identity", return_value=identity), mock.patch.object(runtime, "extents", return_value=bounds), mock.patch.object(runtime, "state_contains", return_value=True), mock.patch.object(runtime, "app_windows", return_value=[(0, node)]) as windows:
+            self.assertEqual(runtime.capture_bound_window_png(app, node, bounds), "cG5n")
+            windows.side_effect = [[(0, node)], []]
+            self.assertIsNone(runtime.capture_bound_window_png(app, node, bounds))
+            windows.side_effect = None
+            windows.return_value = [(0, node), (1, node)]
+            provider.capture_visible_window.reset_mock()
+            self.assertIsNone(runtime.capture_bound_window_png(app, node, bounds))
+            provider.capture_visible_window.assert_not_called()
 
 
 class TextSelectionTests(unittest.TestCase):
