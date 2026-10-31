@@ -456,7 +456,7 @@ def capture_bound_window_png(app, window, bounds):
         return None
 
 
-def send_verified_click(app, window, bounds, element, x, y, button, count):
+def send_verified_click(app, window, bounds, element, x, y, button, count, key=None, duration=None):
     identity = verified_window_identity(app, window, bounds)
     if element is not None:
         if not state_contains(element, Atspi.StateType.VISIBLE) or not state_contains(element, Atspi.StateType.SHOWING):
@@ -469,7 +469,7 @@ def send_verified_click(app, window, bounds, element, x, y, button, count):
         x, y = screen_point(bounds, None, x, y)
     from x11_capture import click_visible_window
     try:
-        click_visible_window(identity["pid"], bounds, int(round(x)), int(round(y)), button, count)
+        click_visible_window(identity["pid"], bounds, int(round(x)), int(round(y)), button, count, held_keysyms(key), duration)
     except Exception as exc:
         raise RuntimeError("Verified pointer click failed; inspect before retrying: " + str(exc)) from exc
 
@@ -767,6 +767,24 @@ def keyval(name):
     raise RuntimeError("Unsupported key: " + name)
 
 
+def held_keysyms(key):
+    if key is None:
+        return []
+    if not isinstance(key, str) or not key.strip():
+        raise RuntimeError("Held key requires a non-empty chord")
+    aliases = {"shift": "Shift_L", "ctrl": "Control_L", "control": "Control_L", "alt": "Alt_L", "super": "Super_L", "win": "Super_L", "cmd": "Super_L"}
+    symbols = []
+    for part in key.split("+"):
+        part = part.strip()
+        if not part:
+            raise RuntimeError("Held chord contains an empty key")
+        normalized = aliases.get(part.lower(), KEY_ALIASES.get(part.lower(), part.lower() if len(part) == 1 and part.isascii() else part))
+        symbol = keyval(normalized)
+        if symbol not in symbols:
+            symbols.append(symbol)
+    return symbols
+
+
 def send_key(key):
     parts = [part for part in str(key).split("+") if part]
     if not parts:
@@ -998,6 +1016,10 @@ def perform_operation(operation):
 
     if tool == "click":
         click_method = (operation.get("click_method") or "auto").lower()
+
+        extended = "key" in operation or "duration_ms" in operation
+        if extended and click_method not in ("auto", "global"):
+            raise RuntimeError("Held clicks require auto or global")
         if click_method == "accessibility":
             if operation.get("click_count", 1) != 1:
                 raise RuntimeError("Accessibility click supports one click; use auto for a click sequence")
@@ -1018,14 +1040,14 @@ def perform_operation(operation):
         elif click_method in ("global", "auto"):
             handled = False
             count, button = operation.get("click_count", 1), operation.get("mouse_button", "left")
-            if click_method == "auto" and element is not None and button == "left" and count == 1:
+            if not extended and click_method == "auto" and element is not None and button == "left" and count == 1:
                 action = preferred_action_index(element)
                 if action is not None:
                     if not do_action_by_index(element, action):
                         raise RuntimeError("Accessibility click was not confirmed; inspect before retrying")
                     handled = True
             if not handled:
-                send_verified_click(app, window, bounds, element, operation.get("x"), operation.get("y"), button, count)
+                send_verified_click(app, window, bounds, element, operation.get("x"), operation.get("y"), button, count, operation.get("key"), operation.get("duration_ms"))
         else:
             raise RuntimeError("Invalid click_method '{}'".format(click_method))
     elif tool == "perform_secondary_action":

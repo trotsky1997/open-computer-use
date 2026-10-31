@@ -557,3 +557,24 @@ lifecycle probes, and both REPL modes across all eight isolated GTK controllers
 and private VM files were cleaned up. No dependency or CI added. Physical devices,
 real window managers, compositors/Wayland, cross-window drag/drop, long-press/chords
 and broader platform behavior remain open. The full harness goal remains active.
+
+
+## Linux held click/chord
+
+Advertise click key/duration_ms using the existing JS contract. Resolve physical
+keys from the current native keymap; share verified pointer preflight, hold keys
+across the sequence and dwell each mouse press. Own reverse releases through
+cancellation/failure. Reject unsupported methods/layouts before input. Validate
+real GTK key/modifier/mouse timing and reset/close releases in both REPLs, with
+existing input/lifecycle regressions. Keep other platforms and wider routing open.
+
+See [Linux held clicks](../../linux-held-clicks.md). The full goal stays active.
+
+Validation passed: 145 Node checks, 75 Python checks (54 runtime, 18 X11,
+3 clipboard), 46 Linux Go top-level checks plus 10 subchecks, CLI SIGTERM and
+parent-death probes, and both REPL modes across nine isolated GTK controllers
+(held clicks, drag, click, image, paste, text, window, launch, cancellation).
+Owned processes and private VM files were cleaned up. No dependency or CI added.
+Wider layouts/IME, real window managers/hardware, background/composited/Wayland,
+Linux pressKey duration and Windows held input remain open. Hard interruption
+cannot confirm releases or roll back accepted effects. The full goal stays active.

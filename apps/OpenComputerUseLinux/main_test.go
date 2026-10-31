@@ -217,7 +217,7 @@ func TestScreenshotOnlyInvalidatesIndexesAcrossWindowAndProcessChanges(t *testin
 				t.Fatal("stale element action accepted")
 			}
 			x, y := 10.0, 20.0
-			if result := s.click("Editor", "", &x, &y, 1, "left", "auto"); result.IsError {
+			if result := s.click("Editor", "", &x, &y, 1, "left", "auto", "", nil); result.IsError {
 				t.Fatalf("coordinate action unavailable: %#v", result)
 			}
 			data, err := os.ReadFile(path)
@@ -294,18 +294,18 @@ func TestLinuxClickMethodSafetyAndPlatformSupport(t *testing.T) {
 	x, y := 10.0, 20.0
 	service := newService()
 
-	result := service.click("Text Editor", "", &x, &y, 1, "left", "app_post")
+	result := service.click("Text Editor", "", &x, &y, 1, "left", "app_post", "", nil)
 	if !result.IsError || result.Content[0].Text != "click_method 'app_post' is not supported on Linux" {
 		t.Fatalf("app_post click result = %#v", result)
 	}
 
-	result = service.click("Text Editor", "", &x, &y, 1, "left", "sky_click")
+	result = service.click("Text Editor", "", &x, &y, 1, "left", "sky_click", "", nil)
 	if !result.IsError || result.Content[0].Text != "click_method 'sky_click' is not supported on Linux" {
 		t.Fatalf("sky_click result = %#v", result)
 	}
 
 	t.Setenv("OPEN_COMPUTER_USE_ALLOW_GLOBAL_POINTER_FALLBACKS", "")
-	result = service.click("Text Editor", "", &x, &y, 1, "left", "global")
+	result = service.click("Text Editor", "", &x, &y, 1, "left", "global", "", nil)
 	if !result.IsError || !strings.Contains(result.Content[0].Text, "requires OPEN_COMPUTER_USE_ALLOW_GLOBAL_POINTER_FALLBACKS=1") {
 		t.Fatalf("unauthorized global click result = %#v", result)
 	}
@@ -683,15 +683,6 @@ func TestDoctorJSONRejectsUnsupportedPermissionDiagnostics(t *testing.T) {
 	}
 	if out.Len() != 0 {
 		t.Fatal("unsupported JSON mode must not emit text on stdout")
-	}
-}
-
-func TestHeldClickOptionsFailBeforePlatformInput(t *testing.T) {
-	for _, args := range []map[string]any{{"key": "shift"}, {"duration_ms": float64(10)}} {
-		result := newService().callTool("click", args)
-		if !result.IsError {
-			t.Fatal("Unsupported held click was accepted")
-		}
 	}
 }
 

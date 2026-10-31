@@ -236,5 +236,77 @@ class DragTests(unittest.TestCase):
             xtest.XTestFakeButtonEvent.assert_not_called()
 
 
+class HeldClickTests(unittest.TestCase):
+    client = ImageTests.client
+
+    def prepared(self):
+        client = self.client()
+        xtest = mock.Mock()
+        client.prepare_pointer = mock.Mock(return_value=(xtest, 2))
+        client.resolve_held_keys = mock.Mock(return_value=([50, 37, 38], 5))
+        client.keyboard_state = mock.Mock(return_value=set())
+        client.pointer = mock.Mock(return_value=(2, 1, 0, 0))
+        client.check_held_click = mock.Mock()
+        events = []
+        xtest.XTestFakeKeyEvent.side_effect = lambda _display, code, down, _delay: events.append(('key', code, down)) or 1
+        xtest.XTestFakeButtonEvent.side_effect = lambda _display, code, down, _delay: events.append(('button', code, down)) or 1
+        return client, xtest, events
+
+    def test_chord_wraps_sequence_and_releases_in_reverse(self):
+        client, xtest, events = self.prepared()
+        client.click(42, (0, 0, 2, 1), (1, 0), 'left', 2, [1, 2, 3], 0)
+        self.assertEqual(events, [('key', 50, 1), ('key', 37, 1), ('key', 38, 1), ('button', 1, 1), ('button', 1, 0), ('button', 1, 1), ('button', 1, 0), ('key', 38, 0), ('key', 37, 0), ('key', 50, 0)])
+        self.assertEqual(client.check_held_click.call_count, 2)
+
+    def test_cancelled_mouse_and_failed_key_release_attempt_all_owned_releases(self):
+        import native_cancel as cancel
+        client, xtest, events = self.prepared()
+        def button(_display, code, down, _delay):
+            events.append(('button', code, down))
+            if down:
+                cancel.handle_signal(None, None)
+            return 1
+        xtest.XTestFakeButtonEvent.side_effect = button
+        with mock.patch.object(cancel, '_requested', False), self.assertRaises(cancel.OperationCancelled):
+            client.click(42, (0, 0, 2, 1), (1, 0), 'left', 3, [1], 100)
+        self.assertEqual(events[-4:], [('button', 1, 0), ('key', 38, 0), ('key', 37, 0), ('key', 50, 0)])
+        self.assertEqual(xtest.XTestFakeButtonEvent.call_count, 2)
+        client, xtest, events = self.prepared()
+        def key(_display, code, down, _delay):
+            events.append(('key', code, down))
+            if code == 38 and not down:
+                raise RuntimeError('release backend failure')
+            return 1
+        xtest.XTestFakeKeyEvent.side_effect = key
+        with self.assertRaisesRegex(RuntimeError, 'key release failed'):
+            client.click(42, (0, 0, 2, 1), (1, 0), 'left', 1, [1], 0)
+        self.assertEqual(events[-3:], [('key', 38, 0), ('key', 37, 0), ('key', 50, 0)])
+
+    def test_preexisting_key_stops_before_pointer_or_input(self):
+        client, xtest, _events = self.prepared()
+        client.keyboard_state.return_value = {50}
+        with self.assertRaisesRegex(RuntimeError, 'already held'):
+            client.click(42, (0, 0, 2, 1), (1, 0), 'left', 1, [1], 0)
+        client.prepare_pointer.assert_not_called()
+        xtest.XTestFakeKeyEvent.assert_not_called()
+
+    def test_native_mapping_and_keyboard_bits(self):
+        client = self.client()
+        mapping = capture.ModifierMap(max_keypermod=1, modifiermap=(capture.C.c_ubyte * 8)(50, 0, 37, 0, 0, 0, 0, 0))
+        client.lib.XGetModifierMapping.return_value = capture.C.pointer(mapping)
+        values = {0xffe1: 50, 0xffe3: 37, 97: 38}
+        client.lib.XKeysymToKeycode.side_effect = lambda _display, symbol: values.get(symbol, 0)
+        client.lib.XKeycodeToKeysym.side_effect = lambda _display, code, _index: next(symbol for symbol, value in values.items() if value == code)
+        self.assertEqual(client.resolve_held_keys([0xffe1, 0xffe3, 97, 97]), ([50, 37, 38], 5))
+        for symbol in (0xffe5, 0xff7f, 0xff14, 99999):
+            with self.assertRaises(RuntimeError):
+                client.resolve_held_keys([symbol])
+        def query(_display, vector):
+            vector[6] = 4
+            return 1
+        client.lib.XQueryKeymap.side_effect = query
+        self.assertEqual(client.keyboard_state(), {50})
+
+
 if __name__ == '__main__':
     unittest.main()

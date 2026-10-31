@@ -23,9 +23,11 @@ still defines supported spellings.
 Click counts are integers 1...3. Duration is finite non-negative milliseconds,
 and zero is allowed. Omitting duration retains a short default press. The SDK
 normalizes l/r/m mouse aliases and rejects malformed/unknown options. It checks
-the native click schema before sending held options: stale backends and current
-Linux/Windows backends fail explicitly. Raw Linux/Windows tool calls also reject
-these options before platform input. Extending those platforms remains open.
+the native click schema before sending held options: stale backends and the current Windows backend fail explicitly. Linux now
+advertises these options through verified visible X11 input; see
+[Linux held clicks](linux-held-clicks.md) for mapping, routing and live evidence.
+Raw Windows calls reject these options before platform input. Windows support
+remains open.
 
 Native macOS pressKey also accepts durationMs through the JS facade and
 press_key.duration_ms through raw MCP. It holds the full chord for that duration,

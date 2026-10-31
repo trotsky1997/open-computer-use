@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"math"
 	"os"
 	"testing"
@@ -39,5 +40,38 @@ func TestDragRejectsMalformedCoordinatesBeforeNativeInput(t *testing.T) {
 	}
 	if _, err := os.Stat(requestPath); !os.IsNotExist(err) {
 		t.Fatal("invalid drag reached native input")
+	}
+}
+
+func TestHeldClickValidationAndBridge(t *testing.T) {
+	requestPath := fakePythonResponse(t, `{"ok":true}`)
+	t.Setenv("OPEN_COMPUTER_USE_ACTION_READ_BACK", "0")
+	service := newService()
+	service.rememberSnapshot("Editor", &appSnapshot{App: appDescriptor{Name: "Editor", PID: 42}, WindowBounds: &frame{Width: 400, Height: 300}})
+	for _, change := range []map[string]any{{"key": nil}, {"key": ""}, {"key": true}, {"duration_ms": nil}, {"duration_ms": true}, {"duration_ms": -1.0}, {"duration_ms": math.NaN()}, {"duration_ms": math.Inf(1)}, {"duration_ms": 1e30}, {"key": "shift", "click_method": "accessibility"}} {
+		args := map[string]any{"app": "Editor", "x": 1.0, "y": 2.0}
+		for k, v := range change {
+			args[k] = v
+		}
+		if !service.callTool("click", args).IsError {
+			t.Fatalf("invalid held click accepted: %#v", args)
+		}
+	}
+	if _, err := os.Stat(requestPath); !os.IsNotExist(err) {
+		t.Fatal("invalid held input reached bridge")
+	}
+	if result := service.callTool("click", map[string]any{"app": "Editor", "x": 1.0, "y": 2.0, "key": "ctrl+a", "duration_ms": 60000.0, "click_count": 2.0}); result.IsError {
+		t.Fatal(result)
+	}
+	data, err := os.ReadFile(requestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var request linuxRequest
+	if err := json.Unmarshal(data, &request); err != nil {
+		t.Fatal(err)
+	}
+	if request.Key != "ctrl+a" || request.DurationMS == nil || *request.DurationMS != 60000 || request.ClickCount != 2 {
+		t.Fatalf("held request lost options: %s", data)
 	}
 }

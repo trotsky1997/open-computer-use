@@ -3,6 +3,7 @@ import ctypes as C
 import ctypes.util
 import struct
 import os
+import math
 import re
 import time
 import zlib
@@ -71,6 +72,8 @@ class X11:
             "XGetModifierMapping": (C.POINTER(ModifierMap), [C.c_void_p]),
             "XFreeModifiermap": (C.c_int, [C.POINTER(ModifierMap)]),
             "XKeycodeToKeysym": (C.c_ulong, [C.c_void_p, C.c_ubyte, C.c_int]),
+            "XQueryKeymap": (C.c_int, [C.c_void_p, C.POINTER(C.c_ubyte)]),
+            "XKeysymToKeycode": (C.c_ubyte, [C.c_void_p, C.c_ulong]),
             "XGetInputFocus": (C.c_int, [C.c_void_p, C.POINTER(C.c_ulong), C.POINTER(C.c_int)]),
             "XQueryTree": (C.c_int, [C.c_void_p, C.c_ulong, C.POINTER(C.c_ulong), C.POINTER(C.c_ulong), C.POINTER(C.POINTER(C.c_ulong)), C.POINTER(C.c_uint)]),
             "XGetWindowAttributes": (C.c_int, [C.c_void_p, C.c_ulong, C.POINTER(Attributes)]),
@@ -269,6 +272,7 @@ class X11:
         xtest = C.CDLL(ctypes.util.find_library("Xtst") or "libXtst.so.6")
         for name, args in {
             "XTestQueryExtension": [C.c_void_p] + [C.POINTER(C.c_int)] * 4,
+            "XTestFakeKeyEvent": [C.c_void_p, C.c_uint, C.c_int, C.c_ulong],
             "XTestFakeMotionEvent": [C.c_void_p, C.c_int, C.c_int, C.c_int, C.c_ulong],
             "XTestFakeButtonEvent": [C.c_void_p, C.c_uint, C.c_int, C.c_ulong],
         }.items():
@@ -308,26 +312,101 @@ class X11:
             raise RuntimeError("Pointer target changed before input; inspect before retrying")
         return xtest, frame
 
-    def click(self, expected_pid, rectangle, point, button, count):
+    def keyboard_state(self):
+        vector = (C.c_ubyte * 32)()
+        if not self.lib.XQueryKeymap(self.display, vector):
+            raise RuntimeError("Native keyboard state unavailable")
+        return {code for code in range(256) if vector[code // 8] & (1 << (code % 8))}
+
+    def resolve_held_keys(self, symbols):
+        keys, mask = [], 0
+        for symbol in symbols:
+            if symbol in (0xffe5, 0xff7f, 0xff14):
+                raise RuntimeError("Lock keys are unsupported for held clicks")
+            code = self.lib.XKeysymToKeycode(self.display, symbol)
+            if not code or self.lib.XKeycodeToKeysym(self.display, code, 0) != symbol:
+                raise RuntimeError("Held key has no unambiguous primary mapping in the native layout")
+            if code not in keys:
+                keys.append(code)
+        mapping = self.lib.XGetModifierMapping(self.display)
+        if not mapping:
+            raise RuntimeError("Native modifier map unavailable")
+        try:
+            size = mapping.contents.max_keypermod
+            if not 1 <= size <= 256:
+                raise RuntimeError("Invalid native modifier map")
+            for bit in range(8):
+                if any(mapping.contents.modifiermap[bit * size + index] in keys for index in range(size)):
+                    mask |= 1 << bit
+        finally:
+            self.lib.XFreeModifiermap(mapping)
+        return keys, mask
+
+    def check_held_click(self, expected_pid, rectangle, frame, point, keys, modifiers, button_mask):
+        if self.verify_frame(expected_pid, rectangle, time.monotonic() + 0.25) != frame:
+            raise RuntimeError("Held click frame changed; inspect before retrying")
+        child, x, y, state = self.pointer()
+        if self.error or (child, x, y) != (frame, *point) or state != (modifiers | button_mask) or self.keyboard_state() != set(keys):
+            raise RuntimeError("Held click input state changed; inspect before retrying")
+
+    def click(self, expected_pid, rectangle, point, button, count, symbols=(), duration=None):
         if button not in ("left", "middle", "right") or type(count) is not int or not 1 <= count <= 3:
             raise RuntimeError("Click requires left/middle/right and count 1..3")
+        if duration is not None and (type(duration) not in (int, float) or not math.isfinite(duration) or duration < 0):
+            raise RuntimeError("Click duration must be finite non-negative milliseconds")
         self.require_point(rectangle, point)
-        xtest, _ = self.prepare_pointer(expected_pid, rectangle, point)
+        extended = bool(symbols) or duration is not None
+        keys, mask = self.resolve_held_keys(symbols) if symbols else ([], 0)
+        if extended and self.keyboard_state():
+            raise RuntimeError("A keyboard key is already held")
+        xtest, frame = self.prepare_pointer(expected_pid, rectangle, point)
+        modifiers = (self.pointer()[3] & 0xff) | mask if extended else 0
         code = {"left": 1, "middle": 2, "right": 3}[button]
-        for _ in range(count):
-            with defer_cancellation():
-                check_cancelled()
+        held = []
+        try:
+            for key in keys:
+                with defer_cancellation():
+                    check_cancelled()
+                    held.append(key)
+                    if not xtest.XTestFakeKeyEvent(self.display, key, 1, 0):
+                        raise RuntimeError("Held key press failed; inspect before retrying")
+                    self.lib.XSync(self.display, 0)
+            for _ in range(count):
+                if extended:
+                    self.check_held_click(expected_pid, rectangle, frame, point, keys, modifiers, 0)
+                attempted = False
                 try:
-                    if not xtest.XTestFakeButtonEvent(self.display, code, 1, 0):
-                        raise RuntimeError("Button press failed; inspect before retrying")
+                    with defer_cancellation():
+                        check_cancelled()
+                        attempted = True
+                        if not xtest.XTestFakeButtonEvent(self.display, code, 1, 0):
+                            raise RuntimeError("Button press failed; inspect before retrying")
+                        self.lib.XSync(self.display, 0)
+                    deadline = time.monotonic() + (duration if duration is not None else 0) / 1000
+                    while time.monotonic() < deadline:
+                        time.sleep(min(0.02, max(0, deadline - time.monotonic())))
+                        check_cancelled()
+                        self.check_held_click(expected_pid, rectangle, frame, point, keys, modifiers, 1 << (code + 7))
                 finally:
-                    if not xtest.XTestFakeButtonEvent(self.display, code, 0, 0):
-                        raise RuntimeError("Button release failed; inspect pointer state before retrying")
+                    if attempted:
+                        with defer_cancellation():
+                            if not xtest.XTestFakeButtonEvent(self.display, code, 0, 0):
+                                raise RuntimeError("Button release failed; inspect pointer state before retrying")
+                            self.lib.XSync(self.display, 0)
+        finally:
+            with defer_cancellation():
+                failed = False
+                for key in reversed(held):
+                    try:
+                        failed = not bool(xtest.XTestFakeKeyEvent(self.display, key, 0, 0)) or failed
+                    except Exception:
+                        failed = True
                 self.lib.XSync(self.display, 0)
-        child, actual_x, actual_y, state = self.pointer()
-        self.require_neutral(state)
-        if self.error:
-            raise RuntimeError("Native click delivery failed; inspect before retrying")
+                if failed:
+                    raise RuntimeError("Held key release failed; inspect keyboard state before retrying")
+        self.require_neutral(self.pointer()[3])
+        if self.error or (extended and self.keyboard_state()):
+            raise RuntimeError("Native click delivery/release failed; inspect before retrying")
 
     def close(self):
         self.lib.XSync(self.display, 0)
@@ -400,11 +479,11 @@ def capture_visible_window(pid, bounds):
         client.close()
 
 
-def click_visible_window(pid, bounds, x, y, button, count):
+def click_visible_window(pid, bounds, x, y, button, count, symbols=(), duration=None):
     rectangle = local_rectangle(bounds)
     client = X11()
     try:
-        return client.click(pid, rectangle, (x, y), button, count)
+        return client.click(pid, rectangle, (x, y), button, count, symbols, duration)
     finally:
         client.close()
 

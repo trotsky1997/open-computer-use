@@ -576,6 +576,13 @@ class VerifiedClickTests(unittest.TestCase):
             self.assertTrue(runtime.perform_operation({"tool": "click", "app": "Editor", "element": {"objectPath": "/owned"}, "skip_read_back": True})["ok"])
             pointer.assert_called_once()
             action.assert_not_called()
+            preferred.reset_mock()
+            pointer.reset_mock()
+            self.assertTrue(runtime.perform_operation({"tool": "click", "app": "Editor", "element": {"objectPath": "/owned"}, "duration_ms": 0, "skip_read_back": True})["ok"])
+            preferred.assert_not_called()
+            action.assert_not_called()
+            pointer.assert_called_once()
+
 
     def test_hidden_indexed_element_never_reaches_pointer_backend(self):
         runtime = load_runtime()
@@ -591,7 +598,7 @@ class VerifiedClickTests(unittest.TestCase):
         bounds = {"x": 100, "y": 200, "width": 400, "height": 300}
         with mock.patch.dict(sys.modules, {"x11_capture": provider}), mock.patch.object(runtime, "verified_window_identity", return_value={"pid": 42}), mock.patch.object(runtime, "state_contains", return_value=True), mock.patch.object(runtime, "extents", return_value={"x": 103, "y": 205, "width": 20, "height": 10}):
             runtime.send_verified_click(object(), object(), bounds, object(), None, None, "left", 1)
-        provider.click_visible_window.assert_called_once_with(42, bounds, 113, 210, "left", 1)
+        provider.click_visible_window.assert_called_once_with(42, bounds, 113, 210, "left", 1, [], None)
 
 
 class BoundImageTests(unittest.TestCase):
@@ -729,6 +736,18 @@ class IndexedTextTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "inspect"):
                 runtime.insert_text(node, "wrong", node=node)
         self.assertEqual(node.text, "hello")
+
+class HeldKeyParsingTests(unittest.TestCase):
+    def test_aliases_deduplication_and_invalid_chords(self):
+        runtime = load_runtime()
+        with mock.patch.object(runtime, 'keyval', side_effect=lambda name: name):
+            self.assertEqual(runtime.held_keysyms('ctrl+control+Shift+A'), ['Control_L', 'Shift_L', 'a'])
+            self.assertEqual(runtime.held_keysyms('shift'), ['Shift_L'])
+            self.assertEqual(runtime.held_keysyms(None), [])
+            for key in ('', '+shift', 'ctrl++a', 1):
+                with self.assertRaises(RuntimeError):
+                    runtime.held_keysyms(key)
+
 
 class VerifiedDragTests(unittest.TestCase):
     def test_drag_uses_fresh_identity_and_window_relative_coordinates(self):

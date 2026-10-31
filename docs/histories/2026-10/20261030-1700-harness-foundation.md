@@ -1235,3 +1235,32 @@ lifecycle probes, and both REPL modes across all eight isolated GTK controllers
 and private VM files were cleaned up. No dependency or CI added. Physical devices,
 real window managers, compositors/Wayland, cross-window drag/drop, long-press/chords
 and broader platform behavior remain open. The full harness goal remains active.
+
+
+## Linux held clicks and chords
+
+Advertised click key/duration_ms through the existing JS facade. Held options
+bypass semantic actions and use verified X11 auto/global input. Keysyms resolve
+through the current primary native keymap, modifier masks come from its map and
+existing logical pressed keys prevent startup. Duplicate keys are held once;
+unknown/shifted-only mappings and lock keys are rejected. Mouse dwell and later
+clicks recheck frame/pointer/key/modifier/button state. Failed sends/cancellation
+attempt mouse release then every owned key release in reverse order. The native
+operation allowance includes requested total dwell with timer-range validation.
+
+Both REPLs passed receiving GTK timestamps/modifier state, modifier-only and
+ordinary-key chords, double-click ownership, duplicates, zero dwell, invalid
+rejection, mid-hold reset/close and fresh global input. Targeted checks cover
+mapping/keyboard bits, preexisting-key rejection, release failure and bridge
+validation. Updated facade help, native schema and current input/cancellation
+notes. Linux pressKey duration, Windows held input and broader physical/Wayland/
+provider verification remain open. See [held clicks](../../linux-held-clicks.md).
+
+Validation passed: 145 Node checks, 75 Python checks (54 runtime, 18 X11,
+3 clipboard), 46 Linux Go top-level checks plus 10 subchecks, CLI SIGTERM and
+parent-death probes, and both REPL modes across nine isolated GTK controllers
+(held clicks, drag, click, image, paste, text, window, launch, cancellation).
+Owned processes and private VM files were cleaned up. No dependency or CI added.
+Wider layouts/IME, real window managers/hardware, background/composited/Wayland,
+Linux pressKey duration and Windows held input remain open. Hard interruption
+cannot confirm releases or roll back accepted effects. The full goal stays active.

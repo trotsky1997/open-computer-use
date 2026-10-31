@@ -45,6 +45,6 @@ XDG_SESSION_TYPE=x11 GDK_BACKEND=x11 \
 Verification is sequential: concurrent hardware input, newly acquired grabs and
 UI changes can race checks. Application drag effects require observation.
 Cross-window drag/drop, complex clipping, real window managers, physical devices,
-Qt/Electron, compositors, Wayland, long-press/chords and other platform routes
+Qt/Electron, compositors, Wayland and other platform routes
 remain open or unverified. This within-window route does not complete the full
 harness parity goal.

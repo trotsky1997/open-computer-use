@@ -12,8 +12,9 @@ If no usable default action exists, it uses verified pointer input. An attempted
 accessibility action returning failure raises an error without replaying the
 click through the pointer. Explicit `accessibility` supports one left click;
 `global` keeps its existing `OPEN_COMPUTER_USE_ALLOW_GLOBAL_POINTER_FALLBACKS=1`
-requirement and uses the same verified route. `app_post`, `sky_click`, held key /
-duration options remain unsupported on Linux.
+requirement and uses the same verified route. `app_post` and `sky_click` remain unsupported on Linux.
+[Held key/chord and duration options](linux-held-clicks.md) use verified physical
+events through auto/global and bypass semantic actions.
 
 The current route shares [visible-window verification](linux-window-images.md):
 local, noncomposited X11; sole active AT-SPI window and unique geometry; native
@@ -44,7 +45,7 @@ interruption/claim handling remains open. A post-send error can follow a partial
 UI effect, so inspect before retrying. Cooperative [native cancellation](linux-native-cancellation.md) has reset/close
 and active-child cleanup coverage. Hard interruption and XTest withdrawal can prevent release
 confirmation. [Verified within-window drag](linux-drag-input.md) shares the pointer preflight.
-Long-press/chord, background,
+Wider keymap/layout, background,
 Wayland/composited and wider window-manager/provider routes remain open.
 
 Private Ubuntu arm64 Xvfb checks in both REPL modes verify actual receiving-widget
