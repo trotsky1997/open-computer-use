@@ -1414,3 +1414,32 @@ normal desktop registrations and user settings were untouched.
 See [native lifecycle](../../native-lifecycle.md). D-Bus activation, terminal
 entries, broader registry/locale precedence, native Windows and the full remaining
 harness parity goal stay open. The full goal remains active.
+
+
+## Acknowledged Linux D-Bus application activation
+
+A real DBusActivatable GTK service exposed a delivery bug in the short-lived GIO
+helper: the service process started, but Activate was not received before the
+helper exited. Desktop D-Bus entries now use the standard well-known name/object
+path and synchronous GIO Activate call, validate the bus name and wait for its
+unit reply within 25 seconds/the native operation deadline. Missing/refused
+services return errors without Exec fallback or automatic replay. Non-empty
+native request startup IDs/activation tokens are sent as standard platform data.
+Normal executable/Exec starts retain independent sessions and detached stdio;
+D-Bus services retain their service manager lifecycle/environment.
+
+Added one owned-registry/private-D-Bus/Xvfb GTK controller with a real activated
+service, deliberate error/pending-reply endpoints and an Exec fallback marker.
+Both JS hosts verified entries without Exec, ID/name activation, four real
+Activate receipts on the same service PID, changed per-request startup/token
+values, AX readiness after turn/native/reset/close, refused/missing/invalid-ID
+errors, hyphen-to-underscore object routing, and no fallback execution. Reset and
+close during a pending Activate reaped the actual bus-reported helper PID and
+preserved the service PID/activation count. The original eight executable/desktop
+GTK launch flows also passed. macOS passed 151 Node checks; arm64 Linux passed
+150 with one macOS-only skip, 47 Go top-level checks plus 10 subchecks, and 83
+Python checks. No dependency/CI or normal user desktop registration changed.
+
+See [native lifecycle](../../native-lifecycle.md). Terminal entries, real compositor
+activation-token/focus behavior, broader registry/locale/platform coverage and
+remaining harness parity stay open. The full goal remains active.

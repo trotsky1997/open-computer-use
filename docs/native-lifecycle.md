@@ -46,26 +46,42 @@ try the executable resolver, then match GIO's registered application display
 names exactly. Display-name matching uses the executor locale, preserves Unicode,
 spaces and slash characters, and performs no fuzzy/case-insensitive matching.
 Multiple matches fail with candidate desktop IDs; select an ID explicitly.
-Hidden entries and invalid/missing executable definitions fail before a confirmed
-start. Name lookup includes registered NoDisplay entries, following GIO's list.
+Hidden entries fail before dispatch. Exec-backed entries with invalid/missing
+executable definitions fail before a confirmed start. Name lookup includes registered NoDisplay entries, following GIO's list.
 
-The embedded GI helper delegates Exec field-code expansion and D-Bus activation
-to the system [GIO desktop application API](https://docs.gtk.org/gio-unix/method.DesktopAppInfo.launch_uris_as_manager_with_fds.html).
+The embedded GI helper delegates Exec field-code expansion to the system
+[GIO desktop application API](https://docs.gtk.org/gio-unix/method.DesktopAppInfo.launch_uris_as_manager_with_fds.html).
 It supplies no document URIs or caller arguments. Arguments configured in the
 selected desktop entry still apply. Spawned processes get an independent session
 and /dev/null for all protocol stdio. D-Bus activated applications use the desktop
 service's process/lifetime/stdio behavior. The helper shares the native operation
 deadline/cancellation path and never retries an uncertain start. Observe the app
-after acceptance or an interrupted/error result. Actual D-Bus activation and
-terminal-emulator entries have not been exercised in this round.
+after acceptance or an interrupted/error result. Terminal-emulator entries and
+broader registry/locale/platform behavior remain unverified.
+
+For DBusActivatable=true entries, the helper uses the desktop ID's well-known
+bus name and standardized object path to call org.freedesktop.Application.Activate
+through [GIO's synchronous D-Bus API](https://docs.gtk.org/gio/method.DBusConnection.call_sync.html).
+It waits up to 25 seconds for a unit reply within the native operation deadline,
+and validates the bus name before dispatch. The reply acknowledges the method;
+observe the window separately for readiness. These entries can omit Exec.
+Errors from missing services or refused activation propagate to JavaScript;
+the harness does not fall back to Exec or replay an uncertain activation.
+Reset/close reap a waiting helper and leave an accepted service application alive.
+Non-empty XDG_ACTIVATION_TOKEN and DESKTOP_STARTUP_ID from the native request
+environment are forwarded as activation-token and desktop-startup-id in the
+standard platform-data dictionary. Token focus effects on a real Wayland
+compositor remain unverified.
 
 ## Ownership and cleanup
 
 The launched application persists independently of REPL/native-peer cleanup.
-Linux inherits the detected desktop environment and uses a new session (`setsid`).
+Linux executable/Exec starts inherit the detected desktop environment and use a
+new session (`setsid`); D-Bus service applications use the service manager
+environment and lifecycle.
 Windows uses `DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP`; see
 [Windows creation flags](https://learn.microsoft.com/en-us/windows/win32/procthread/process-creation-flags).
-The launcher's stdin/stdout/stderr are discarded rather than inherited from the
+The executable/Exec launcher's stdin/stdout/stderr are discarded rather than inherited from the
 MCP JSON pipe. The peer reaps child exits while it remains alive. Turn end, reset
 and close release automation state and leave accepted application processes open.
 The user/application owns subsequent shutdown.
@@ -79,6 +95,8 @@ node --test scripts/node-repl/*.test.mjs
 # In an owned Linux dbus-run-session / Xvfb desktop with GTK/AT-SPI installed:
 GTK_MODULES=gail:atk-bridge NO_AT_BRIDGE=0 GDK_BACKEND=x11 \
   node scripts/tests/linux-launch-js-smoke.mjs /path/to/open-computer-use-linux
+# This controller creates its own private XDG registry, D-Bus session and Xvfb:
+node scripts/tests/linux-dbus-launch-js-smoke.mjs /path/to/open-computer-use-linux
 ```
 
 All 151 Node checks passed on macOS; arm64 Linux passed 150 with one macOS-only
@@ -95,13 +113,21 @@ replacement and JS reset; it also survived final REPL close. The expanded launch
 %c/%k/%% arguments and omitted no-URI %f/%u codes arrived correctly; duplicate
 names, hidden entries, missing IDs and missing executable entries were rejected
 without launching the fixture. All eight successful starts survived the same
-observation/turn/reset/close checks. Fixtures were stopped and removed afterward. A host-side Linux suite run on macOS hit its existing
+observation/turn/reset/close checks. The D-Bus controller additionally activated a
+real GTK service from an entry without Exec, observed its window, and repeated
+Activate by ID/display name on the same PID across both hosts. It checks refused
+methods, absent services, invalid IDs, exact hyphen-to-underscore object paths,
+absence of an Exec fallback marker, per-request startup-ID/token values on the
+same service PID, and reset/close while Activate is pending.
+The real helper PIDs are obtained from the bus and confirmed reaped; service PID,
+activation count and AX state remain intact after automation cleanup. Fixtures were stopped and removed afterward. A host-side Linux suite run on macOS hit its existing
 Linux-only bridge guard; native VM execution supplied the actual Linux evidence.
 
 Prior validation: Windows common Go tests passed on macOS and amd64/arm64 Windows
 binaries built. Windows code was unchanged in the desktop-entry update.
 A real Windows desktop, console/job-object cleanup behavior, application aliases,
 installer distribution and startup-error/dialog cases remain unverified. [Linux window binding](native-window-binding.md) now supports AX/semantic actions;
-Windows binding/display-name/AppUserModelID resolution, Linux D-Bus/terminal
-launch evidence, broader desktop registry/locale coverage, remote native executors,
+Windows binding/display-name/AppUserModelID resolution, Linux terminal launch,
+real compositor activation-token effects, broader desktop registry/locale coverage,
+remote native executors,
 per-platform input/paste and the broader harness goal remain open.

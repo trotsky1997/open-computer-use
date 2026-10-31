@@ -498,7 +498,10 @@ The JS computer binding reports the local executor platform without starting the
 native peer. Linux/Windows dispatch explicit launch_app calls after native
 capability discovery; macOS retains getApp's launch behavior. The Go runtimes
 resolve a single literal executable; Linux additionally delegates desktop ID/path
-and exact display-name startup to GIO, rejecting ambiguous names. They discard
+and exact display-name startup to GIO, rejecting ambiguous names. D-Bus desktop
+entries wait for a standard Activate reply through GIO before the helper exits;
+errors propagate without Exec fallback. Native request startup IDs/activation tokens
+are forwarded through standard platform data. They discard
 protocol stdio and start an
 independent application process/session. Started apps persist across automation
 cleanup; the peer reaps child exits while alive. Source/Worker Linux GTK fixtures
