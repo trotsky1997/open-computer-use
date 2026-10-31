@@ -85,3 +85,21 @@ test('both JS hosts prepend pending notices without replacing explicit output',a
   }finally{await session.close();}
  }
 });
+
+test('discovery reuses the turn observer and bounds new targets before IO',async()=>{
+ const host=new BrowserWebMcp(()=> 'http://owned.test'),owner={},state=host.state(owner);state.observers.set('tab',{endpoint:'http://owned.test',ready:Promise.resolve(false)});
+ assert.equal(await host.request(owner,{action:'observe',targetId:'tab'}),false);assert.throws(()=>host.request(owner,{action:'observe',targetId:'tab',input:{}}),/Invalid WebMCP request/);
+ host.endpoint=()=> 'http://changed.test';await assert.rejects(host.request(owner,{action:'observe',targetId:'tab'}),/endpoint changed/);
+ for(let i=1;i<128;i++)state.observers.set(String(i),{});
+ await assert.rejects(host.request(owner,{action:'observe',targetId:'new'}),/observer limit/);await host.cleanup(owner);assert.equal(host.owners.size,0);
+});
+
+test('initial discovery notices filter exact frames and failed observer close retains ownership',async()=>{
+ const {EventEmitter}=await import('node:events'),f=fixture(()=>{}),entry={targetId:'observed',endpoint:'http://owned.test',discover:true,watchers:new Map()};let fail=true;
+ entry.browser={async close(){if(fail)throw Error('Observer disconnect failed');}};f.state.observers.set('observed',entry);
+ const session=new EventEmitter();session.send=async()=>{session.emit('WebMCP.toolsAdded',{tools:[{frameId:'main'}]});return {};};
+ await f.host.watch(f.state,entry,{session,frameId:'main'});assert.equal(f.host.notifications(f.owner).length,1);
+ session.emit('WebMCP.toolsAdded',{tools:[{frameId:'foreign'}]});assert.deepEqual(f.host.notifications(f.owner),[]);
+ await assert.rejects(f.host.cleanup(f.owner),/Observer disconnect failed/);assert.equal(f.host.owners.size,1);assert.equal(f.state.observers.size,1);assert.equal(f.state.collections.size,0);
+ fail=false;await f.host.cleanup(f.owner);assert.equal(f.host.owners.size,0);
+});

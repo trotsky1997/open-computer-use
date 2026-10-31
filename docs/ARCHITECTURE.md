@@ -488,10 +488,14 @@ by native tool ID, protecting a fetched handle from a same-name replacement.
 Turn cleanup waits for each native executeTool promise to settle after abort,
 using an awaited isolated-world cancellation method, before disconnecting. Its
 bounded cancellation retains failed cleanup for retry. Browser navigation/context destruction invalidates collections.
-Fetched frame sessions also observe native WebMCP toolsAdded/toolsRemoved events.
-Owner queues coalesce notices per tab and prepend them to the next JS result in
-both hosts. Initial inventories, foreign frames, stale documents/endpoints and
-closed owners do not produce change notices; tool schemas still require a fetch.
+Binding/using a tab starts a turn-owned native observer, independent of fetched
+collections. Fixed isolated-world availability reads and native toolsAdded/
+toolsRemoved events discover initial tools and dynamic same-process/OOP frames;
+navigation resyncs subscriptions. Older browsers skip optional discovery. Owner
+queues coalesce notices per tab and prepend them to later JS results in both
+hosts; foreign frames, stale endpoints and closed owners are excluded. Schemas
+and callable handles still require an explicit fetch. Observers share existing
+bounded cleanup and retain failed disconnects for retry.
 The public tab capability prints untrusted metadata and preserves native result
 strings; the ordinary host action/confirmation policy still applies. Installer,
 CLI readiness and npm copy lists include the host module. See [WebMCP](browser-webmcp.md).

@@ -1105,3 +1105,35 @@ cleanup. The native WebMCP.enable capability was probed on that exact browser.
 Initial discovery of unfetched tabs and newly attached frames still requires a
 fetch. Real consent, headful/platform/crash and external-site notifications remain
 unverified. Full harness parity remains active; no package or registry release.
+
+## WebMCP discovery on tab binding
+
+Binding/using a tab now starts an idempotent turn-owned observer independently of
+callable collections. Fixed private-world native getTools queries report only
+initial availability. Exact native frame-session tool events then discover
+changes and newly attached same-process/OOP frames. Navigation resyncs discovery,
+and ordinary use of a retained tab binding restarts it in a later turn. Notices
+stay generic and coalesced; fetchTools remains required for exact names/schema.
+No page tool executes during discovery.
+
+Optional discovery skips Chrome below 158, defers active dialogs and reports a
+diagnostic on startup failure while ordinary actions remain usable. Background
+sync failures request an explicit refresh. Turns allow 128 observed tabs, with
+128 current frames/retained native sessions per observed tab and bounded sync/
+native calls. Cleanup joins background jobs and closes observer connections;
+failed disconnect retains ownership for retry. Detached/navigated frames leave
+old frame membership, and closed owners cannot enqueue notices.
+
+Validation: all 160 Node checks pass, including observer reuse/scope/budget,
+initial-frame filtering and failed-close retention/retry. Owned headless Chrome
+158 passes both hosts with discovery before any fetch, an already loaded tab,
+late same-process/OOP frames, navigation, cross-turn retained bindings, ordinary
+calls and turn/reset/close cancellation. Chrome 156 passes ordinary binding and
+explicit unsupported-WebMCP behavior. Browser/navigation/input/filechooser,
+dialog and early-dialog/popup ownership/recovery controllers also pass. Fixture
+round trips on all native observer connections settle expected frame events
+before unrelated-tab isolation checks.
+
+No new dependency, CI, package publication or user-profile modification. Unbound
+browser-wide inventory, real consent, headful, other-platform and crash behavior
+remain open. Full harness parity remains active.

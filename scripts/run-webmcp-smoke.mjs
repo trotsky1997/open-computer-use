@@ -23,15 +23,22 @@ await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));const url=`http
 const browser=await chromium.connectOverCDP(endpoint,{noDefaults:true}),native={async request(){throw Error('native unused');}};
 async function run(session,code){const result=await session.run(code,30000);assert.equal(result.isError,false,result.content.at(-1).text);return JSON.parse(result.content.at(-1).text);}
 async function until(fn){const end=Date.now()+5000;while(!fn()){assert.ok(Date.now()<end,'Native tool notice did not arrive');await new Promise(resolve=>setTimeout(resolve,20));}}
+async function settleNotices(session){
+ const states=[...session.browserWebMcp.owners.values()];await Promise.all(states.flatMap(state=>[...state.observers.values()].map(entry=>entry.sync)));
+ const sessions=new Set(states.flatMap(state=>[...state.collections.values(),...state.observers.values()].flatMap(entry=>[...entry.watchers.keys()])));
+ await Promise.all([...sessions].map(session=>session.send('Page.getFrameTree')));
+}
 function listing(text){const start=text.indexOf('['),end=text.lastIndexOf(']');return start<0?[]:JSON.parse(text.slice(start,end+1));}
 try{
  for(const Session of [WorkerJavaScriptSession,PersistentJavaScriptSession]){
   const session=new Session({native});let page;
   try{
-   const id=await run(session,`var b=await cua.getBrowser({id:'cdp'});var tab=await b.tabs.new();await tab.goto(${JSON.stringify(url)});await tab.markHandoff();nodeRepl.write(JSON.stringify(tab.id));`);
+   const initial=await session.run(`var b=await cua.getBrowser({id:'cdp'});var tab=await b.tabs.new();await tab.goto(${JSON.stringify(url)});await tab.markHandoff();nodeRepl.write(JSON.stringify(tab.id));`);assert.equal(initial.isError,false);const id=JSON.parse(initial.content.at(-1).text);
    for(const context of browser.contexts())for(const candidate of context.pages()){const cdp=await context.newCDPSession(candidate);try{if((await cdp.send('Target.getTargetInfo')).targetInfo.targetId===id)page=candidate;}finally{await cdp.detach();}}
    assert.ok(page);await page.waitForURL(url,{waitUntil:'load'});for(const frame of page.frames())await frame.evaluate(()=>fixture.ready);
    if(missing){assert.equal(await run(session,`var cap=await tab.capabilities.get('webmcp');var failed=false;try{await cap.fetchTools();}catch(e){failed=/Native WebMCP is unavailable/.test(e.message);}nodeRepl.write(JSON.stringify(failed));`),true);console.log(`${Session.name} PASS explicit missing-native failure`);continue;}
+   assert.equal([...session.browserWebMcp.owners.values()].reduce((n,state)=>n+state.collections.size,0),0,'Discovery fetched callable handles');
+   if(!initial.content.some(item=>item._meta?.id==='cua.webmcp')){await until(()=>[...session.browserWebMcp.owners.values()].some(state=>state.notifications.has(id)));const discovered=await session.run('nodeRepl.write("initial-discovery")');assert.equal(discovered.content.filter(item=>item._meta?.id==='cua.webmcp').length,1);}
    // Main-world API spoofing cannot replace the isolated native API.
    await page.evaluate(()=>Object.defineProperty(document,'modelContext',{value:{getTools(){throw Error('Page spoof');}}}));
    const tools=listing(await run(session,`var cap=await tab.capabilities.get('webmcp');var tools=await cap.fetchTools();nodeRepl.write(JSON.stringify(tools.description()));`));
@@ -48,13 +55,20 @@ try{
    const fresh=listing(await run(session,`var fresh=await cap.fetchTools();nodeRepl.write(JSON.stringify(fresh.description()));`)),replacement=fresh.find(tool=>tool.name.startsWith('echo__'));
    assert.notEqual(replacement.name,echo.name);assert.equal(await run(session,`nodeRepl.write(JSON.stringify(await fresh.call(${JSON.stringify(replacement.name)},{})));`),'replacement');
    for(const frame of page.frames().filter(frame=>new URL(frame.url()).pathname==='/child'))await frame.evaluate(()=>fixture.replace());
-   await until(()=>[...session.browserWebMcp.owners.values()].some(state=>state.notifications.has(id)));
+   await settleNotices(session);await until(()=>[...session.browserWebMcp.owners.values()].some(state=>state.notifications.has(id)));
    const childNotice=await session.run('nodeRepl.write("child-notice")');assert.equal(childNotice.content.filter(item=>item._meta?.id==='cua.webmcp').length,1);
    assert.equal((await session.run('nodeRepl.write("drained")')).content.filter(item=>item._meta?.id==='cua.webmcp').length,0);
-   const unrelated=await page.context().newPage();try{await unrelated.goto(url+'cancel?unrelated');await unrelated.evaluate(()=>fixture.ready);await unrelated.evaluate(()=>fixture.replace());assert.equal((await session.run('nodeRepl.write("unrelated")')).content.filter(item=>item._meta?.id==='cua.webmcp').length,0);}finally{await unrelated.close();}
-   await run(session,`var pending=tools.call(${JSON.stringify(slow.name)},{}).catch(()=>{});nodeRepl.write(JSON.stringify(true));`);
+   const unrelated=await page.context().newPage();try{await unrelated.goto(url+'cancel?unrelated');await unrelated.evaluate(()=>fixture.ready);await unrelated.evaluate(()=>fixture.replace());const isolated=await session.run('nodeRepl.write("unrelated")');assert.equal(isolated.content.filter(item=>item._meta?.id==='cua.webmcp').length,0,JSON.stringify({content:isolated.content,observers:[...session.browserWebMcp.owners.values()].flatMap(state=>[...state.observers.values()].map(entry=>({incomplete:entry.incomplete,frames:entry.frames.size,watchers:entry.watchers.size})))}));const cdp=await unrelated.context().newCDPSession(unrelated);let preexistingId;try{preexistingId=(await cdp.send('Target.getTargetInfo')).targetInfo.targetId;}finally{await cdp.detach();}const bound=await session.run(`var prebound=await b.tabs.get(${JSON.stringify(preexistingId)});nodeRepl.write("bound-existing")`);assert.equal(bound.isError,false);assert.ok(bound.content.some(item=>item._meta?.id==='cua.webmcp'&&item.text.includes(preexistingId)));}finally{await unrelated.close();}
+   for(const late of [url+'child?late',url.replace('127.0.0.1','localhost')+'child?late']){
+    const navigated=page.waitForEvent('framenavigated',{predicate:frame=>frame.url()===late});await page.evaluate(src=>{const frame=document.createElement('iframe');frame.allow='tools';frame.src=src;document.body.append(frame);},late);
+    const frame=await navigated;await frame.waitForLoadState('load');await frame.evaluate(()=>fixture.ready);await until(()=>[...session.browserWebMcp.owners.values()].some(state=>state.notifications.has(id)));
+    const discovered=await session.run('nodeRepl.write("late-frame")');assert.equal(discovered.content.filter(item=>item._meta?.id==='cua.webmcp').length,1);
+   }
+   const active=listing(await run(session,`var active=await cap.fetchTools();nodeRepl.write(JSON.stringify(active.description()));`)),activeSlow=active.find(tool=>tool.name.startsWith('slow__'));assert.ok(activeSlow);
+   await run(session,`var pending=active.call(${JSON.stringify(activeSlow.name)},{}).catch(()=>{});nodeRepl.write(JSON.stringify(true));`);
    await page.waitForFunction(()=>fixture.started===1);const started=Date.now();await session.endTurn();assert.ok(Date.now()-started<5000);await page.waitForFunction(()=>fixture.aborted===1);
    assert.equal(session.browserWebMcp.owners.size,0);
+   const resumed=await session.run('await tab.getAXState({emit:false});nodeRepl.write("resumed")');assert.equal(resumed.isError,false);assert.equal([...session.browserWebMcp.owners.values()].reduce((n,state)=>n+state.observers.size,0),1);assert.equal([...session.browserWebMcp.owners.values()].reduce((n,state)=>n+state.collections.size,0),0);
    assert.equal(await run(session,`var stale=false;try{await tools.call(${JSON.stringify(slow.name)},{});}catch(e){stale=/Stale|unknown|turn ended/.test(e.message);}nodeRepl.write(JSON.stringify(stale));`),true);
    const next=listing(await run(session,`var next=await cap.fetchTools();nodeRepl.write(JSON.stringify(next.description()));`)),nav=next.find(tool=>tool.name.startsWith('navigate__'));
    assert.equal(await run(session,`nodeRepl.write(JSON.stringify(await next.call(${JSON.stringify(nav.name)},{})));`),null);
@@ -72,7 +86,7 @@ try{
     await run(session,`var pending=current.call(${JSON.stringify(waiting.name)},{}).catch(()=>{});nodeRepl.write(JSON.stringify(true));`);await page.waitForFunction(()=>fixture.started===1);
     await session[ending]();await page.waitForFunction(()=>fixture.aborted===1);assert.equal(session.browserWebMcp.owners.size,0);
    }
-   console.log(`${Session.name} PASS native tools, isolated API, exact same-URL/OOP frames, stale replacement/turn/navigation, provider validation errors, coalesced main/child/OOP tool-change notices, turn/reset/close native cancellation settlement, declarative form and empty listing`);
+   console.log(`${Session.name} PASS native tools, isolated API, exact same-URL/OOP frames, stale replacement/turn/navigation, provider validation errors, initial and late-frame discovery, coalesced main/child/OOP tool-change notices, turn/reset/close native cancellation settlement, declarative form and empty listing`);
   }finally{await session.close();await page?.close();}
  }
 }finally{await browser.close();await new Promise(resolve=>server.close(resolve));}
