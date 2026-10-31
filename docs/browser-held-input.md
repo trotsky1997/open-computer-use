@@ -125,7 +125,7 @@ hit-test calls, fencing page-world prototype and instance overrides. It requires
 the resolved node to belong to the main document; child-frame transforms, native
 geometry and coordination with external CDP clients remain open. Temporary resolved-node handles are released.
 
-The pointer controller now runs 39 cases per macOS/Linux platform. Five added
+The pointer controller now runs 53 cases per macOS/Linux platform. Five added
 cases use a real offscreen button and pause the host after native scrolling to
 check competing-input rejection, successful completion and reset/Worker-exit
 cancellation before any down. The installed-runtime smoke also clicks an AX
@@ -148,3 +148,25 @@ fixture under the previous implementation delivered a trusted down to its decoy.
 Installed-runtime flows also use a page whose geometry/hit-test methods throw.
 This verifies isolation from those overrides; arbitrary DOM/layout changes and
 external clients can still race between measurement and input.
+
+
+## Recheck before each down
+
+Every managed pointer action checks document/geometry again after the initial
+unpressed move. AX clicks also revalidate the observed role/name/backend node and
+use the isolated-world hit test at the original point before each new down.
+Rechecks do not scroll, recompute a center or silently move to the target's new
+position. A moved/covered/renamed target stops the sequence and requires a fresh
+observation. This applies to the second and third press of a multi-click too.
+
+Fourteen added real-browser cases cover hover-driven movement, overlays with a
+held Shift key, AX name changes, first-click name/movement changes and
+content-size changes on coordinate click/drag. They assert actual receiver
+presses, clicks and balanced key releases; multi-click changes allow only the
+first already completed click. A pre-change control on each platform recorded a
+trusted background click after the button moved away during the initial move.
+
+CDP inspection and event dispatch remain separate commands. Arbitrary concurrent
+layout/handler changes can still occur after the final check. The harness aborts
+observed changes and preserves admitted effects; atomic browser-side target
+fencing, child-frame transforms and external-client coordination remain open.

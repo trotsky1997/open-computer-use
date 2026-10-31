@@ -4,12 +4,13 @@ import {BrowserFocusLeases} from "./browser-playwright.mjs";
 import {BrowserInputs,heldKeys,validateClick,validatePressKey,browserPointerLeases} from "./browser-input.mjs";
 
 test('managed clicks and drags admit press effects but stop on resize or navigation',async()=>{
- for(const action of ['click','drag'])for(const mode of ['normal','resize','navigation']) {
-  const endpoint='http://pointer-'+action+'-'+mode+'/',calls=[],geometry={loaderId:'old',viewport:{clientWidth:320,clientHeight:240,pageX:0,pageY:0,scale:1},contentSize:{width:320,height:240},viewportRevision:0};let moves=0,pressed=false;const changed=()=>moves>0||action==='click'&&pressed;
+ for(const action of ['click','drag'])for(const mode of ['normal','resize','navigation','hover-resize','hover-navigation','hover-content']) {
+  const endpoint='http://pointer-'+action+'-'+mode+'/',calls=[],geometry={loaderId:'old',viewport:{clientWidth:320,clientHeight:240,pageX:0,pageY:0,scale:1},contentSize:{width:320,height:240},viewportRevision:0};let moves=0,pressed=false,hovered=false;const changed=()=>moves>0||action==='click'&&pressed||mode.startsWith('hover-')&&hovered;
   const input=new BrowserInputs(()=>endpoint,async()=>({close(){},async send(method,args){
    calls.push({method,args});
-   if(method==='Page.getFrameTree')return {frameTree:{frame:{loaderId:mode==='navigation'&&changed()?'new':'old'}}};
-   if(method==='Page.getLayoutMetrics')return {cssVisualViewport:{...geometry.viewport,pageY:changed()?100:0,clientWidth:mode==='resize'&&changed()?300:320},cssContentSize:{width:320,height:changed()?900:240}};
+   if(method==='Page.getFrameTree')return {frameTree:{frame:{loaderId:mode.includes('navigation')&&changed()?'new':'old'}}};
+   if(method==='Page.getLayoutMetrics')return {cssVisualViewport:{...geometry.viewport,pageY:changed()&&mode!=='hover-content'?100:0,clientWidth:mode.includes('resize')&&changed()?300:320},cssContentSize:{width:320,height:changed()?900:240}};
+   if(method==='Input.dispatchMouseEvent'&&args.type==='mouseMoved'&&args.buttons===0)hovered=true;
    if(method==='Input.dispatchMouseEvent'&&args.type==='mousePressed')pressed=true;
    if(method==='Input.dispatchMouseEvent'&&args.type==='mouseMoved'&&args.buttons===1)moves++;
    if(method==='Page.handleJavaScriptDialog')throw Error('No dialog is showing');
@@ -23,9 +24,9 @@ test('managed clicks and drags admit press effects but stop on resize or navigat
   if(mode==='normal')await work;else await assert.rejects(work,/document|viewport/);
   const events=calls.filter(call=>call.method==='Input.dispatchMouseEvent').map(call=>call.args);
   assert.equal(events[0].button,'none');assert.equal(events[0].buttons,0);
-  assert.equal(events.filter(event=>event.type==='mousePressed').length,1);
-  assert.deepEqual(events.filter(event=>event.type==='mouseReleased').map(event=>[event.x,event.y,event.buttons]),[mode==='normal'?(action==='drag'?[200,100,0]:[20,20,0]):[-1,-1,0]]);
-  assert.equal(moves,action==='drag'?(mode==='normal'?12:1):0);assert.equal(browserPointerLeases.has(endpoint),false);
+  assert.equal(events.filter(event=>event.type==='mousePressed').length,mode.startsWith('hover-')?0:1);
+  assert.deepEqual(events.filter(event=>event.type==='mouseReleased').map(event=>[event.x,event.y,event.buttons]),mode.startsWith('hover-')?[]:[mode==='normal'?(action==='drag'?[200,100,0]:[20,20,0]):[-1,-1,0]]);
+  assert.equal(moves,action==='drag'&&!mode.startsWith('hover-')?(mode==='normal'?12:1):0);assert.equal(browserPointerLeases.has(endpoint),false);
   assert.equal(calls.filter(call=>call.method==='Emulation.setFocusEmulationEnabled').at(-1).args.enabled,false);
  }
 });
@@ -115,19 +116,20 @@ test("pressKey validates duration and releases after an admitted navigation with
 
 
 test('AX click preparation owns scrolling and cancellation before any press',async()=>{
- for(const mode of ['normal','cancel','changed','navigation','world-missing']) {
-  const endpoint='http://prepare-'+mode+'/',owner={},calls=[];let scrolled=false,ready,release;
+ for(const mode of ['normal','cancel','changed','navigation','world-missing','hover-name','hover-covered']) {
+  const endpoint='http://prepare-'+mode+'/',owner={},calls=[];let scrolled=false,hovered=false,ready,release;
   const gate=new Promise(resolve=>{release=resolve;}),started=new Promise(resolve=>{ready=resolve;});
   const geometry={loaderId:'old',viewport:{clientWidth:320,clientHeight:240,pageY:0},contentSize:{width:320,height:2000},viewportRevision:0};
   const input=new BrowserInputs(()=>endpoint,async()=>({close(){},async send(method,args){
    calls.push({method,args});
    if(method==='Page.getFrameTree')return {frameTree:{frame:{id:'root',loaderId:mode==='navigation'&&scrolled?'new':'old'}}};
    if(method==='Page.getLayoutMetrics')return {cssVisualViewport:{...geometry.viewport,pageY:scrolled?800:0},cssContentSize:geometry.contentSize};
-   if(method==='Accessibility.getPartialAXTree')return {nodes:[{backendDOMNodeId:9,role:{value:'button'},name:{value:mode==='changed'?'Changed':'Target'}}]};
+   if(method==='Accessibility.getPartialAXTree')return {nodes:[{backendDOMNodeId:9,role:{value:'button'},name:{value:mode==='changed'||mode==='hover-name'&&hovered?'Changed':'Target'}}]};
    if(method==='DOM.scrollIntoViewIfNeeded'){scrolled=true;ready();await gate;}
    if(method==='Page.createIsolatedWorld'){assert.deepEqual(args,{frameId:'root',worldName:'ocu-pointer'});return mode==='world-missing'?{}:{executionContextId:17};}
    if(method==='DOM.resolveNode'){assert.equal(args.executionContextId,17);return {object:{objectId:'node'}};}
-   if(method==='Runtime.callFunctionOn')return {result:{value:{x:20,y:30}}};
+   if(method==='Runtime.callFunctionOn'){assert.deepEqual(args.arguments,[{value:hovered?{x:20,y:30}:null}]);return mode==='hover-covered'&&hovered?{exceptionDetails:{}}:{result:{value:{x:20,y:30}}};}
+   if(method==='Input.dispatchMouseEvent'&&args.type==='mouseMoved')hovered=true;
    return {};
   }}),()=>0);
   input.supported=async()=>{};input.target=async()=>({webSocketDebuggerUrl:'page'});
@@ -140,11 +142,11 @@ test('AX click preparation owns scrolling and cancellation before any press',asy
    assert.throws(()=>input.request({},{action:'check'}),/already owns/);
    if(mode==='cancel')input.cancel(owner);
    release();
-   if(mode==='normal')await work;else await assert.rejects(work,mode==='cancel'?/canceled/:mode==='world-missing'?/isolated world/:/document|viewport/);
+   if(mode==='normal')await work;else await assert.rejects(work,mode==='cancel'?/canceled/:mode==='world-missing'?/isolated world/:mode==='hover-name'?/changed/:mode==='hover-covered'?/covered/:/document|viewport/);
   }
   assert.equal(calls.filter(call=>call.args?.type==='mousePressed').length,mode==='normal'?1:0);
   assert.equal(calls.filter(call=>call.method==='DOM.scrollIntoViewIfNeeded').length,mode==='changed'?0:1);
-  assert.equal(calls.filter(call=>call.method==='Runtime.releaseObject').length,mode==='normal'?1:0);
+  assert.equal(calls.filter(call=>call.method==='Runtime.releaseObject').length,mode==='normal'||mode==='hover-covered'?2:mode==='hover-name'?1:0);
   assert.equal(input.leases.size,0);assert.equal(browserPointerLeases.has(endpoint),false);
  }
 });

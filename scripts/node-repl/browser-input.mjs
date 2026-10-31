@@ -96,28 +96,31 @@ export class BrowserInputs {
     }
     if(JSON.stringify(actual)!==JSON.stringify(record.geometry)) throw new Error("Browser input document or geometry changed");
   }
-  async prepareElement(record,element) {
+  async elementPoint(record,element,position) {
     const send=async(method,params={})=>{this.check(record);const result=await record.connection.send(method,params,0);this.check(record);return result;};
     await this.guard(record);
     const current=await send("Accessibility.getPartialAXTree",{backendNodeId:element.backendNodeId,fetchRelatives:false});
     const node=current.nodes.find(node=>node.backendDOMNodeId===element.backendNodeId && !node.ignored);
     if(!node || node.role?.value!==element.role || node.name?.value!==element.name)throw new Error("Element changed; read AX state again");
     await this.guard(record);
-    await send("DOM.scrollIntoViewIfNeeded",{backendNodeId:element.backendNodeId});
+    // Rechecks keep the admitted point; scrolling again would silently retarget.
+    if(!position)await send("DOM.scrollIntoViewIfNeeded",{backendNodeId:element.backendNodeId});
     const frame=(await send("Page.getFrameTree")).frameTree.frame,loaderId=frame.loaderId;
-    const metrics=await send("Page.getLayoutMetrics"),viewportRevision=await this.revision();
-    this.check(record);
-    if(loaderId!==record.geometry.loaderId || viewportRevision!==record.geometry.viewportRevision || !['clientWidth','clientHeight','scale','zoom','offsetX','offsetY'].every(key=>metrics.cssVisualViewport[key]===record.geometry.viewport[key]))throw new Error("Browser pointer document or viewport changed during preparation");
-    record.geometry={loaderId,viewport:metrics.cssVisualViewport,contentSize:metrics.cssContentSize,viewportRevision};
+    if(!position) {
+      const metrics=await send("Page.getLayoutMetrics"),viewportRevision=await this.revision();
+      this.check(record);
+      if(loaderId!==record.geometry.loaderId || viewportRevision!==record.geometry.viewportRevision || !['clientWidth','clientHeight','scale','zoom','offsetX','offsetY'].every(key=>metrics.cssVisualViewport[key]===record.geometry.viewport[key]))throw new Error("Browser pointer document or viewport changed during preparation");
+      record.geometry={loaderId,viewport:metrics.cssVisualViewport,contentSize:metrics.cssContentSize,viewportRevision};
+    }
     const {executionContextId}=await send("Page.createIsolatedWorld",{frameId:frame.id,worldName:"ocu-pointer"});
     if(!Number.isInteger(executionContextId) || executionContextId<=0)throw new Error("Browser pointer isolated world unavailable");
     const {object}=await send("DOM.resolveNode",{backendNodeId:element.backendNodeId,executionContextId});
     try {
-      const result=await send("Runtime.callFunctionOn",{objectId:object.objectId,returnByValue:true,functionDeclaration:`function() {
+      const result=await send("Runtime.callFunctionOn",{objectId:object.objectId,returnByValue:true,arguments:[{value:position ?? null}],functionDeclaration:`function(position) {
         if(this.ownerDocument!==document)throw new Error("Element outside the main document");
         const r=this.getBoundingClientRect();
-        const x=Math.max(0,r.left)+(Math.min(innerWidth,r.right)-Math.max(0,r.left))/2;
-        const y=Math.max(0,r.top)+(Math.min(innerHeight,r.bottom)-Math.max(0,r.top))/2;
+        const x=position ? position.x : Math.max(0,r.left)+(Math.min(innerWidth,r.right)-Math.max(0,r.left))/2;
+        const y=position ? position.y : Math.max(0,r.top)+(Math.min(innerHeight,r.bottom)-Math.max(0,r.top))/2;
         const hit=this.ownerDocument.elementFromPoint(x,y);
         if(!this.isConnected || r.width<=0 || r.height<=0 || !(hit===this || this.contains(hit)))throw new Error("Element is covered or not visible");
         return {x,y};
@@ -125,7 +128,7 @@ export class BrowserInputs {
       if(result.exceptionDetails)throw new Error("Element is covered or not visible in the main document; read state again");
       const {x,y}=result.result.value ?? {};
       if(![x,y].every(Number.isFinite) || x<0 || y<0 || x>=record.geometry.viewport.clientWidth || y>=record.geometry.viewport.clientHeight)throw new Error("Invalid browser input position");
-      record.position={x,y};
+      return {x,y};
     } finally {await send("Runtime.releaseObject",{objectId:object.objectId});}
   }
   click(owner,args) {return this.perform(owner,args,validateClick(args.options));}
@@ -158,7 +161,7 @@ export class BrowserInputs {
       record.connection=await this.open(target.webSocketDebuggerUrl);this.check(record);
       const send=record.connection.send;
       if(!this.focus) {record.emulated=true;await send("Emulation.setFocusEmulationEnabled",{enabled:true});}
-      if(args.element!==undefined)await this.prepareElement(record,args.element);
+      if(args.element!==undefined)record.position=await this.elementPoint(record,args.element);
       if(keyboard && args.backendNodeId!==undefined) {await this.guard(record);await send("DOM.focus",{backendNodeId:args.backendNodeId},0);}
       for(const key of options.keys) {
         await this.guard(record);
@@ -171,6 +174,9 @@ export class BrowserInputs {
         const mouse={...record.position,button:options.button,clickCount:count,modifiers:record.modifiers};
         // CDP adds button's flag to buttons, even on a move before the press.
         await send("Input.dispatchMouseEvent",{type:"mouseMoved",...mouse,button:'none',buttons:0},0);this.check(record);
+        if(args.element!==undefined)await this.elementPoint(record,args.element,record.position);
+        await this.guard(record);
+        // shortcut: layout can change after this check; strict fencing needs an atomic browser-side hit check and press.
         record.mouse=mouse;
         await send("Input.dispatchMouseEvent",{type:"mousePressed",...mouse,buttons:{left:1,right:2,middle:4}[options.button]},0);
         if(args.action==='drag') {

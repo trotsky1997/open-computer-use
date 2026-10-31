@@ -1558,3 +1558,40 @@ throwing page-world methods. The initial generic regression caught a changed
 error-message assertion; the final message preserves its covered/visibility
 meaning and includes the main-document requirement, and both regressions pass.
 Linux fixtures retain CDPScreenshotNewSurface. Windows/headful remain untested.
+
+
+## Pointer pre-press target revalidation
+
+The previous manager checked geometry before the unpressed pointer move. A live
+control on macOS and arm64 Linux showed the button moving in that handler while
+the existing click still delivered a trusted down/up/click to the background.
+The fixture preserves actual receiver events as evidence.
+
+BrowserInputs now reuses one isolated element-point routine to resolve the
+initial point and verify that exact point after movement before each new down.
+The latter path revalidates AX role/name/backend identity and hit/visibility,
+without another scroll or center calculation. All managed pointer actions also
+check document/geometry after movement. Observed changes abort remaining stages;
+accepted earlier clicks are kept and never replayed. Existing modifier/focus
+cleanup and failed-release retention remain shared.
+
+The existing controller adds 14 cases across both JS hosts: hover movement,
+overlays while Shift is held, AX rename, first-click rename/movement before the
+second press, and content-only geometry changes on coordinate click/drag. The
+small existing unit checks also cover pre-press viewport/navigation changes,
+fixed-point arguments, a single preparation scroll and balanced object release.
+No dependency, input replay or CI was added.
+
+CDP hit checks and event dispatch remain separate commands, with a source
+shortcut comment documenting the need for an atomic browser operation for strict
+target fencing. Arbitrary concurrent changes after the final check, child-frame
+transforms, external-client coordination and broader platform coverage stay open.
+
+
+Validation: macOS Node 26 passes 171/171 tests; arm64 Linux Node 24 passes
+170 with one macOS-only virtual-display skip. Chrome 158 on each platform passes
+all 53 pointer cases, generic browser and held-input regressions. Source-removed
+standalone, installed Persistent/Worker and installed MCP launcher browser flows
+pass, including the existing page-world geometry tampering fixture. The Linux
+owned fixture retains CDPScreenshotNewSurface. Windows/headful and atomic target
+fencing remain unverified.
