@@ -40,8 +40,14 @@ each dispatch; document changes fail without replaying the drag.
 One session owns native dragging for the browser origin at a time. Action timeout
 cancels native dragging and preserves the JS session when cleanup succeeds. A
 JavaScript dialog returns control through getJsDialog(); it pauses the drop action
-deadline so it can be answered in a later call. The overall JS execution deadline
-still applies. Answering the dialog resumes remaining stages. Reset, timeout and
+deadline so it can be answered in a later call. Each response resumes the
+remaining active-time budget, including across sequential prompts. Readiness
+checks after a response still expire; accepting/dismissing the dialog reports the
+resumed action failure. The pinned Playwright public AbortSignal cancels target
+resolution and trial hover. Cancellation is checked before each native stage,
+and native drag cancellation still requires acknowledgement before lease release.
+The overall JS execution deadline still applies. Answering the dialog resumes
+remaining stages. Reset, timeout and
 close prevent later stages, dismiss owned dialogs and cancel dragging before
 releasing focus. Cleanup failure retains ownership and blocks reuse until a
 successful reset retry. Page effects from an already dispatched drop can finish.
@@ -50,7 +56,7 @@ Host crash and external native input contention remain open.
 ## Verification
 
 ```sh
-node --test scripts/node-repl/browser-drop.test.mjs
+node --test scripts/node-repl/browser-drop.test.mjs scripts/node-repl/browser-dialog-budget.test.mjs
 OPEN_COMPUTER_USE_CDP_URL=http://127.0.0.1:9222 node scripts/run-drop-smoke.mjs
 ```
 
@@ -74,3 +80,20 @@ coordinates for DOM.getNodeForLocation follows Chromium's
 [DOM agent implementation](https://chromium.googlesource.com/chromium/src/+/HEAD/third_party/blink/renderer/core/inspector/inspector_dom_agent.cc).
 Child hit tests use the child layout viewport dimensions; its reported visual
 viewport can carry top-level dimensions.
+
+
+`node scripts/run-drop-budget-smoke.mjs`, with `OCU_TEST_CHROME_EXECUTABLE`
+pointing to owned Chrome for Testing, verifies repeated prompt pauses beyond the
+active budget, hidden-target timeout after response, no late/duplicate drop,
+missing-target timeout, timeout=0 reset and fresh trusted-input recovery. Both
+JS hosts pass on macOS and arm64 Linux, including installed payloads after source
+relocation. The browser-only installed smoke invokes this controller too.
+
+
+On the arm64 Linux Chrome 158 fixture, restoring a hidden target after expiry can
+make six normal trial checks take about 17 seconds; the recovery assertion uses
+an explicit 30s budget. Deadline assertions keep their 3s/100ms budgets and the
+product default stays 10s. The broader Linux iframe fixture still exceeds that
+default in both the pre-change and current runtime. Linux actionability latency
+and the full Linux MIME/frame matrix remain open; the focused deadline/recovery
+controller covers its stated cases only.

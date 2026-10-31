@@ -115,6 +115,12 @@ if(process.argv[2]==='codex-plugin-config') { (await import('node:fs')).chmodSyn
   await new Promise((resolve,reject)=>{dialogs.once('error',reject);dialogs.once('exit',code=>code===0?resolve():reject(Error(dialogOutput)));});
   for(const line of dialogOutput.split('\n').filter(line=>line.includes('PASS')))console.log(line);
   console.log('PASS installed independent-host dialog inventory after source checkout removal');
+  const drops=spawn(process.execPath,[path.join(source,'scripts/run-drop-budget-smoke.mjs'),installed],{env:{...env,OCU_TEST_CHROME_EXECUTABLE:path.resolve(chrome)},stdio:['ignore','pipe','pipe']});let dropOutput='';
+  drops.stdout.on('data',chunk=>{dropOutput+=chunk;});drops.stderr.on('data',chunk=>{dropOutput+=chunk;});
+  await new Promise((resolve,reject)=>{drops.once('error',reject);drops.once('exit',code=>code===0?resolve():reject(Error(dropOutput)));});
+  for(const line of dropOutput.split('\n').filter(line=>line.includes('PASS')))console.log(line);
+  console.log('PASS installed native drop active-time deadlines after source checkout removal');
+
 
 
 

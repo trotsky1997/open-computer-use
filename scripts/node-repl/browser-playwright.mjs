@@ -16,10 +16,10 @@ export function createPlaywrightApi(endpoint, targetId, invalidate, focusLease, 
   const actions = ["click", "dblclick", "fill", "press", "check", "uncheck", "setChecked", "selectOption", "hover", "scrollIntoViewIfNeeded", "pressSequentially", "type", "drop"];
   async function invoke(path, method, args) {
     if (checkDialog) await checkDialog(actions.includes(method));
-    if (withAction && actions.includes(method)) return withAction((opened,changes) => perform(path,method,args,opened,changes));
+    if (withAction && actions.includes(method)) return withAction((_opened,changes) => perform(path,method,args,changes));
     return perform(path,method,args);
   }
-  async function perform(path, method, args, dialogOpened, dialogChanges) {
+  async function perform(path, method, args, dialogChanges) {
     const {chromium} = await import("playwright-core");
     const browser = await chromium.connectOverCDP(endpoint(), {timeout:10_000, noDefaults:true});
     for (const context of browser.contexts()) context.on("dialog", () => {});
@@ -71,19 +71,23 @@ export function createPlaywrightApi(endpoint, targetId, invalidate, focusLease, 
           if (!dropRequest) throw new Error("Native drop backend unavailable");
           const [payload,options] = args;
           const id = await dropRequest({action:"acquire",targetId,payload});
-          let timer;
-          const timeout = options.timeoutMs ?? 10_000;
-          const work = (async () => {
-            for (const type of ["dragEnter","dragOver","drop"]) {
-              const geometry = await nativeDropPoint(locator,page,focusSession,options,dropRequest);
-              await dropRequest({action:"stage",id,type,...geometry});
-            }
-          })();
-          work.catch(()=>{});
-          const expired = new Promise((_,reject)=>{if (timeout) timer=setTimeout(()=>reject(new Error(`Native drop timeout after ${timeout} ms`)),timeout);});
-          dialogOpened?.then(result=>{if(result.opened) clearTimeout(timer);}).catch(()=>{});
-          try {await Promise.race([work,expired]);}
-          finally {clearTimeout(timer);await dropRequest({action:"release",id});}
+          try {
+            await withBrowserActionBudget(async ({signal})=>{
+              signal.throwIfAborted();
+              let abort;
+              const canceled=new Promise((_,reject)=>{abort=()=>reject(signal.reason);signal.addEventListener('abort',abort,{once:true});});
+              const work=(async()=>{
+                for(const type of ["dragEnter","dragOver","drop"]){
+                  signal.throwIfAborted();
+                  const geometry=await nativeDropPoint(locator,page,focusSession,{...options,signal},dropRequest);
+                  signal.throwIfAborted();
+                  await dropRequest({action:"stage",id,type,...geometry});
+                }
+              })();
+              try {await Promise.race([work,canceled]);}
+              finally {signal.removeEventListener('abort',abort);}
+            },{timeout:options.timeoutMs??10_000},dialogChanges);
+          } finally {await dropRequest({action:"release",id});}
           return;
         }
         if (method === "filechooser") {
@@ -239,7 +243,6 @@ export function createPlaywrightApi(endpoint, targetId, invalidate, focusLease, 
 
 
 export async function withBrowserActionBudget(operation,options,changes){
-  if(!changes)return operation(options);
   const timeout=options.timeout??10_000;
   if(typeof timeout!=='number'||!Number.isFinite(timeout)||timeout<0)throw Error('Action timeout must be non-negative and finite');
   const control=new AbortController(),signal=options.signal?AbortSignal.any([options.signal,control.signal]):control.signal;
@@ -249,24 +252,24 @@ export async function withBrowserActionBudget(operation,options,changes){
     if(!active&&timeout){started=performance.now();timer=setTimeout(()=>control.abort(Error(`Timeout ${timeout}ms exceeded while browser action was active`)),Math.max(0,remaining));}
   };
   update(false);
-  const monitor=(async()=>{
+  const monitor=changes && (async()=>{
     let revision=-1;
     while(!stopped){
       const state=await changes(revision);if(stopped)return;revision=state.revision;
       if(state.done){control.abort(Error('Browser action watcher ended'));return;}
       update(state.active);
     }
-  })();monitor.catch(error=>{if(!stopped)control.abort(error);});
+  })();monitor?.catch(error=>{if(!stopped)control.abort(error);});
   try{return await operation({...options,timeout:0,signal});}
   finally{stopped=true;clearTimeout(timer);}
 }
 
 async function nativeDropPoint(locator,page,session,options,request) {
-  const handle = await locator.elementHandle({timeout:0});
+  const handle = await locator.elementHandle({timeout:0,signal:options.signal});
   const childSessions=[];
   if (!handle) throw new Error("Drop target missing");
   try {
-    await handle.hover({trial:true,timeout:0});
+    await handle.hover({trial:true,timeout:0,signal:options.signal});
     const box = await handle.boundingBox();
     if (!box) throw new Error("Drop target has no visible bounds");
     const viewport = (await session.send("Page.getLayoutMetrics")).cssVisualViewport;
@@ -283,7 +286,7 @@ async function nativeDropPoint(locator,page,session,options,request) {
     }
     const point = options.position ? {x:Math.round(box.x+border.x+options.position.x),y:Math.round(box.y+border.y+options.position.y)} : {x:Math.floor((left+right)/2),y:Math.floor((top+bottom)/2)};
     if (point.x<left || point.x>=right || point.y<top || point.y>=bottom) throw new Error("Drop point outside visible target");
-    await handle.hover({trial:true,timeout:0,position:{x:point.x-box.x-border.x,y:point.y-box.y-border.y}});
+    await handle.hover({trial:true,timeout:0,signal:options.signal,position:{x:point.x-box.x-border.x,y:point.y-box.y-border.y}});
     const after = await handle.boundingBox();
     if (!after || ["x","y","width","height"].some(key=>Math.abs(after[key]-box[key])>.25)) throw new Error("Drop target moved; resolve again");
     const frames = dropFrames((await session.send("Page.getFrameTree")).frameTree);

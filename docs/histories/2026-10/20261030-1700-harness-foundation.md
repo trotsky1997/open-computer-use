@@ -2969,3 +2969,30 @@ Browser-only npm build/pack confirms both copied modules match current source.
 Capturing/responding to dialogs predating another host's observer, sole-callback
 takeover, broader raw action deadlines, physical macOS headful and Windows remain
 open. No dependency, version, configuration or CI changes.
+
+
+## Native drop deadlines resume after every dialog
+
+Replaced drop's one-shot timer clearing with the shared dialog active-time budget.
+The original native reproduction waited beyond its 3s resumed budget until the
+whole JS run expired at 7s. The pinned Playwright public AbortSignal now cancels
+target resolution/trial hover, and the stage loop checks cancellation before each
+native dispatch. Native release still waits for cancellation acknowledgement and
+retains ownership on failure. Standalone operations also receive an active budget
+when no dialog watcher is supplied. No dependency, option, version or CI changes.
+
+Owned Chrome 158 source and source-relocated installed controllers exercise both
+JS hosts on macOS/Linux: delayed/repeated prompts, resumed hidden-target timeout,
+missing-target timeout, no late/duplicate drop, unlimited-action reset and fresh
+trusted delivery. Existing macOS full MIME/file/frame/shadow/native-owner and
+cleanup failure/retry checks pass in both hosts. Their competing input now uses
+its own tab and retained reset targets explicitly request handoff. Node: macOS
+210/210; Linux 209/210, one platform-only skip. Browser-only build/pack checks
+both production copies against the current source.
+
+Measured Linux restored-target trial checks at roughly 17s; recovery explicitly
+allows 30s while expiry assertions retain 3s/100ms and the product default remains
+10s. A separate pre-change runtime reproduces the broad Linux iframe fixture's
+same default-10s failure. Broader Linux actionability latency and full MIME/frame
+coverage remain open, alongside raw navigation/wait deadlines, physical/headful
+drop and Windows. Focused deadline checks do not establish that broader matrix.

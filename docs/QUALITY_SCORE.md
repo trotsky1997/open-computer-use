@@ -56,3 +56,15 @@ drop / 导航等待的计时协调、物理 macOS headful 与 Windows 继续待�
 回归通过。Node 为 209/209、208/209（一个平台专属跳过）；npm build/pack 中两份
 运行模块与当前源码一致。跨宿主接管已有弹窗回调、其他原始动作计时、物理 macOS
 headful 与 Windows 继续待补。
+
+
+原生 drop 已复用弹窗活动时间预算：每次关闭弹窗后恢复剩余期限，公开 AbortSignal
+取消目标解析及 trial hover，并在后续原生阶段前检查取消；拖拽释放仍等待确认，失败
+继续保留所有权。原先隐藏目标会拖到整个 JS 在 7s 超时，现按 3s 动作期限失败。
+macOS/Linux 双会话源码及安装入口覆盖连续等待、恢复后超时、无迟发/重复投递和
+无限动作重置恢复；macOS 完整 MIME/文件/frame/shadow 与清理故障重试回归通过。
+Node 为 210/210、209/210（一个平台专属跳过），npm build/pack 内容匹配当前源码。
+Linux 恢复目标的六次 trial 检查约需 17s，恢复测试显式使用 30s；超时断言仍保持
+3s/100ms，产品默认仍为 10s。独立旧版本也在同一 Linux iframe 夹具触发默认超时，
+该延迟与完整 Linux MIME/frame 覆盖继续待补；原始导航、物理/headful drop 和
+Windows 仍待验证。

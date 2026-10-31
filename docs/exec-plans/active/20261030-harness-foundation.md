@@ -2312,3 +2312,44 @@ Capturing/responding to a dialog that predates a different host's observer still
 requires the owning host or existing native controls. Sole-callback takeover,
 raw CDP/drop/navigation-wait deadline coordination, physical macOS headful and
 Windows remain open. The full parity goal stays active.
+
+
+## Native drop active-time deadlines
+
+Raw keyboard/pointer input already waits across dialogs with host-owned leases
+and cancellation cleanup. Native drop instead permanently cleared its timer on
+the first dialog. An owned Chrome reproduction waited past the 3s resumed budget
+until the entire JS run timed out at 7s when a prompt hid the target.
+
+Native drop now reuses the existing dialog active-time budget and propagates its
+public AbortSignal through target resolution and both trial-hover checks.
+Expiration and watcher teardown stop later native stages. Native drag release is
+still awaited; failed cancellation keeps ownership and blocks reuse. The same
+budget handles standalone operations without a dialog watcher. No new dependency
+or runtime option was needed.
+
+Owned Chrome 158 source and source-relocated installed controllers cover both JS
+hosts on macOS/Linux: hidden-target timeout after a delayed response, repeated
+prompt pauses beyond the action budget, missing-target timeout, no late/duplicate
+delivery, timeout=0 reset and fresh trusted-input recovery. The original macOS
+full MIME/file, rich-editor, same/cross-process/shadow/reorder/navigation and
+cleanup-failure/retry drop regressions pass in both hosts. Updated that fixture
+to use an independently owned competing tab and explicit handoff for retained
+reset targets. Node: macOS 210/210; Linux 209/210 with one platform-only skip.
+Browser-only build/pack verifies both changed production modules against source.
+
+Linux restored hidden targets took roughly 17s for six normal trial checks;
+recovery uses an explicit 30s budget, while all expiry assertions retain 3s/100ms
+budgets and the product default stays 10s. A separate copy of the pre-change
+runtime reproduces the same default-10s failure on the broad Linux iframe drop
+fixture as current code. Broader Linux actionability latency remains open; the
+focused Linux controller verifies the listed deadline/recovery cases; the full
+Linux MIME/frame matrix remains open. Physical/headful drop and Windows remain unverified.
+
+Raw navigation command deadline/settlement and navigation-wait coordination
+remain separate open paths. An owned Chrome probe in both JS hosts confirms that
+goto opening a beforeunload dialog, waiting 11s, then dismissing reports
+"CDP Page.navigate timed out". This is the next concrete deadline defect.
+Page.navigate's deferred errorText check also sits outside its dialog callback;
+that distinct outcome still needs a native reproduction. The complete harness
+parity goal stays active.

@@ -406,7 +406,7 @@ explicitly while a known dialog is active. Playwright connection setup also fail
 explicitly if another observed tab has an active dialog, since CDP connection
 initialization can stall on such pages.
 
-Locator actions and file-chooser `setFiles` count their default 10s or explicit
+Locator actions, native `drop` and file-chooser `setFiles` count their default 10s or explicit
 `timeoutMs` budget only while active. A known action-owned JavaScript dialog
 pauses that budget; closing it resumes the remaining time, including across
 sequential prompts. Readiness and resumed work still have a deadline, and
@@ -414,8 +414,8 @@ sequential prompts. Readiness and resumed work still have a deadline, and
 retrying an uncertain action. The pinned Playwright public AbortSignal cancels
 expired work; connection/focus cleanup must still acknowledge completion.
 `timeoutMs: 0` disables the action deadline while turn/reset/close cancellation
-remains active. Connection setup, raw CDP input/navigation, native drop and
-navigation-wait deadlines retain their separate policies.
+remains active. Connection setup, raw CDP input/navigation and navigation-wait deadlines retain
+their separate policies.
 
 One observer per endpoint/tab is shared inside the host process. An action's
 dialog belongs to its initiating session; an unclaimed asynchronous dialog belongs

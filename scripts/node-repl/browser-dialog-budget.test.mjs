@@ -40,3 +40,12 @@ test('watcher cleanup and caller abort cancel pending actions even during dialog
   await assert.rejects(pending,/watcher ended|Caller canceled/);assert.equal(signal.aborted,true);finish({revision:3,done:true});
  }
 });
+
+
+test('active-time budget cancels native work without a dialog watcher',async()=>{
+ await assert.rejects(withBrowserActionBudget(({signal,timeout})=>{
+  assert.equal(timeout,0);signal.throwIfAborted();return new Promise((_,reject)=>signal.addEventListener('abort',()=>reject(signal.reason),{once:true}));
+ },{timeout:20}),/Timeout 20ms/);
+ const caller=new AbortController();caller.abort(Error('Already canceled'));
+ await assert.rejects(withBrowserActionBudget(({signal})=>signal.throwIfAborted(),{timeout:0,signal:caller.signal}),/Already canceled/);
+});
