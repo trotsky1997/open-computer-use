@@ -105,8 +105,11 @@ cancellation signal, and a callback that ignores it may continue accepted side
 effects. Cancellation supplies no rollback; inspect state before another action.
 Other owners' pages and native browser processes remain open.
 
-Native session crash events and main-page crash events interrupt outstanding
-invocations with a renderer-crashed error. A destroyed native target confirms
+Native Inspector events and browser-level `Target.targetCrashed` events interrupt
+outstanding invocations with a renderer-crashed error. Each session captures its
+exact native target ID; browser-level events only affect matching records. This
+covers OOP crashes whose target-specific caller may otherwise wait for a cancel
+reply from a dead renderer. A destroyed native target confirms
 that target's callers are gone. A main-page crash only supplies that confirmation
 for its root/same-process records; surviving OOP sessions still require abort
 acknowledgement. A child-session crash cannot confirm release in a surviving root
@@ -150,12 +153,12 @@ opaque names and raw string results. Temporary reference tabs were closed.
 
 A disposable testing profile used Chrome's test keychain flag because the new
 browser's real keychain read blocked; process-stack
-sampling identified that wait. No normal profile/keychain settings were changed. All 162 Node checks pass on macOS; Linux passes 161 with the macOS-only virtual-display check skipped;
+sampling identified that wait. No normal profile/keychain settings were changed. All 163 Node checks pass on macOS; Linux passes 162 with the macOS-only virtual-display check skipped;
 native-free CLI/MCP and both sessions’ read-only evaluation regressions also
 passed on Chrome 158, including renderer-crash cleanup.
 The test runtime came from the official Chrome for Testing channel metadata.
 Browser-wide discovery of unbound tabs, real user-interaction/consent dialogs, headful and
-Windows behavior, whole-browser process death, live OOP-child crash and broader external-site workflows remain
+Windows behavior, whole-browser process death, attached-crashed-frame refresh and broader external-site workflows remain
 unverified. Full transport/claims/native desktop parity remains an active goal.
 
 Turn-owned discovery also passes both sessions on Chrome 158: initial tools
@@ -173,3 +176,11 @@ reload/load-wait with restored notices and a new tool call. The Linux runtime ca
 The fixture closes its owned HTTP connections before awaiting server shutdown;
 this prevents an accepted local keepalive connection from delaying process exit
 on Node 24. Crash control sessions detach asynchronously after their target dies.
+
+Live OOP crash isolation passes both hosts on macOS/Linux arm64. The controller
+checks a native `iframe` target distinct from the root, runs waiting tools in
+both processes, and crashes only the child. The child call fails while the root
+call remains live; turn cleanup delivers the root's abort signal. After removing
+the crashed child, fresh root tools execute on the retained tab. Root crash,
+reset and same-tab reload checks also continue to pass. Refresh while a crashed
+child remains attached is outside this evidence.

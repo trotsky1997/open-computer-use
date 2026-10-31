@@ -14,8 +14,8 @@ const server=createServer((req,res)=>{
  const mc=document.modelContext,token=crypto.randomUUID();
  fixture.ready=(async()=>{if(!mc||${empty})return;
  await mc.registerTool({name:${JSON.stringify(child?'frame_echo':'echo')},description:'Owned echo fixture',inputSchema:{type:'object',properties:{text:{type:'string'}},required:['text']},annotations:{readOnlyHint:true},execute:({text})=>{if(typeof text!=='string')throw Error('Fixture text must be a string');fixture.calls++;return {content:[{type:'text',text:${child?"token+':'+text":"text"}}]};}},{signal:fixture.controller.signal});
- ${!child?`await mc.registerTool({name:'slow',description:'Owned cancelable wait',inputSchema:{type:'object'},execute:async(_input,{signal})=>{fixture.started++;await new Promise((resolve,reject)=>{signal.addEventListener('abort',()=>{fixture.aborted++;reject(Error('Stopped'));},{once:true});});return 'unused';}});
- await mc.registerTool({name:'navigate',description:'Owned fixture navigation',inputSchema:{type:'object'},execute:()=>{location.href='/empty';return new Promise(()=>{});}});`:''}
+ await mc.registerTool({name:'slow',description:'Owned cancelable wait',inputSchema:{type:'object'},execute:async(_input,{signal})=>{fixture.started++;await new Promise((resolve,reject)=>{signal.addEventListener('abort',()=>{fixture.aborted++;reject(Error('Stopped'));},{once:true});});return 'unused';}});
+ ${!child?`await mc.registerTool({name:'navigate',description:'Owned fixture navigation',inputSchema:{type:'object'},execute:()=>{location.href='/empty';return new Promise(()=>{});}});`:''}
  })();fixture.replace=async()=>{fixture.controller.abort();await mc.registerTool({name:${JSON.stringify(child?'frame_echo':'echo')},description:'Replacement',inputSchema:{type:'object'},execute:()=>{fixture.calls++;return 'replacement';}});};
  </script>`);
 });
@@ -80,11 +80,25 @@ try{
    const formTools=listing(await run(session,`var formTools=await cap.fetchTools();nodeRepl.write(JSON.stringify(formTools.description()));`)),form=formTools.find(tool=>tool.name.startsWith('submit_echo__'));assert.ok(form);
    assert.equal(await run(session,`nodeRepl.write(JSON.stringify(await formTools.call(${JSON.stringify(form.name)},{text:'owned-form-value'})));`),null);await page.waitForURL(url+'empty?text=owned-form-value');
    await session.reset();assert.equal(session.browserWebMcp.owners.size,0);
-   for(const ending of ['crash','reload','reset','close']){
+   for(const ending of ['crash','reload','oop','reset','close']){
     await run(session,`var b=await cua.getBrowser({id:'cdp'});var tab=await b.tabs.get(${JSON.stringify(id)});await tab.markHandoff();await tab.goto(${JSON.stringify(url+'cancel?'+ending)});nodeRepl.write(JSON.stringify(true));`);
     await page.waitForURL(url+'cancel?'+ending,{waitUntil:'load'});await page.evaluate(()=>fixture.ready);
-    const current=listing(await run(session,`var cap=await tab.capabilities.get('webmcp');var current=await cap.fetchTools();nodeRepl.write(JSON.stringify(current.description()));`)),waiting=current.find(tool=>tool.name.startsWith('slow__'));assert.ok(waiting);
-    await run(session,`var pending=current.call(${JSON.stringify(waiting.name)},{}).catch(error=>error.message);nodeRepl.write(JSON.stringify(true));`);await page.waitForFunction(()=>fixture.started===1);
+    let child;
+    if(ending==='oop'){
+     const src=url.replace('127.0.0.1','localhost')+'child?crash',navigated=page.waitForEvent('framenavigated',{predicate:frame=>frame.url()===src});await page.evaluate(src=>{const frame=document.createElement('iframe');frame.id='crash-child';frame.allow='tools';frame.src=src;document.body.append(frame);},src);child=await navigated;await child.waitForLoadState('load');await child.evaluate(()=>fixture.ready);
+    }
+    const current=listing(await run(session,`var cap=await tab.capabilities.get('webmcp');var current=await cap.fetchTools();nodeRepl.write(JSON.stringify(current.description()));`)),waiting=current.find(tool=>tool.name.startsWith('slow__')&&(ending!=='oop'||tool.origin.startsWith('http://localhost:')));assert.ok(waiting);
+    if(ending==='oop'){const rootSlow=current.find(tool=>tool.name.startsWith('slow__')&&tool.origin.startsWith('http://127.0.0.1:'));assert.ok(rootSlow);await run(session,`var rootSettled=false;var rootPending=current.call(${JSON.stringify(rootSlow.name)},{}).then(value=>{rootSettled=true;return value;},error=>{rootSettled=true;return error.message;});nodeRepl.write(JSON.stringify(true));`);await page.waitForFunction(()=>fixture.started===1);}
+    await run(session,`var pending=current.call(${JSON.stringify(waiting.name)},{}).catch(error=>error.message);nodeRepl.write(JSON.stringify(true));`);await (child??page).waitForFunction(()=>fixture.started===1);
+    if(ending==='oop'){
+     const cdp=await page.context().newCDPSession(child),target=(await cdp.send('Target.getTargetInfo')).targetInfo;assert.equal(target.type,'iframe');assert.notEqual(target.targetId,id);await cdp.send('Inspector.enable');
+     let timer;const crashed=new Promise((resolve,reject)=>{cdp.once('Inspector.targetCrashed',resolve);timer=setTimeout(()=>reject(Error('Owned OOP target did not crash')),5000);});try{void cdp.send('Page.crash').catch(()=>{});await crashed;}finally{clearTimeout(timer);}
+     assert.match(await run(session,'nodeRepl.write(JSON.stringify(await pending));'),/renderer crashed/);assert.equal(await page.evaluate(()=>fixture.started),1);assert.equal(await page.evaluate(()=>fixture.aborted),0);assert.equal(await page.evaluate(()=>fixture.calls),0);assert.equal(await run(session,'nodeRepl.write(JSON.stringify(rootSettled));'),false);
+     assert.equal([...session.browserWebMcp.owners.values()].reduce((count,state)=>count+state.active.size,0),1);assert.equal((await session.run(`await current.call(${JSON.stringify(waiting.name)},{});`)).isError,true);
+     await session.endTurn();await page.waitForFunction(()=>fixture.aborted===1);assert.equal(session.browserWebMcp.owners.size,0);
+     const detached=page.waitForEvent('framedetached',{predicate:frame=>frame===child});await page.evaluate(()=>document.getElementById('crash-child').remove());await detached;void cdp.detach().catch(()=>{});
+     const survived=listing(await run(session,`var b=await cua.getBrowser({id:'cdp'});var tab=await b.tabs.get(${JSON.stringify(id)});await tab.markHandoff();var cap=await tab.capabilities.get('webmcp');var survived=await cap.fetchTools();nodeRepl.write(JSON.stringify(survived.description()));`)),echo=survived.find(tool=>tool.name.startsWith('echo__'));assert.ok(echo);assert.equal(await run(session,`nodeRepl.write(JSON.stringify(await survived.call(${JSON.stringify(echo.name)},{text:'root-survived'})));`),JSON.stringify({content:[{type:'text',text:'root-survived'}]}));continue;
+    }
     if(ending==='crash'||ending==='reload'){
      const cdp=await page.context().newCDPSession(page),crashed=page.waitForEvent('crash',{timeout:5000});void cdp.send('Page.crash').catch(()=>{});await crashed;assert.match(await run(session,'nodeRepl.write(JSON.stringify(await pending));'),/renderer crashed/);
      if(ending==='reload'){
@@ -101,7 +115,7 @@ try{
      const recovered=listing(await run(session,`var cap=await tab.capabilities.get('webmcp');var recovered=await cap.fetchTools();nodeRepl.write(JSON.stringify(recovered.description()));`)),echo=recovered.find(tool=>tool.name.startsWith('echo__'));assert.ok(echo);assert.equal(await run(session,`nodeRepl.write(JSON.stringify(await recovered.call(${JSON.stringify(echo.name)},{text:'after-crash'})));`),JSON.stringify({content:[{type:'text',text:'after-crash'}]}));
     }else{await session[ending]();await page.waitForFunction(()=>fixture.aborted===1);assert.equal(session.browserWebMcp.owners.size,0);}
    }
-   console.log(`${Session.name} PASS native tools, isolated API, exact same-URL/OOP frames, stale replacement/turn/navigation, provider validation errors, initial and late-frame discovery, coalesced main/child/OOP tool-change notices, renderer crash/reset, fresh-tab and same-tab reload recovery, turn/reset/close native cancellation settlement, declarative form and empty listing`);
+   console.log(`${Session.name} PASS native tools, isolated API, exact same-URL/OOP frames, stale replacement/turn/navigation, provider validation errors, initial and late-frame discovery, coalesced main/child/OOP tool-change notices, renderer crash/reset, fresh-tab/same-tab reload and OOP-crash root isolation, turn/reset/close native cancellation settlement, declarative form and empty listing`);
   }finally{await page?.close();await session.close();}
  }
 }finally{await browser.close();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}

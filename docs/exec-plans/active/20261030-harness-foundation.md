@@ -1197,3 +1197,33 @@ reload implementation; it adds no runtime API, dependency, CI or registry releas
 
 Whole-browser process death, live OOP-child crash, Windows, physical/headful and
 external-site recovery remain open. Full harness parity remains active.
+
+## Live WebMCP OOP renderer-crash isolation
+
+Both platforms reproduced a child-target crash whose WebMCP caller timed out
+waiting for cancellation. Fetched collections now enable browser-level target
+crash discovery and match targetCrashed events against Target.getTargetInfo IDs
+captured for their exact native sessions. Matching dead sessions release their
+callers; only a confirmed root-target crash signals the root process. Native
+Inspector events remain an additional exact-session source. A generic page
+object crash callback no longer supplies root-process destruction authority.
+
+The owned fixture registers cancelable waits in child documents. It verifies a
+native iframe target distinct from the root, holds calls in both, and crashes
+only that child. Its call fails while the root call remains pending and its abort
+counter stays zero. Turn end then delivers cancellation to the living root and
+clears owned callers. Removing the crashed child permits a freshly fetched root
+tool call on the retained tab without resetting the JS session. Old handles are
+rejected. Main-renderer crash/reset and same-tab reload checks still pass.
+
+All 163 Node checks pass on macOS. Ubuntu arm64 / Node 24 passes 162 and skips
+the macOS-only virtual-display case. Both source/Worker sessions pass the entire
+updated owned Chrome 158 controller on macOS and Linux, including imperative/
+declarative tools, exact same-URL/OOP frames, discovery, cancellation, root crash,
+reload and the new OOP/root-call isolation. The focused check covers foreign
+crash events, captured target identity, root/child separation and closed-owner
+fencing. Test profiles and processes are owned; no normal profile was changed.
+
+Refresh with a crashed child still attached, whole-browser process death,
+physical/headful, Windows and external-site recovery remain open. No dependency,
+CI or registry release was added. Full harness parity remains active.

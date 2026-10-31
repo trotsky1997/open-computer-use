@@ -52,13 +52,20 @@ export class BrowserWebMcp {
   let watcher=entry.watchers.get(session);
   if(!watcher){
    let crash;watcher={frames:new Set(entry.discover?[frameId]:[]),ready:false,crash:new Promise((_,reject)=>{crash=reject;})};watcher.crash.catch(()=>{});entry.watchers.set(session,watcher);
-   session.on('Inspector.targetCrashed',()=>{watcher.crashed=true;if(!entry.discover){entry.crashed=true;if(session===entry.rootSession)entry.rootCrashed=true;entry.stale=true;}crash(Error('WebMCP renderer crashed; inspect before retrying'));});
+   watcher.fail=()=>{const error=Error('WebMCP renderer crashed; inspect before retrying');watcher.crashed=true;if(!entry.discover){entry.crashed=true;entry.stale=true;if(session===entry.rootSession){entry.rootCrashed=true;entry.signalRootCrash?.(error);}}crash(error);};
+   session.on('Inspector.targetCrashed',watcher.fail);
+   const {targetInfo}=await bounded(state.wait(session.send('Target.getTargetInfo')),'WebMCP target identity');if(typeof targetInfo?.targetId!=='string'||!targetInfo.targetId)throw Error('Native WebMCP target identity unavailable');watcher.targetId=targetInfo.targetId;
    const changed=event=>{if((entry.discover||watcher.ready)&&!state.closed&&!entry.stale&&Array.isArray(event.tools)&&event.tools.some(tool=>tool&&typeof tool.frameId==='string'&&watcher.frames.has(tool.frameId)))state.notifications.set(entry.targetId,entry);};
    session.on('WebMCP.toolsAdded',changed);session.on('WebMCP.toolsRemoved',changed);
    await bounded(state.wait(session.send('Inspector.enable')),'WebMCP crash observer');
    await bounded(state.wait(session.send('WebMCP.enable')),'WebMCP notifications');watcher.ready=true;
   }
   watcher.frames.add(frameId);
+ }
+ async watchCrashes(state,entry){
+  const session=await bounded(state.wait(entry.browser.newBrowserCDPSession()),'WebMCP browser crash observer');
+  session.on('Target.targetCrashed',event=>{if(state.closed)return;for(const watcher of entry.watchers.values())if(watcher.targetId===event.targetId)watcher.fail();});
+  await bounded(state.wait(session.send('Target.setDiscoverTargets',{discover:true,filter:[{type:'page'},{type:'iframe'}]})),'WebMCP target crash discovery');
  }
  async observe(state,targetId){
   const existing=state.observers.get(targetId);if(existing){if(existing.endpoint!==this.endpoint())throw Error('WebMCP observer endpoint changed; reset before reuse');return existing.ready;}
@@ -108,8 +115,8 @@ export class BrowserWebMcp {
    for(const context of entry.browser.contexts())context.on('dialog',()=>{});
    const {page,session}=await bounded(state.wait(findBrowserPage(entry.browser,targetId)),'WebMCP tab discovery');check();
    if(!/^https?:/u.test(page.url()))throw Error('WebMCP requires an HTTP(S) page');
-   entry.rootSession=session;let rejectCrash;entry.crash=new Promise((_,reject)=>{rejectCrash=reject;});entry.crash.catch(()=>{});
-   page.on('crash',()=>{entry.crashed=true;entry.rootCrashed=true;entry.stale=true;rejectCrash(Error('WebMCP renderer crashed; inspect before retrying'));});
+   entry.rootSession=session;entry.crash=new Promise((_,reject)=>{entry.signalRootCrash=reject;});entry.crash.catch(()=>{});
+   await this.watchCrashes(state,entry);check();
    entry.page=page;page.on('framenavigated',()=>{entry.stale=true;});page.on('framedetached',()=>{entry.stale=true;});page.on('close',()=>{entry.stale=true;});
    const metadata=[];
    for(const frame of page.frames()){

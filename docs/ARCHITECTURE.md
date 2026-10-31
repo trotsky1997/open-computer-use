@@ -496,11 +496,14 @@ queues coalesce notices per tab and prepend them to later JS results in both
 hosts; foreign frames, stale endpoints and closed owners are excluded. Schemas
 and callable handles still require an explicit fetch. Observers share existing
 bounded cleanup and retain failed disconnects for retry. Native target/main-page
-crashes reject outstanding calls. Destruction confirms only the affected native
+crashes reject outstanding calls through native Inspector and browser-level target
+events matched against captured session target IDs. Destruction confirms only the affected native
 session; a surviving OOP/root session still requires cancellation acknowledgement.
 Renderer-crash reset/fresh-tab recovery and explicit same-tab reload/load-wait
 have macOS/Linux arm64 evidence. Reload retains the tab binding/ID while old
-collections stay invalid; discovery and fresh native calls resume.
+collections stay invalid; discovery and fresh native calls resume. Live OOP crash
+checks also preserve a waiting root call and confirm its later cancellation;
+removing the dead child permits fresh root tools on that tab.
 The public tab capability prints untrusted metadata and preserves native result
 strings; the ordinary host action/confirmation policy still applies. Installer,
 CLI readiness and npm copy lists include the host module. See [WebMCP](browser-webmcp.md).
