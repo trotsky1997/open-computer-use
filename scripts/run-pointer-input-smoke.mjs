@@ -6,7 +6,7 @@ import {withConnection} from './node-repl/browser-cdp.mjs';
 const endpoint=process.env.OPEN_COMPUTER_USE_CDP_URL;if(!endpoint)throw Error('Set OPEN_COMPUTER_USE_CDP_URL to disposable Chrome');
 const server=createServer((req,res)=>{
  res.setHeader('Content-Type','text/html');res.end(`<title>Owned pointer fixture</title><style>body{margin:0;height:2000px}#surface{border:0;position:fixed;left:20px;top:50px;width:320px;height:140px;background:lightblue}output{position:fixed;top:240px;left:0}</style><button id="surface">Pointer surface</button><output></output><script>
- const events=[];let held=false;for(const type of ['mousedown','mousemove','mouseup','click','contextmenu','keydown','keyup'])document.addEventListener(type,e=>{if(type==='mousedown')held=true;if(type==='mouseup')held=false;events.push({type,x:e.clientX,y:e.clientY,buttons:e.buttons,button:e.button,detail:e.detail,scrollY,trusted:e.isTrusted,target:e.target.id,visibility:document.visibilityState});document.querySelector('output').textContent=JSON.stringify(events);if(type==='contextmenu')e.preventDefault();if(type==='mousedown'&&location.search==='?effects'){document.body.style.height='4000px';scrollTo(0,400);}if(type==='mousemove'&&held&&e.buttons===1)document.body.style.height='2400px';if(held&&((type==='mousemove'&&e.buttons===1&&location.search==='?modal-drag')||(type==='mousedown'&&location.search==='?modal-click'))){history.replaceState({},'',location.pathname);prompt('Pointer pause');}});globalThis.readFixture=()=>({events,held,visibility:document.visibilityState,width:visualViewport.width,height:document.body.scrollHeight});
+ if(location.search==='?offscreen'){document.querySelector('#surface').style.position='absolute';document.querySelector('#surface').style.top='1500px';}const events=[];let held=false;for(const type of ['mousedown','mousemove','mouseup','click','contextmenu','keydown','keyup'])document.addEventListener(type,e=>{if(type==='mousedown')held=true;if(type==='mouseup')held=false;events.push({type,x:e.clientX,y:e.clientY,buttons:e.buttons,button:e.button,detail:e.detail,scrollY,trusted:e.isTrusted,target:e.target.id,visibility:document.visibilityState});document.querySelector('output').textContent=JSON.stringify(events);if(type==='contextmenu')e.preventDefault();if(type==='mousedown'&&location.search==='?effects'){document.body.style.height='4000px';scrollTo(0,400);}if(type==='mousemove'&&held&&e.buttons===1)document.body.style.height='2400px';if(held&&((type==='mousemove'&&e.buttons===1&&location.search==='?modal-drag')||(type==='mousedown'&&location.search==='?modal-click'))){history.replaceState({},'',location.pathname);prompt('Pointer pause');}});globalThis.readFixture=()=>({events,held,visibility:document.visibilityState,width:visualViewport.width,height:document.body.scrollHeight,scrollY});
  </script>`);
 });
 await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));const url=`http://127.0.0.1:${server.address().port}/`,ids=new Set();
@@ -61,6 +61,34 @@ try{
    console.log(`${Session.name} PASS ${mode} ${action}, trusted receiver events, focus restoration, no replay and cleanup`);
   }catch(error){console.error('POINTER_FAILURE',Session.name,action,mode,currentId?JSON.stringify(await state(currentId).catch(error=>({error:error.message}))):'setup');throw error;}finally{if(originalOpen)session.browserInputs.open=originalOpen;await other?.close();await session.close();}
  }
+ for(const Session of [WorkerJavaScriptSession,PersistentJavaScriptSession])for(const mode of ['normal','reset',...(Session===WorkerJavaScriptSession?['exit']:[])]){
+  const session=new Session({native}),other=new Session({native});let release,originalOpen;
+  const gate=new Promise(resolve=>{release=resolve;});let prepared=false;
+  try{
+   const {id,baseline}=await setup(session,'?offscreen'),otherId=(await setup(other)).id;
+   originalOpen=session.browserInputs.open;
+   session.browserInputs.open=async(...args)=>{const connection=await originalOpen(...args),send=connection.send;connection.send=async(method,...rest)=>{const result=await send(method,...rest);if(method==='DOM.scrollIntoViewIfNeeded'){prepared=true;await gate;}return result;};return connection;};
+   const running=session.run('await tab.click(index);',30000);
+   await until(()=>prepared);
+   const record=[...session.browserInputs.leases.values()].find(record=>record.targetId===id);assert.ok(record);assert.equal(record.mouse,undefined);
+   const preparing=await state(id);assert.ok(preparing.scrollY>baseline.scrollY);assert.equal(preparing.events.filter(event=>event.type==='mousedown').length,0);
+   const denied=await other.run('await tab.pressKey(null,"a");');assert.equal(denied.isError,true);assert.match(denied.content.at(-1).text,/already owns/);
+   let cleanup;
+   if(mode==='reset'){cleanup=session.reset();await until(()=>record.canceled);}
+   if(mode==='exit'){cleanup=session.worker.terminate();await until(()=>record.canceled);}
+   release();await cleanup;
+   assert.equal((await running).isError,mode!=='normal');
+   await until(()=>session.browserInputs.leases.size===0);
+   const final=await state(id);
+   assert.equal(final.events.filter(event=>event.type==='mousedown').length,mode==='normal'?1:0);
+   assert.equal(final.events.filter(event=>event.type==='mouseup').length,mode==='normal'?1:0);
+   assert.equal(final.events.filter(event=>event.type==='click'&&event.target==='surface').length,mode==='normal'?1:0);
+   assert.equal(final.visibility,baseline.visibility);assert.equal(session.browserFocusLeases.entries.size,0);
+   assert.equal((await state(otherId)).events.filter(event=>event.type==='keydown').length,0);
+   console.log(`${Session.name} PASS AX preparation ${mode}, native scroll under host lease, competitor refused, no canceled press`);
+  }finally{release();if(originalOpen)session.browserInputs.open=originalOpen;await other.close();await session.close();}
+ }
+
 }finally{
  try{for(const id of ids)if(await target(id)){const version=await(await fetch(new URL('/json/version',endpoint))).json();await withConnection(version.webSocketDebuggerUrl,send=>send('Target.closeTarget',{targetId:id}));}}
  finally{server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}

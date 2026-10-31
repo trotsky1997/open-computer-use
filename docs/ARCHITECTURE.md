@@ -349,7 +349,7 @@ lazy startup and source-level sessions. See [native held clicks](native-held-cli
 for schema gating, exact verification and current lock/platform boundaries.
 
 
-BrowserInputs owns the press/release sequences of every raw CDP click and pointer drag outside the Worker, including clicks without options. It shares the
+BrowserInputs owns every raw CDP click and pointer drag outside the Worker, including clicks without options. AX clicks also revalidate node identity, scroll and resolve their point under the host input/focus lease. It shares the
 configured-origin pointer lease with BrowserDrops, guards document/geometry
 before presses, and releases buttons/keys through a fresh controller after
 cancellation. Raw input and locator action entry points consult this lease.

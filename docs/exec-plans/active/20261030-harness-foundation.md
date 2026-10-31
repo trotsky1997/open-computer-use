@@ -1489,3 +1489,34 @@ for owned headless fixtures; Windows/headful and broader provider races stay ope
 AX point preparation still resolves and may scroll in the client before host
 admission. Broader preparation/lease coordination remains open; this change owns
 the press/release sequence and preserves the existing initial point resolution.
+
+
+## AX click preparation under host ownership
+
+The ordinary-click follow-up moves AX point preparation out of the Worker and
+into the existing BrowserInputs operation. The client transfers its observed
+backend-node/role/name and loader/geometry snapshot. Before any scroll, the host
+owns the shared origin pointer/focus lease and revalidates the document and AX
+identity. It admits scroll/content effects, checks coordinate viewport and
+revision stability, resolves and validates the point, then continues the same
+managed press/release sequence. Temporary node objects are released.
+
+The pointer controller retains its original 30 cases and adds five offscreen
+AX preparation cases across both JS hosts. Native scrolling is observed while
+host completion is paused; competing input is rejected, normal completion
+clicks once, and reset/Worker exit produce no mouse down. A small existing-file
+unit test also checks changed AX identity and navigation refusal. Installed
+runtime validation clicks an AX textbox and verifies resulting text focus.
+
+This supersedes the previous client-side AX preparation limitation. Page-world
+bounding-box/hit-test calls, external-client/other-action coordination and the
+existing broader platform/provider gaps still require work. Accepted scrolls
+can remain after cancellation. No dependencies, CI or automatic press retry added.
+
+
+Validation: macOS Node 26 passes 171/171 tests; arm64 Linux Node 24 passes
+170 with one macOS-only virtual-display skip and no failures. Chrome 158 on each
+platform passes all 35 pointer cases, generic browser/held-input controllers and
+source-removed installer/standalone/Worker/Persistent/MCP browser flows. Linux
+fixtures retain the documented CDPScreenshotNewSurface flag. Windows/headful
+and page-world geometry isolation are not verified by these runs.

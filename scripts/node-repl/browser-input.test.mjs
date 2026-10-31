@@ -112,3 +112,38 @@ test("pressKey validates duration and releases after an admitted navigation with
  assert.deepEqual(calls.filter(call=>call.startsWith('rawKeyDown')),['rawKeyDown:Shift','rawKeyDown:Enter']);
  assert.deepEqual(calls.slice(-3),['keyUp:Enter','keyUp:Shift','focus-off']);
 });
+
+
+test('AX click preparation owns scrolling and cancellation before any press',async()=>{
+ for(const mode of ['normal','cancel','changed','navigation']) {
+  const endpoint='http://prepare-'+mode+'/',owner={},calls=[];let scrolled=false,ready,release;
+  const gate=new Promise(resolve=>{release=resolve;}),started=new Promise(resolve=>{ready=resolve;});
+  const geometry={loaderId:'old',viewport:{clientWidth:320,clientHeight:240,pageY:0},contentSize:{width:320,height:2000},viewportRevision:0};
+  const input=new BrowserInputs(()=>endpoint,async()=>({close(){},async send(method,args){
+   calls.push({method,args});
+   if(method==='Page.getFrameTree')return {frameTree:{frame:{loaderId:mode==='navigation'&&scrolled?'new':'old'}}};
+   if(method==='Page.getLayoutMetrics')return {cssVisualViewport:{...geometry.viewport,pageY:scrolled?800:0},cssContentSize:geometry.contentSize};
+   if(method==='Accessibility.getPartialAXTree')return {nodes:[{backendDOMNodeId:9,role:{value:'button'},name:{value:mode==='changed'?'Changed':'Target'}}]};
+   if(method==='DOM.scrollIntoViewIfNeeded'){scrolled=true;ready();await gate;}
+   if(method==='DOM.resolveNode')return {object:{objectId:'node'}};
+   if(method==='Runtime.callFunctionOn')return {result:{value:{x:20,y:30}}};
+   return {};
+  }}),()=>0);
+  input.supported=async()=>{};input.target=async()=>({webSocketDebuggerUrl:'page'});
+  const args={targetId:'tab',element:{backendNodeId:9,role:'button',name:'Target'},geometry};
+  const work=input.request(owner,args);work.catch(()=>{});
+  if(mode==='changed')await assert.rejects(work,/Element changed/);
+  else {
+   await started;
+   assert.equal(input.leases.get(endpoint).owner,owner);
+   assert.throws(()=>input.request({},{action:'check'}),/already owns/);
+   if(mode==='cancel')input.cancel(owner);
+   release();
+   if(mode==='normal')await work;else await assert.rejects(work,mode==='cancel'?/canceled/:/document|viewport/);
+  }
+  assert.equal(calls.filter(call=>call.args?.type==='mousePressed').length,mode==='normal'?1:0);
+  assert.equal(calls.filter(call=>call.method==='DOM.scrollIntoViewIfNeeded').length,mode==='changed'?0:1);
+  assert.equal(calls.filter(call=>call.method==='Runtime.releaseObject').length,mode==='normal'?1:0);
+  assert.equal(input.leases.size,0);assert.equal(browserPointerLeases.has(endpoint),false);
+ }
+});

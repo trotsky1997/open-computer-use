@@ -106,3 +106,26 @@ The already admitted down is never replayed. A press-triggered navigation or
 viewport change aborts remaining stages and releases outside; inspect the new
 page/state before retrying. Thirty click/drag cases pass per macOS/Linux platform
 across both JS hosts, including press-triggered content growth and document scroll.
+
+
+## AX click preparation
+
+AX-index clicks transfer the observed backend-node ID, role/name and document
+identity to BrowserInputs. The host acquires the origin input/focus lease before
+revalidating the AX node, scrolling it into view and resolving its point. The
+lease stays held through press/release and cleanup, so a competing actor cannot
+enter between the scroll and the press. Scrolling may change page offsets and
+content size; a changed loader, coordinate viewport or viewport revision stops
+preparation. The resolved point and geometry are checked before pressing.
+
+Reset and Worker exit during preparation stop later stages, restore focus and
+release ownership without pressing. An already accepted scroll can remain after
+cancellation. Point resolution retains the existing page-world bounding-box and
+hit-test implementation; isolated/native geometry and coordination with external
+CDP clients remain open. Temporary resolved-node handles are released.
+
+The pointer controller now runs 35 cases per macOS/Linux platform. Five added
+cases use a real offscreen button and pause the host after native scrolling to
+check competing-input rejection, successful completion and reset/Worker-exit
+cancellation before any down. The installed-runtime smoke also clicks an AX
+textbox and verifies typing into its resulting focus after source removal.

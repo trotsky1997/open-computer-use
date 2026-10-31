@@ -602,7 +602,7 @@ pass {emit:false} to suppress output. AX state uses browser accessibility node I
 Tab input: click(elementIndex, {mouseButton?, clickCount?, key?, durationMs?}), typeText(elementIndexOrNull, text),
 pressKey(elementIndexOrNull, key, {durationMs?}), paste(elementIndexOrNull, text, {format:"text"|"html"}),
 and scroll(elementIndex, direction, pages). Read fresh AX state after actions.
-Every click uses host input ownership and virtual focus, including calls without options, button aliases and multi-clicks. pressKey owns actual modifier/primary down and reverse up events, supports modifier-only keys and holds the chord for durationMs without synthesizing repeat. An element index focuses its validated target under the input lease; null uses the current focus. Key-induced navigation/scroll can complete before release. Held click keys/chords stay down across the click sequence; durationMs holds each press (finite, non-negative). Uses host-owned trusted CDP events and virtual focus. Ordinary keys type at the current focus before the click. Managed pointer actions block other raw input/locator actions until release; reset/timeout/close releases held state, and cleanup failure retains ownership for retry. Dialogs can be answered in later calls. Releases may finish already admitted effects.
+Every click uses host input ownership and virtual focus, including calls without options, button aliases and multi-clicks. AX clicks revalidate and scroll their observed node under this ownership before resolving the click point. pressKey owns actual modifier/primary down and reverse up events, supports modifier-only keys and holds the chord for durationMs without synthesizing repeat. An element index focuses its validated target under the input lease; null uses the current focus. Key-induced navigation/scroll can complete before release. Held click keys/chords stay down across the click sequence; durationMs holds each press (finite, non-negative). Uses host-owned trusted CDP events and virtual focus. Ordinary keys type at the current focus before the click. Managed pointer actions block other raw input/locator actions until release; reset/timeout/close releases held state, and cleanup failure retains ownership for retry. Dialogs can be answered in later calls. Releases may finish already admitted effects.
 Screenshot-only reads invalidate element indices. Navigation invalidates all indices.
 setValue(elementIndex, value) replaces editable text; selectText(elementIndex, text, {prefix?,suffix?,selectionType?}) selects exact text or positions the cursor.
 click and scroll also accept screenshot pixel pairs. drag(fromPixelPair, toPixelPair) performs a host-owned pointer drag with managed cancellation and focus restoration. Scroll/content effects during motion are allowed; navigation or a changed coordinate viewport stops remaining movement. Capture a new screenshot after input; changed document or viewport geometry invalidates coordinates. Pinch zoom is unsupported.
@@ -800,23 +800,6 @@ export function createBrowserApi(activeOutput, environment = process.env, {focus
     async function focus(send, index) {
       if (index !== null) await send("DOM.focus", { backendNodeId: await element(send, index) });
     }
-    async function point(send, index) {
-      if (Array.isArray(index)) return coordinate(send, index);
-      const backendNodeId = await element(send, index);
-      await send("DOM.scrollIntoViewIfNeeded", { backendNodeId });
-      const { object } = await send("DOM.resolveNode", { backendNodeId });
-      const result = await send("Runtime.callFunctionOn", { objectId: object.objectId, returnByValue: true,
-        functionDeclaration: `function() {
-          const r = this.getBoundingClientRect();
-          const x = Math.max(0, r.left) + (Math.min(innerWidth, r.right) - Math.max(0, r.left)) / 2;
-          const y = Math.max(0, r.top) + (Math.min(innerHeight, r.bottom) - Math.max(0, r.top)) / 2;
-          const hit = this.ownerDocument.elementFromPoint(x, y);
-          if (!this.isConnected || r.width <= 0 || r.height <= 0 || !(hit === this || this.contains(hit))) throw new Error("Element is covered or not visible");
-          return {x, y};
-        }` });
-      if (result.exceptionDetails) throw new Error("Element is covered or not visible; read state again");
-      return result.result.value;
-    }
     async function edit(index, operation, text, options = {}) {
       await input(async send => {
         const backendNodeId = await element(send, index);
@@ -883,8 +866,17 @@ export function createBrowserApi(activeOutput, environment = process.env, {focus
       async click(index, options = {}) {
         validateClick(options);
         await input(async send => {
-          const position = await point(send, index);
-          return requestInput({targetId:target.id,position,geometry:await geometry(send),options});
+          const observedLoaderId=documentId;
+          const position = Array.isArray(index) ? await coordinate(send,index) : undefined;
+          let elementTarget;
+          if(!position) {
+            const node=elements.get(String(index));
+            if(!node || !documentId)throw new Error("Unknown or stale element index; read AX state again");
+            elementTarget={backendNodeId:node.backendDOMNodeId,role:node.role?.value,name:node.name?.value};
+          }
+          const current=await geometry(send);
+          if(elementTarget && current.loaderId!==observedLoaderId)throw new Error("Page navigated; read AX state again");
+          return requestInput({targetId:target.id,position,element:elementTarget,geometry:current,options});
         });
       },
       async drag(from, to) {
