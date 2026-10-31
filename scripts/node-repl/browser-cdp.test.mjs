@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { BrowserConsoleLogs, createBrowserApi, keyEvent, screenshotPoint, screenshotRegion, imageDimensions } from "./browser-cdp.mjs";
+import { BrowserConsoleLogs, openConnection, createBrowserApi, keyEvent, screenshotPoint, screenshotRegion, imageDimensions } from "./browser-cdp.mjs";
 import { createCuaApi } from "./open-computer-use-repl.mjs";
 const output = () => ({ write() {}, async emitImage() {} });
 
@@ -111,4 +111,21 @@ test("failed host cleanup retains ownership for a later retry", async () => {
   fail=false;
   await leases.cleanup(owner);
   assert.equal(leases.entries.size,0);
+});
+
+
+test("closed CDP connections reject new requests immediately, including no-deadline calls",{timeout:1000},async()=>{
+ const Original=globalThis.WebSocket;let sent=0;
+ class Socket extends EventTarget {
+  static OPEN=1;
+  constructor(){super();this.readyState=Socket.OPEN;queueMicrotask(()=>this.dispatchEvent(new Event('open')));}
+  send(){sent++;}
+  close(){this.readyState=3;queueMicrotask(()=>this.dispatchEvent(new Event('close')));}
+ }
+ globalThis.WebSocket=Socket;
+ try {
+  const connection=await openConnection('ws://owned.invalid');connection.close();
+  await assert.rejects(connection.send('Runtime.evaluate',{},0),/connection closed/);
+  await assert.rejects(connection.send('Page.enable'),/connection closed/);assert.equal(sent,0);
+ }finally{globalThis.WebSocket=Original;}
 });

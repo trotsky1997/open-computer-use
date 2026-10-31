@@ -758,3 +758,39 @@ already open before observer startup delays Page.enable without replaying its
 opening event. That boundary, broader frame/provider/extension/headful behavior,
 external-client coordination and native Windows remain open. The full harness
 goal stays active. All browser profiles/configs/targets were owned fixtures.
+
+## Retained dialog cleanup after capture loss
+
+Closed CDP connections now reject new requests immediately, including calls with
+no deadline. A failed dialog response retains a replacement observation/control
+connection for renderer verification, later events and retries. Late callbacks
+from replaced connections are identity-guarded. Cleanup ownership carries into
+synchronous follow-ups and is cleared after each attempt.
+
+A real active-dialog disconnect reproduced the Chromium PageHandler boundary:
+dialog callbacks belong to the observing session, so a new handler can report no
+callback while the old dialog still blocks renderer progress. Cleanup now waits
+for renderer progress or a new dialog event before discarding that captured
+identity. Failure returns an explicit unconfirmed-cleanup error, retains dialog
+and owner, and blocks further JS reuse. Existing native/browser controls or a
+surviving observer can close the old dialog; the retained observer captures
+follow-ups and reset retry can then release dialog/input/focus resources. This
+step establishes safe recovery boundaries; automatic sole-observer callback
+takeover remains open in the full harness goal.
+
+Validation passed: 153 Node checks on macOS; arm64 Linux passed 152 with one
+macOS-only skip. Both JS hosts and platforms passed real first-reset failure with
+identity/ownership retention, blocked JS reuse, surviving-observer dismissal of
+the first dialog, capture and automatic cleanup of a second synchronous prompt,
+reset retry, AX/locator readback and final resource release. Existing early/popup,
+alert/confirm/prompt/beforeunload, stale-handle and cleanup-failure recovery smokes
+also passed on both platforms. A focused closed-transport check verifies immediate
+rejection of no-deadline calls. macOS local/global npm tarball installation and
+installed browser CLI/JS/MCP flows passed; the local browser-only tarball was
+refreshed without registry publication. No project dependency or CI added.
+
+See [browser CDP](../../browser-cdp.md) for the owning Chromium source and runtime
+limits. Headful native recovery, sole-observer takeover, external-client
+coordination, broader frame/provider and Windows behavior remain unverified.
+The full harness goal stays active. Checks used only owned browser profiles,
+local fixture pages and an explicitly created surviving observer.

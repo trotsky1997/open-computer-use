@@ -174,6 +174,7 @@ export async function openConnection(url, onEvent = () => {}, onClose = () => {}
     });
     clearTimeout(timer);
     const send = (method, params = {}, timeoutMs = TIMEOUT, sessionId) => new Promise((resolve, reject) => {
+      if (socket.readyState !== WebSocket.OPEN) { reject(new Error("Browser connection closed")); return; }
       const id = ++nextId;
       const timeout = timeoutMs === 0 ? undefined : setTimeout(() => { pending.delete(id); reject(new Error(`CDP ${method} timed out`)); }, timeoutMs);
       pending.set(id, {
@@ -361,8 +362,8 @@ export class BrowserDialogs {
         opener = parent.openerId;
       }
       const watch = watches.at(-1);
-      entry.dialog = {id:++this.nextId,type:event.params.type,owner:watch?.owner,consumed:false,watches};
-      if (watch) this.claim(entry,watch.owner);
+      entry.dialog = {id:++this.nextId,type:event.params.type,owner:watch?.owner ?? entry.cleanupOwner,consumed:false,watches};
+      if (entry.dialog.owner) this.claim(entry,entry.dialog.owner);
       for (const notify of entry.dialogWaiters) notify();
       for (const waiting of watches) {
         waiting.dialog = entry.dialog;
@@ -394,7 +395,7 @@ export class BrowserDialogs {
           if (!response.ok) throw new Error(`Browser discovery failed: HTTP ${response.status}`);
           const target = (await response.json()).find(item => item.type === "page" && item.id === targetId);
           if (!target) throw new Error("Tab closed or no longer available");
-          connection = await openConnection(target.webSocketDebuggerUrl,event => this.event(entry,event), () => { if (!entry.closed) entry.error = new Error("Browser dialog connection closed; bind the tab again"); });
+          connection = await openConnection(target.webSocketDebuggerUrl,event => {if (entry.connection === connection) this.event(entry,event);}, () => { if (!entry.closed && entry.connection === connection) entry.error = new Error("Browser dialog connection closed; bind the tab again"); });
         }
         entry.connection = connection;
         if (entry.closed) { connection.close(); throw new Error("Browser dialog session closed"); }
@@ -491,33 +492,59 @@ export class BrowserDialogs {
     for (const entry of entries) {
       await entry.ready.catch(() => {});
       const deadline = Date.now() + TIMEOUT;
-      while (entry.dialog && (entry.dialog.owner === owner || (!entry.dialog.owner && entry.owners.size === 1 && !entry.passiveOwners?.has(owner)))) {
-        if (Date.now() > deadline) throw Object.assign(new Error("JavaScript dialogs kept opening during cleanup"),{browserCleanupFailed:true});
-        await entry.dialog.response?.catch(() => {});
-        if (entry.dialog) {
-          const dismissed = entry.dialog;
-          let notify, gone = false;
-          const nextDialog = new Promise(resolve => {notify=resolve;entry.dialogWaiters.add(resolve);});
-          try {
-            try { await entry.connection.send("Page.handleJavaScriptDialog",{accept:false}); }
-            catch (error) {
-              // A closed tab needs no dismissal; a live tab gets one fresh control connection.
-              const response = await fetch(new URL("/json/list",entry.endpoint),{signal:AbortSignal.timeout(TIMEOUT),redirect:"error"});
-              if (!response.ok) throw new Error(`Browser discovery failed: HTTP ${response.status}`);
-              const target = (await response.json()).find(item => item.id === targetId);
-              gone = !target;
-              if (target) await withConnection(target.webSocketDebuggerUrl,send => send("Page.handleJavaScriptDialog",{accept:false})).catch(error => {if (!/No dialog is showing/i.test(error.message)) throw error;});
-            }
-            if (entry.dialog === dismissed) entry.dialog = undefined;
-            if (gone) break;
-            if (!entry.dialog) {
-              // The renderer barrier completes after synchronous continuations, or the next dialog wins.
-              await Promise.race([entry.connection.send("Page.getFrameTree"),nextDialog]);
-            }
-          } catch (cleanupError) {cleanupError.browserCleanupFailed=true;throw cleanupError;}
-          finally {entry.dialogWaiters.delete(notify);}
+      try {
+        while (entry.dialog && (entry.dialog.owner === owner || (!entry.dialog.owner && entry.owners.size === 1 && !entry.passiveOwners?.has(owner)))) {
+          entry.cleanupOwner = owner;
+          if (Date.now() > deadline) throw Object.assign(new Error("JavaScript dialogs kept opening during cleanup"),{browserCleanupFailed:true});
+          await entry.dialog.response?.catch(() => {});
+          if (entry.dialog) {
+            const dismissed = entry.dialog;
+            let notify, gone = false, unconfirmed = false;
+            const nextDialog = new Promise(resolve => {notify=resolve;entry.dialogWaiters.add(resolve);});
+            try {
+              try { await entry.connection.send("Page.handleJavaScriptDialog",{accept:false}); }
+              catch (error) {
+                // Keep recovery observation alive through synchronous follow-up dialogs.
+                const response = await fetch(new URL("/json/list",entry.endpoint),{signal:AbortSignal.timeout(TIMEOUT),redirect:"error"});
+                if (!response.ok) throw new Error(`Browser discovery failed: HTTP ${response.status}`);
+                const target = (await response.json()).find(item => item.id === targetId);
+                gone = !target;
+                if (target) {
+                  let connection;
+                  connection = await openConnection(target.webSocketDebuggerUrl,event=>{if (entry.connection === connection) this.event(entry,event);},()=>{
+                    if (!entry.closed && entry.connection === connection) entry.error = new Error("Browser dialog recovery connection closed");
+                  });
+                  const previous = entry.connection;
+                  entry.connection = connection;
+                  entry.captureSessionId = undefined;
+                  entry.error = undefined;
+                  // Enable before dismissal; its renderer reply can wait for the dialog to close.
+                  connection.send("Page.enable").catch(error=>{if (!entry.closed && entry.connection === connection) entry.error=error;});
+                  previous?.close();
+                  await connection.send("Page.handleJavaScriptDialog",{accept:false}).catch(error => {
+                    if (!/No dialog is showing/i.test(error.message)) throw error;
+                    unconfirmed = true;
+                  });
+                }
+              }
+              if (gone) break;
+              if (unconfirmed && entry.dialog === dismissed) {
+                // A fresh Page handler has no callback for an older dialog; require renderer progress.
+                try {await Promise.race([entry.connection.send("Page.getFrameTree"),nextDialog]);}
+                catch (error) {throw new Error("Dialog capture disconnected; cleanup is unconfirmed. Resolve the existing browser/native dialog, then retry reset.",{cause:error});}
+                if (entry.dialog === dismissed) entry.dialog = undefined;
+              } else {
+                if (entry.dialog === dismissed) entry.dialog = undefined;
+                if (!entry.dialog) {
+                  // The renderer barrier completes after synchronous continuations, or the next dialog wins.
+                  await Promise.race([entry.connection.send("Page.getFrameTree"),nextDialog]);
+                }
+              }
+            } catch (cleanupError) {cleanupError.browserCleanupFailed=true;throw cleanupError;}
+            finally {entry.dialogWaiters.delete(notify);}
+          }
         }
-      }
+      } finally { if (entry.cleanupOwner === owner) delete entry.cleanupOwner; }
       if (!this.closedOwners.has(owner)) await Promise.all([...entry.watches].filter(watch => watch.owner === owner).map(watch => watch.finished));
       for (const watch of entry.watches) if (watch.owner === owner) {
         watch.resolve({opened:false});

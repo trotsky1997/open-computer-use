@@ -383,8 +383,9 @@ to the first session that obtains a handle. Other sessions cannot respond to tha
 handle, and closing a passive observer preserves the owner's dialog. Reset,
 timeout and close dismiss owned active dialogs before releasing the observer and
 focus resources. Immediate sequential dialogs are drained during cleanup; dialogs
-that keep opening beyond the bounded cleanup interval stop reuse. A live target with a broken observer gets a fresh control
-connection for dismissal; failed cleanup retains ownership and stops session
+that keep opening beyond the bounded cleanup interval stop reuse. A live target with a broken observer gets a fresh observation/control connection
+that stays alive through cleanup and retries. Its identity guards late events
+from replaced connections. Failed cleanup retains ownership and stops session
 reuse until reset successfully retries. Source-level
 PersistentJavaScriptSession reset()/close() are asynchronous; run() also waits for
 the pending cleanup barrier and reports cleanup failure.
@@ -409,6 +410,18 @@ tab promotes that owner; subsequent inventory does not demote it. The last owner
 releases auto-attach and its root connection. Stale capture-session events are
 ignored; a lost root observer fails discovery until reset releases it and allows
 fresh observation. No document content is rewritten for capture.
+
+Chromium's [PageHandler implementation](https://github.com/chromium/chromium/blob/main/content/browser/devtools/protocol/page_handler.cc)
+stores dialog callbacks in the observing session. A replacement handler reports
+only its own callbacks. After capture loss, cleanup requires renderer progress or
+new dialog events before clearing an older dialog identity. If that check times
+out, reset fails with an explicit unconfirmed-cleanup error, retains the dialog
+and owner, and keeps further JavaScript blocked. An existing native/browser
+control or an already-observing CDP session can close the old dialog. The retained
+recovery observer then captures synchronous follow-ups; retry reset to drain
+those dialogs and release input/focus/observer resources. A renderer barrier is
+always sent over the recovered connection. Closed CDP connections reject new
+requests immediately, including timeoutMs:0 calls.
 
 A prompt during a cross-process frame drop has real Chrome coverage. macOS and
 arm64 Linux disposable Chromium verified pre-binding prompts, synchronous popup

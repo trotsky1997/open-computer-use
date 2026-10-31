@@ -535,3 +535,18 @@ observer blocks further discovery until reset. Real pre-binding/popup flows and
 cleanup are verified in both JS hosts on macOS and arm64 Linux. Existing dialogs
 that predate observer startup still require existing browser/native controls;
 raw CDP cannot replay their opening event. See [browser CDP](browser-cdp.md).
+
+
+## Dialog cleanup after capture loss
+
+Closed CDP transports reject new calls immediately, including no-deadline calls.
+A failed dialog response installs a persistent replacement observer and uses it
+for later events and the renderer barrier. Connection identity guards ignore
+late callbacks from the replaced transport. Cleanup ownership carries through
+synchronous follow-up dialogs and is released after the cleanup attempt.
+Chromium stores dialog callbacks per observing session; a fresh handler cannot
+adopt an older callback. If renderer progress remains unconfirmed, cleanup keeps
+the captured dialog/owner and blocks JS reuse. Existing browser/native controls
+or a surviving observer can close that dialog, after which the retained observer
+captures follow-ups and reset can complete. The real-browser controller verifies
+this boundary and successful retry; automatic takeover remains open.
