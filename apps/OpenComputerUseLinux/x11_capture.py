@@ -53,16 +53,39 @@ class PictureFormat(C.Structure):
                 ("direct", DirectFormat), ("colormap", C.c_ulong)]
 
 
-def png(raw, width, height, stride, order, masks, alpha=False):
+class Rectangle(C.Structure):
+    _fields_ = [("x", C.c_short), ("y", C.c_short), ("width", C.c_ushort), ("height", C.c_ushort)]
+
+
+def png(raw, width, height, stride, order, masks, alpha=False, shape=None):
     if order not in (0, 1) or stride != width * 4 or masks != (0xff0000, 0xff00, 0xff):
         raise RuntimeError("Unsupported X11 pixel layout")
-    channels = 4 if alpha else 3
+    coverage = None
+    if shape is not None:
+        if len(shape) > 4096:
+            raise RuntimeError("X11 shape exceeds rectangle budget")
+        coverage, area = bytearray(width * height), 0
+        for x, y, w, h in shape:
+            if w <= 0 or h <= 0:
+                raise RuntimeError("Invalid X11 shape rectangle")
+            left, top, right, bottom = max(0, x), max(0, y), min(width, x + w), min(height, y + h)
+            if right <= left or bottom <= top:
+                continue
+            area += (right - left) * (bottom - top)
+            if area > 16_000_000:
+                raise RuntimeError("X11 shape exceeds pixel budget")
+            span = bytes([1]) * (right - left)
+            for row in range(top, bottom):
+                coverage[row * width + left:row * width + right] = span
+    channels = 4 if alpha or coverage is not None else 3
     rgb = bytearray(width * height * channels)
     red, green, blue = (2, 1, 0) if order == 0 else (1, 2, 3)
-    if alpha:
+    if channels == 4:
         opacity = 3 if order == 0 else 0
         for pixel in range(width * height):
-            a = raw[pixel * 4 + opacity]
+            a = raw[pixel * 4 + opacity] if alpha else 255
+            if coverage is not None and not coverage[pixel]:
+                a = 0
             for channel, source in enumerate((red, green, blue)):
                 rgb[pixel * 4 + channel] = min(255, (raw[pixel * 4 + source] * 255 + a // 2) // a) if a else 0
             rgb[pixel * 4 + 3] = a
@@ -71,7 +94,7 @@ def png(raw, width, height, stride, order, masks, alpha=False):
     rows = b"".join(b"\0" + rgb[y * width * channels:(y + 1) * width * channels] for y in range(height))
     def chunk(kind, data):
         return struct.pack("!I", len(data)) + kind + data + struct.pack("!I", zlib.crc32(kind + data))
-    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack("!2I5B", width, height, 8, 6 if alpha else 2, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b"")
+    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack("!2I5B", width, height, 8, 6 if channels == 4 else 2, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b"")
 
 
 class X11:
@@ -113,6 +136,8 @@ class X11:
         self.shape = C.CDLL(ctypes.util.find_library("Xext") or "libXext.so.6")
         self.shape.XShapeQueryExtents.restype = C.c_int
         self.shape.XShapeQueryExtents.argtypes = [C.c_void_p, C.c_ulong, C.POINTER(C.c_int), C.POINTER(C.c_int), C.POINTER(C.c_int), C.POINTER(C.c_uint), C.POINTER(C.c_uint), C.POINTER(C.c_int), C.POINTER(C.c_int), C.POINTER(C.c_int), C.POINTER(C.c_uint), C.POINTER(C.c_uint)]
+        self.shape.XShapeGetRectangles.restype = C.POINTER(Rectangle)
+        self.shape.XShapeGetRectangles.argtypes = [C.c_void_p, C.c_ulong, C.c_int, C.POINTER(C.c_int), C.POINTER(C.c_int)]
         self.display = self.lib.XOpenDisplay(None)
         if not self.display:
             raise RuntimeError("X11 display unavailable")
@@ -283,14 +308,31 @@ class X11:
                 pending.extend((entry, depth + 1) for entry in children)
             if pids != {expected_pid}:
                 continue
-            shaped, bx, by, bw, bh = C.c_int(), C.c_int(), C.c_int(), C.c_uint(), C.c_uint()
-            clipped, cx, cy, cw, ch = C.c_int(), C.c_int(), C.c_int(), C.c_uint(), C.c_uint()
-            if not self.shape.XShapeQueryExtents(self.display, window, C.byref(shaped), C.byref(bx), C.byref(by), C.byref(bw), C.byref(bh), C.byref(clipped), C.byref(cx), C.byref(cy), C.byref(cw), C.byref(ch)) or shaped.value:
-                raise RuntimeError("Shaped XComposite frame unsupported")
             matches.append(window)
         if len(matches) != 1:
             raise RuntimeError("XComposite frame PID/geometry is absent or ambiguous")
         return matches[0]
+
+    def capture_shape(self, window, attrs, deadline):
+        shaped, bx, by, bw, bh = C.c_int(), C.c_int(), C.c_int(), C.c_uint(), C.c_uint()
+        clipped, cx, cy, cw, ch = C.c_int(), C.c_int(), C.c_int(), C.c_uint(), C.c_uint()
+        if not self.shape.XShapeQueryExtents(self.display, window, C.byref(shaped), C.byref(bx), C.byref(by), C.byref(bw), C.byref(bh), C.byref(clipped), C.byref(cx), C.byref(cy), C.byref(cw), C.byref(ch)):
+            raise RuntimeError("X11 frame shape unavailable")
+        if not shaped.value:
+            return None
+        count, order = C.c_int(), C.c_int()
+        rectangles = self.shape.XShapeGetRectangles(self.display, window, 0, C.byref(count), C.byref(order))
+        try:
+            if not 0 <= count.value <= 4096 or order.value not in (0, 1, 2, 3) or (count.value and not rectangles) or time.monotonic() > deadline:
+                raise RuntimeError("Invalid or over-budget X11 frame shape")
+            if count.value == 0:
+                return []
+            # Shape coordinates start at the window interior; the pixmap includes its border.
+            border = attrs.border_width
+            return [(r.x + border, r.y + border, r.width, r.height) for r in rectangles[:count.value]]
+        finally:
+            if rectangles:
+                self.lib.XFree(rectangles)
 
     def read_composite(self, expected_pid, rectangle):
         _x, _y, width, height = rectangle
@@ -314,8 +356,10 @@ class X11:
                 raise RuntimeError("XComposite capture requires an existing compositor")
             if not composite.XCompositeQueryVersion(self.display, C.byref(major), C.byref(minor)) or (major.value, minor.value) < (0, 2):
                 raise RuntimeError("XComposite named window pixmaps unavailable")
-            window = self.composite_frame(expected_pid, rectangle, time.monotonic() + 0.25)
+            deadline = time.monotonic() + 0.25
+            window = self.composite_frame(expected_pid, rectangle, deadline)
             attrs = self.attributes(window)
+            shape = self.capture_shape(window, attrs, deadline)
             format_ = render.XRenderFindVisualFormat(self.display, attrs.visual)
             if not format_ or format_.contents.type != 1 or format_.contents.depth != attrs.depth or attrs.depth not in (24, 32):
                 raise RuntimeError("Unsupported XComposite visual")
@@ -339,7 +383,7 @@ class X11:
             if not value.data or value.format != 2 or value.xoffset != 0 or value.bits_per_pixel != 32 or value.bytes_per_line != width * 4 or (value.width, value.height, value.depth) != (width, height, attrs.depth):
                 raise RuntimeError("Unsupported XComposite image format")
             raw = C.string_at(value.data, value.bytes_per_line * height)
-            layout = (value.bytes_per_line, value.byte_order, masks, bool(alpha_mask))
+            layout = (value.bytes_per_line, value.byte_order, masks, bool(alpha_mask), shape)
         finally:
             if image:
                 self.lib.XDestroyImage(image)

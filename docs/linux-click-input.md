@@ -27,7 +27,9 @@ need broader provider coverage.
 
 Root-image compositor/depth restrictions apply only to the root-pixel capture
 route. Input verifies the receiving frame independently and accepts ARGB visual
-depths; it still requires focus, full on-screen bounds and no occlusion.
+depths; it still requires focus, full on-screen bounds and no occlusion. Shaped
+frames remain unsupported for physical input, including when their composited
+image is available; semantic AX actions remain available.
 
 The helper checks existing core buttons/action modifiers, briefly probes pointer
 grab availability, moves the pointer and verifies its root child/window and pixel

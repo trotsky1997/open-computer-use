@@ -7,6 +7,25 @@ import x11_capture as capture
 
 
 class ImageTests(unittest.TestCase):
+    def test_shape_png_clips_unions_and_zeros_rgb_without_losing_alpha(self):
+        def pixels(raw, alpha, shape):
+            data = capture.png(raw, 3, 2, 12, 0, (0xff0000, 0xff00, 0xff), alpha, shape)
+            self.assertEqual(data[25], 6)
+            length = struct.unpack_from('!I', data, 33)[0]
+            rows = zlib.decompress(data[41:41 + length])
+            return rows[1:13] + rows[14:26]
+        raw = bytes([0, 0, 255, 0]) * 6
+        red, clear = bytes([255, 0, 0, 255]), bytes(4)
+        self.assertEqual(pixels(raw, False, [(-1, 0, 2, 1), (1, 1, 3, 1), (1, 1, 1, 1)]), red + clear * 3 + red * 2)
+        self.assertEqual(pixels(raw, False, []), bytes(24))
+        self.assertEqual(pixels(bytes([0, 0, 128, 128]) * 6, True, [(0, 0, 1, 1)]), bytes([255, 0, 0, 128]) + bytes(20))
+        with self.assertRaisesRegex(RuntimeError, 'rectangle budget'):
+            pixels(raw, False, [(0, 0, 1, 1)] * 4097)
+        with self.assertRaisesRegex(RuntimeError, 'Invalid X11 shape'):
+            pixels(raw, False, [(0, 0, 0, 1)])
+        with self.assertRaisesRegex(RuntimeError, 'pixel budget'):
+            capture.png(b'', 4000, 4000, 16000, 0, (0xff0000, 0xff00, 0xff), False, [(0, 0, 4000, 4000)] * 2)
+
     def test_png_unpremultiplies_alpha_in_both_byte_orders(self):
         for order, raw in [(0, bytes([0, 0, 128, 128, 10, 20, 30, 0])), (1, bytes([128, 128, 0, 0, 0, 30, 20, 10]))]:
             data = capture.png(raw, 2, 1, 8, order, (0xff0000, 0xff00, 0xff), True)
@@ -127,6 +146,29 @@ class ImageTests(unittest.TestCase):
         client.pid = lambda window: 42 if window == 2 else 99
         with self.assertRaisesRegex(RuntimeError, 'PID/geometry'):
             client.composite_frame(42, (0, 0, 2, 1), float('inf'))
+
+    def test_native_shape_border_translation_empty_region_and_cleanup(self):
+        client = self.client()
+        def shaped(_display, _window, bounding, *_args):
+            bounding._obj.value = 1
+            return 1
+        client.shape.XShapeQueryExtents.side_effect = shaped
+        rectangles = (capture.Rectangle * 2)(capture.Rectangle(-2, -1, 3, 2), capture.Rectangle(3, 2, 5, 4))
+        def region(_display, _window, kind, count, order):
+            self.assertEqual(kind, 0)
+            count._obj.value, order._obj.value = 2, 3
+            return rectangles
+        client.shape.XShapeGetRectangles.side_effect = region
+        self.assertEqual(client.capture_shape(2, types.SimpleNamespace(border_width=2), float('inf')), [(0, 1, 3, 2), (5, 4, 5, 4)])
+        client.lib.XFree.assert_called_once_with(rectangles)
+        client.lib.XFree.reset_mock()
+        client.shape.XShapeGetRectangles.side_effect = lambda _d, _w, _kind, count, order: (setattr(count._obj, 'value', 4097) or rectangles)
+        with self.assertRaisesRegex(RuntimeError, 'over-budget'):
+            client.capture_shape(2, types.SimpleNamespace(border_width=2), float('inf'))
+        client.lib.XFree.assert_called_once_with(rectangles)
+        client.shape.XShapeGetRectangles.side_effect = None
+        client.shape.XShapeGetRectangles.return_value = capture.C.POINTER(capture.Rectangle)()
+        self.assertEqual(client.capture_shape(2, types.SimpleNamespace(border_width=2), float('inf')), [])
 
     def test_composite_pixmap_and_image_are_freed_on_success_and_format_failure(self):
         for valid in (True, False):

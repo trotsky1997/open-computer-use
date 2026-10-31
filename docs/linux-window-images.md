@@ -23,13 +23,29 @@ offscreen frames can be captured independently of the visible desktop.
 The mapped descendant tree must have a single matching PID. Descendant depths
 may differ: XComposite storage contains the complete hierarchy, including WM
 decoration children; the named pixmap is validated against the frame visual.
-Same-geometry ambiguity, shaped frames, absent backing storage, native errors and
+Same-geometry ambiguity, invalid/over-budget shape metadata, absent backing
+storage, native errors and
 changed pixmap dimensions fail capture. XRender must report a supported direct
 24/32-bit visual with RGB888 masks and optional eight-bit alpha. The native image
 must match its geometry, depth, format, byte order and stride. ARGB backing pixels
 are converted from premultiplied color to straight-alpha RGBA PNG; opaque visuals
 use RGB PNG. The source pixmap is named anew for each capture so resize/map cycles
 do not reuse a stale image. This route additionally needs libXcomposite/libXrender.
+
+For a shaped frame, `XShapeGetRectangles(ShapeBounding)` reads the native client
+region under the same server grab. Interior coordinates are translated by the
+native border width and clipped to the pixmap rectangle, giving the effective
+bounding region. Encoding unions these rectangles after server release and sets
+all RGBA channels outside the region to zero. ARGB opacity inside the region is
+preserved; shaped RGB sources produce opaque RGBA inside the region. Empty
+regions yield a transparent image. There is a 4096-rectangle cap, a 16-million
+clipped rectangle-pixel work budget and the existing 250 ms native verification
+deadline. Native rectangle storage is freed on every exit. Missing/invalid
+region evidence returns no image.
+
+Physical input and the noncomposited root-image fallback retain their current
+shape refusal. Semantic AX actions remain available for shaped windows.
+
 
 ## Exposed frames without a compositor
 
@@ -68,7 +84,12 @@ capture. Frame-relative fixture coordinates include WM borders/titlebars. The
 existing noncomposited checks retain their exposure/black-frame and refusal
 behavior. Python self-checks cover PNG byte order/CRC/alpha conversion,
 PID/geometry validation, mixed-depth frame acceptance with foreign-PID refusal,
-identity changes and resource cleanup on failure.
+identity changes, shape clipping/union/empty regions, border translation,
+rectangle/pixel budget failures and native region cleanup. Both hosts also verify
+real opaque/ARGB corner cuts and interior holes, zero RGB outside shape, preserved
+half-alpha inside shape, shape reset and refusal of shaped physical clicks. The
+fixture sets server bounding regions via XShape on its own native window IDs and
+keeps errors in its private test directory.
 
 ```sh
 # In an owned private Xvfb/D-Bus desktop, with GTK3, AT-SPI and Cairo installed:
@@ -85,8 +106,8 @@ XDG_SESSION_TYPE=x11 GDK_BACKEND=x11 \
 python3 -m unittest discover -s apps/OpenComputerUseLinux -p '*_test.py'
 ```
 
-Real GNOME/KWin desktops, other WM themes/shapes, GPU/full-screen paths,
-minimized/unmapped windows, Wayland/portal capture and other providers remain open.
+Real GNOME/KWin desktops, other WM/compositor themes and shape/input effects,
+GPU/full-screen paths, minimized/unmapped windows, Wayland/portal capture and other providers remain open.
 Current evidence uses owned GTK windows in Xvfb with xcompmgr and Openbox.
 
 The upstream X.Org `Xcomposite(3)` manual specifies named redirected pixmaps,
@@ -98,3 +119,8 @@ describes stacking, grabs, image formats and obscured-window pixel limitations.
 GTK's [Accessible.get_id](https://gnome.pages.gitlab.gnome.org/at-spi2-core/libatspi/method.Accessible.get_id.html)
 is an application ID; the owned GTK probe exposed no native XID attribute. See
 [GTK's window accessibility source](https://github.com/GNOME/gtk/blob/gtk-3-24/gtk/a11y/gtkwindowaccessible.c).
+
+The [X.Org Shape protocol](https://xorg.freedesktop.org/archive/X11R7.5/doc/Xext/shape.html)
+defines effective bounding regions and the native rectangle representation. The
+[Xlib Shape API](https://xorg.freedesktop.org/archive/X11R7.6/doc/libXext/shapelib.html)
+defines the native rectangle retrieval binding.

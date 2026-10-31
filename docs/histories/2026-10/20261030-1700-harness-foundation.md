@@ -1660,3 +1660,41 @@ See [Linux window images](../../linux-window-images.md). GNOME/KWin, other WM
 themes/shapes, GPU/full-screen, minimized windows, Wayland/portal, external
 interruption/claims and broader providers remain open. The full harness parity
 goal stays active.
+
+
+## Shaped compositor window images
+
+Composited images now read the verified native ShapeBounding region instead of
+rejecting every shaped frame. Native rectangles are copied under the same server
+grab as pixmap capture, translated from interior to border-inclusive coordinates,
+and released through XFree on success/failure. Region encoding runs after server
+release, clips to the default pixmap bounds and unions the rectangles. Every
+channel outside the effective region becomes zero; ARGB opacity is preserved
+inside, and shaped RGB becomes opaque RGBA inside. Empty regions produce a
+transparent image. Shape reads/encoding enforce rectangle, time and pixel-work
+budgets. PID/tree/geometry/visual/pixmap/AT-SPI validation remains in place.
+
+The fixture sets server bounding regions on its own native XIDs through XShape,
+with corner cuts and interior holes in both RGB and ARGB windows. It records
+frame-relative sample/input points and private errors. Both hosts check exact
+zero RGBA at corner/interior samples, all transparent pixels' RGB channels,
+preserved half-alpha content, reset recovery and rejection of shaped physical
+clicks before receiving any button event. Root-image fallback and physical
+input keep their existing shape refusal. MCP tool descriptions and injected JS
+instructions now make that boundary explicit.
+
+Validation passed: 92 Python checks on macOS and Ubuntu arm64; 155 Node checks;
+47 native Linux Go checks plus 10 subchecks. The actual xcompmgr pixel controller
+passed in both JS hosts without a WM, and with Openbox in decorated and
+undecorated modes. Existing background/occlusion/offscreen, RGB/ARGB resize/remap,
+focus, same-title identity and stale/hidden/ambiguous checks also passed. Both
+hosts passed the separate noncomposited image controller. Targeted checks cover
+region clipping/union/empty output, RGB zeroing and alpha, border translation,
+rectangle/pixel budgets, native allocation cleanup and invalid metadata. All GUI
+runs used owned private Xvfb/D-Bus desktops and private WM config/cache paths.
+No project dependency, CI, installation package or registry release was added.
+
+See [Linux window images](../../linux-window-images.md) for the X.Org Shape
+protocol/library references. Shaped physical input, GNOME/KWin, other compositor
+and WM effects, GPU/full-screen, Wayland/portal and broader providers remain open.
+The full harness parity goal stays active.
