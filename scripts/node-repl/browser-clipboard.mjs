@@ -99,10 +99,10 @@ export async function nativeClipboardJob(phase, key, url, operation) {
 }
 
 export class BrowserClipboard {
-  constructor(endpoint, connect, input) {
+  constructor(endpoint, connect, input, identity) {
     this.endpoint = endpoint;
     this.connect = connect;
-    this.input = input;
+    this.input = input;this.identity=identity;
     this.owners = new Map();
     this.closedOwners = new WeakSet();
     this.tokens = new Set();
@@ -202,7 +202,7 @@ export class BrowserClipboard {
         const key = targetInfo.browserContextId ?? "default";
         let bridge = state.bridges.get(key);
         if (!bridge) {
-          bridge = {context,jobs:new Set(),endpoint,browser:version.webSocketDebuggerUrl,exitProof:await browserExitProof(endpoint,version.webSocketDebuggerUrl,send)};
+          bridge = {context,jobs:new Set(),endpoint,browser:version.webSocketDebuggerUrl,exitProof:this.identity ? await this.identity(endpoint,version.webSocketDebuggerUrl) : await browserExitProof(endpoint,version.webSocketDebuggerUrl,send)};
           state.bridges.set(key,bridge);
           const origin = await this.ensureServer();
           bridge.path = `/__ocu_clipboard_${randomUUID()}`;

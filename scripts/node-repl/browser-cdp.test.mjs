@@ -129,3 +129,28 @@ test("closed CDP connections reject new requests immediately, including no-deadl
   await assert.rejects(connection.send('Page.enable'),/connection closed/);assert.equal(sent,0);
  }finally{globalThis.WebSocket=Original;}
 });
+
+test('focus leases dispose captured connections on acknowledged release and confirmed exit, including lost acquisition replies',async()=>{
+ const {BrowserFocusLeases}=await import('./browser-playwright.mjs');
+ for(const mode of ['normal','exit','lost-acquire']){
+  let gone=false,disposed=0,releases=0;
+  const leases=new BrowserFocusLeases(async(_target,enabled,register)=>{
+   if(enabled){register(()=>{disposed++;});if(mode==='lost-acquire'){gone=true;throw Error('Acquire reply lost');}}
+   else releases++;
+  });
+  const owner={},proof={browserGone:()=>gone};
+  if(mode==='lost-acquire')await assert.rejects(leases.acquire(owner,'target',proof),/reply lost/);
+  else{const id=await leases.acquire(owner,'target',proof);gone=mode==='exit';await leases.release(owner,id);}
+  assert.equal(disposed,1);assert.equal(releases,mode==='normal'?1:0);assert.equal(leases.entries.size,0);
+ }
+});
+
+test('dialog observer cleanup skips native detachment only for a confirmed dead browser',async()=>{
+ const {BrowserDialogs}=await import('./browser-cdp.mjs');
+ for(const dead of [false,true]){
+  const owner={},endpoint='http://dialog-exit/',dialogs=new BrowserDialogs(()=>endpoint);let commands=0,closed=0;
+  dialogs.browsers.set(endpoint,{owners:new Set([owner]),pending:new Set(),ready:Promise.resolve(),exitProof:{browserGone:()=>dead},connection:{async send(){commands++;throw Error('Detach reply lost');},close(){closed++;}}});
+  if(dead)await dialogs.cleanup(owner);else await assert.rejects(dialogs.cleanup(owner),/reply lost/);
+  assert.equal(commands,dead?0:1);assert.equal(closed,1);assert.equal(dialogs.browsers.size,0);
+ }
+});

@@ -2546,3 +2546,63 @@ To reproduce the owned-process exit cases, set OCU_TEST_CHROME_EXECUTABLE to an
 owned test Chromium 158+ executable and run
 `node scripts/run-clipboard-exit-smoke.mjs`. The controller creates and removes
 its own profiles and kills only its own subprocesses.
+
+
+## General browser-input recovery after confirmed process exit
+
+Ordinary click/drag, indexed pressKey and text insertion now acquire the existing
+verified browser identity under their input lease. The existing dialog observer captures
+identity through its owned browser connection; shared-host and local browser
+input and clipboard services reuse its route-checked proof. Paste retains its
+preparation proof. Cancellation or confirmed exit during identity acquisition stops before
+target access, and confirmed exit stops remaining native dispatch. Input and
+focus cleanup can then retire the original dead instance without querying it or
+sending commands into a replacement browser. Live/unidentified release failures
+continue retaining ownership.
+
+Focus acquisition registers a local connection disposer before the emulation
+acknowledgement. Lease cleanup invokes it only after acknowledged native release
+or confirmed process exit, including a lost acquisition reply. This removes the
+captured native focus connection from the host map even when native shutdown is
+skipped. Dialog observers retain that browser-route-checked identity:
+a known-dead browser skips auto-attach shutdown and closes its local connection.
+Proof caching keeps duplicate process queries outside the already-bound paste
+call, preserving the existing short cancellation deadline. It also leaves no
+unowned tab-discovery connection after inventory/observer cleanup. This removes
+an observed Node 24 Persistent-host unhandled rejection when reset
+sent Target.setAutoAttach(false) during the dead browser's socket-error window.
+
+Added `scripts/run-input-exit-smoke.mjs`: four input kinds, both JS hosts and
+offline/same-port replacement reset yield 16 cases per platform. The controller
+owns every browser/profile, holds a real admitted native input acknowledgement,
+kills that original process, checks zero dead/replacement input/focus cleanup
+RPCs and one local focus disposal, then verifies fresh native receiver events and
+exact edit/down/up counts. Baseline click cleanup failed with connection refused
+after original process exit. Small checks cover cancellation/death during
+identity acquisition, local disposer timing (including acquisition failure) and
+live-versus-dead dialog observer shutdown. Diagnostic instrumentation stays in
+scratch files; shipped code retains caller-visible error reporting.
+
+The parity goal stays active. Host-process crash recovery, unidentified/remote
+browser death, destroyed completion contexts in a surviving browser, atomic
+target validation/edit dispatch and headful/Windows evidence remain open.
+
+
+Validation: macOS Node 26 passes 181/181 checks; arm64 Linux Node 24 passes
+180 with one macOS-only skip. Each system passes all 16 ordinary input-exit
+cases and the eight clipboard-exit plus eight clipboard-transport cases in both
+JS hosts. Both systems also pass the existing 59 held-input cases (27 paste,
+21 text, ten indexed-key cases and the general held suite), 53 pointer cases,
+full native text/HTML/PNG clipboard controller, main dialog controller and both
+early-dialog host flows. The macOS text-clipboard hash remains unchanged.
+Source-removed installed Persistent/Worker and MCP browser workflows pass on
+both systems. All final fixture processes exit normally; obsolete diagnostic
+runs with the extra unowned observer were explicitly stopped after identifying
+that retained connection. Existing 1.2-second timeout assertions remain intact.
+Linux keeps CDPScreenshotNewSurface enabled.
+
+Run `node scripts/run-input-exit-smoke.mjs` with OCU_TEST_CHROME_EXECUTABLE set to
+an owned test Chromium 158+ executable. The controller owns and removes every
+profile/browser it starts. No diagnostic hooks or global rejection suppression
+are shipped. Native platform app code, headful/Windows and unidentified browser
+exit recovery are outside this verification.

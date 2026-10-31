@@ -391,6 +391,19 @@ route alone never clears it. Local identity requires the explicit profile,
 matching DevToolsActivePort route, actual listener PID and executable. The two
 lsof queries each have a five-second bound after observed one-second timeouts.
 
+Ordinary clicks, drags, pressKey and text insertion also retain the verified
+browser process identity cached by their existing dialog observer. That observer
+captures identity through its owned connection; input and clipboard reuse the
+route-checked proof. Identity acquisition runs under the
+input lease; cancellation or confirmed exit stops before new target access and
+native downs. Confirmed exit permits input/focus ownership to retire without
+probing a dead endpoint or a replacement instance. Live/unidentified browsers
+still require native release acknowledgements. Focus acquisition registers its
+local connection disposer before its first acknowledgement, so normal release,
+confirmed exit and lost-acquisition replies can all dispose the captured
+connection. Dialog observers share the same route-checked identity and skip
+native auto-attach shutdown only after confirmed process exit.
+
 Raw tab pressKey shares BrowserInputs ownership even without an explicit duration.
 The client transfers the observed AX role/name/backend node and loader. Under
 the origin lease, the host validates and focuses that target, then checks its

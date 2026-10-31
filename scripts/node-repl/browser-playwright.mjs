@@ -357,7 +357,7 @@ export class BrowserFocusLeases {
     const id = this.nextId++;
     const entry = {owner, targetId, exitProof};
     this.entries.set(id, entry);
-    entry.ready = Promise.resolve().then(() => this.updateFocus(targetId, true));
+    entry.ready = Promise.resolve().then(() => this.updateFocus(targetId, true,dispose=>{entry.dispose=dispose;}));
     try { await entry.ready; return id; }
     catch (error) {
       try {await this.release(owner,id);}
@@ -371,6 +371,7 @@ export class BrowserFocusLeases {
     if (!entry.releasing) entry.releasing = (async () => {
       await entry.ready.catch(() => {});
       if(!entry.exitProof?.browserGone())await this.updateFocus(entry.targetId, false);
+      entry.dispose?.();
       this.entries.delete(id);
     })().catch(error => {
       entry.releasing = undefined;

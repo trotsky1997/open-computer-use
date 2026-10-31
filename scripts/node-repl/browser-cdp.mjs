@@ -6,6 +6,7 @@ import {BrowserChrome} from "./browser-chrome.mjs";
 import {BrowserEvaluator} from "./browser-evaluate.mjs";
 import {BrowserAssets,ASSETS_DOCUMENTATION} from "./browser-assets.mjs";
 import {BrowserDebugger,CDP_DOCUMENTATION,cdpCommand,cdpOptions} from "./browser-debugger.mjs";
+import {browserExitProof} from "./browser-process.mjs";
 import {BrowserTabs} from "./browser-tabs.mjs";
 import {BrowserInputs,validatePressKey,validateClick} from "./browser-input.mjs";
 import { BrowserDownloads } from "./browser-downloads.mjs";
@@ -301,6 +302,7 @@ export class BrowserDialogs {
         const response = await fetch(new URL("/json/version",endpoint),{signal:AbortSignal.timeout(TIMEOUT),redirect:"error"});
         if (!response.ok) throw new Error(`Browser discovery failed: HTTP ${response.status}`);
         const {webSocketDebuggerUrl} = await response.json();
+        browser.browserId=new URL(webSocketDebuggerUrl).pathname;
         browser.connection = await openConnection(webSocketDebuggerUrl,event => {
           if (browser.closed) return;
           if (event.sessionId) {
@@ -338,6 +340,7 @@ export class BrowserDialogs {
             if (entry?.captureSessionId && !entry.closed) entry.error = browser.error;
           }
         });
+        browser.exitProof=await browserExitProof(endpoint,webSocketDebuggerUrl,browser.connection.send);
         await browser.connection.send("Target.setAutoAttach",{autoAttach:true,waitForDebuggerOnStart:true,flatten:true,filter:[{type:"page",exclude:false},{exclude:true}]});
         await Promise.allSettled([...browser.pending]);
       })();
@@ -576,7 +579,7 @@ export class BrowserDialogs {
       await browser.ready.catch(()=>{});
       try {
         await Promise.allSettled([...browser.pending]);
-        if (!browser.error) await browser.connection?.send("Target.setAutoAttach",{autoAttach:false,waitForDebuggerOnStart:false,flatten:true});
+        if (!browser.error && !browser.exitProof?.browserGone()) await browser.connection?.send("Target.setAutoAttach",{autoAttach:false,waitForDebuggerOnStart:false,flatten:true});
       } finally {
         browser.closed = true;
         browser.connection?.close();
@@ -650,13 +653,17 @@ export function createBrowserApi(activeOutput, environment = process.env, {focus
   if(chromeBridge)cleanups.push(()=>chromeBridge.cleanup(chromeOwner));
   const requestChrome=chromeRequest ?? (args=>chromeBridge.request(chromeOwner,args));
   const tabs=tabRequest ? undefined : new BrowserTabs(()=>endpoint()?.href,openConnection);
+  const localBrowserIdentity=async(origin,socket)=>{
+    const browser=dialogs?.browsers.get(origin);
+    return browser && (!socket || browser.browserId===new URL(socket).pathname) ? browser.exitProof : undefined;
+  };
   const tabOwner={};
   const requestTab=tabRequest ?? (args=>tabs.request(tabOwner,args));
   const clipboard = clipboardRequest ? undefined : new BrowserClipboard(() => endpoint()?.href,withConnection,(_owner,args,prepare)=>{
     if(args.action!=='paste')return requestInput(args);
     if(!inputs)throw new Error("Paste requires shared clipboard/input hosts");
     return inputs.paste(inputOwner,args,prepare);
-  });
+  },localBrowserIdentity);
   const clipboardOwner = {};
   if (clipboard) cleanups.push(() => clipboard.cleanup(clipboardOwner));
   const requestClipboard = clipboardRequest ?? (args => clipboard.request(clipboardOwner,args));
@@ -672,7 +679,7 @@ export function createBrowserApi(activeOutput, environment = process.env, {focus
   const dialogOwner = {};
   if (dialogs) cleanups.push(() => dialogs.cleanup(dialogOwner));
   const requestDialog = dialogRequest ?? (args => dialogs.request(dialogOwner,args));
-  const inputs=inputRequest ? undefined : new BrowserInputs(()=>endpoint()?.href,openConnection,()=>requestViewport({action:"state"}),undefined,(_owner,targetId)=>requestDialog({action:"state",targetId}),()=>clipboard?.assertSettled());
+  const inputs=inputRequest ? undefined : new BrowserInputs(()=>endpoint()?.href,openConnection,()=>requestViewport({action:"state"}),undefined,(_owner,targetId)=>requestDialog({action:"state",targetId}),()=>clipboard?.assertSettled(),localBrowserIdentity);
   const inputOwner={};
   if(inputs) cleanups.push(()=>inputs.cleanup(inputOwner));
   const requestInput=inputRequest ?? (args=>inputs.request(inputOwner,args));
@@ -1099,7 +1106,7 @@ export function createBrowserApi(activeOutput, environment = process.env, {focus
 
 
 const focusConnections = new Map();
-export async function updateBrowserFocus(targetId, enabled) {
+export async function updateBrowserFocus(targetId, enabled, registerDispose) {
   const origin = new URL(process.env.OPEN_COMPUTER_USE_CDP_URL);
   if (!["http:","https:"].includes(origin.protocol) || origin.username || origin.password || origin.pathname !== "/" || origin.search || origin.hash) throw new Error("Invalid configured CDP origin");
   const key = `${origin.href}|${targetId}`;
@@ -1123,6 +1130,7 @@ export async function updateBrowserFocus(targetId, enabled) {
   if (enabled) {
     const connection = await openConnection(target.webSocketDebuggerUrl);
     focusConnections.set(key, connection);
+    registerDispose?.(()=>{connection.close();if(focusConnections.get(key)===connection)focusConnections.delete(key);});
     await connection.send("Emulation.setFocusEmulationEnabled", {enabled:true});
   } else await withConnection(target.webSocketDebuggerUrl, send => send("Emulation.setFocusEmulationEnabled", {enabled:false}));
 }

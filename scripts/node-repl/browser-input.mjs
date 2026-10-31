@@ -44,9 +44,9 @@ export function validatePressKey(key,options={}) {
 }
 
 export class BrowserInputs {
-  constructor(endpoint,open,revision=()=>0,focus,dialog=()=>undefined,ready=()=>{}) {
+  constructor(endpoint,open,revision=()=>0,focus,dialog=()=>undefined,ready=()=>{},identity) {
     this.endpoint=endpoint;this.open=open;this.revision=revision;this.focus=focus;this.dialog=dialog;
-    this.ready=ready;this.leases=new Map();this.closedOwners=new WeakSet();
+    this.identity=identity;this.ready=ready;this.leases=new Map();this.closedOwners=new WeakSet();
   }
   request(owner,args) {
     this.ready();
@@ -84,7 +84,7 @@ export class BrowserInputs {
     if(element && !keyboard) {required.Page.push("createIsolatedWorld");required.DOM=["scrollIntoViewIfNeeded","resolveNode"];required.Runtime=["callFunctionOn","releaseObject"];}
     if(!Object.entries(required).every(([domain,names])=>names.every(name=>protocol.domains?.find(item=>item.domain===domain)?.commands?.some(command=>command.name===name)))) throw new Error("Managed inputs require CDP input, cancellation, dialog, focus and requested AX target support");
   }
-  check(record) {this.ready();if(record.canceled) throw new Error("Browser input canceled");}
+  check(record) {this.ready();if(record.exitProof?.browserGone())throw new Error("Browser process exited during input; completion unknown");if(record.canceled) throw new Error("Browser input canceled");}
   async idle(record) {
     this.check(record);
     while(await this.dialog(record.owner,record.targetId)) {await delay(20,undefined,{signal:record.abort.signal});this.check(record);}
@@ -181,6 +181,7 @@ export class BrowserInputs {
     active.set(endpoint,record);this.leases.set(endpoint,record);
     record.work=(async()=>{
       await this.supported(endpoint,{keyboard,element:args.element!==undefined,text:args.action==='text'});this.check(record);
+      record.exitProof ??= await this.identity?.(endpoint);this.check(record);
       const target=await this.target(endpoint,args.targetId);this.check(record);
       if(!target) throw new Error("Browser input tab closed");
       if(this.focus) {

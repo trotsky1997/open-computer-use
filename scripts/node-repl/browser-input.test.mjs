@@ -201,3 +201,17 @@ test('paste exit proof retires only the original dead input and focus leases',as
  await input.finish(record);
  assert.equal(queries,0);assert.equal(input.leases.size,0);assert.equal(browserPointerLeases.has(endpoint),false);assert.equal(focus.entries.size,0);
 });
+
+test('input identity acquisition stops before target access on browser death or cancellation',async()=>{
+ for(const mode of ['death','cancel']){
+  const owner={},endpoint='http://identity-'+mode+'/',proof={browserGone:()=>mode==='death'};let identities=0,targets=0,release;
+  const gate=new Promise(resolve=>{release=resolve;});
+  const input=new BrowserInputs(()=>endpoint,()=>{throw Error('Unexpected input connection');},()=>0,undefined,undefined,undefined,async saved=>{assert.equal(saved,endpoint);identities++;await gate;return proof;});
+  input.supported=async()=>{};input.target=async()=>{targets++;throw Error('Unexpected target access');};
+  const pending=input.request(owner,{action:'text',targetId:'target',text:'blocked',geometry:{loaderId:'observed'}});
+  await new Promise(resolve=>setImmediate(resolve));assert.equal(identities,1);
+  if(mode==='cancel')input.cancel(owner);release();
+  await assert.rejects(pending,mode==='death'?/process exited/:/canceled/);
+  assert.equal(targets,0);assert.equal(input.leases.size,0);assert.equal(browserPointerLeases.has(endpoint),false);
+ }
+});

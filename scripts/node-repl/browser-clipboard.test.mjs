@@ -110,16 +110,17 @@ test('native clipboard evidence survives duplicate starts, pending queries and c
 });
 
 test('confirmed original browser exit retires uncertain jobs without touching a replacement',async()=>{
- const owner={},endpoint='http://clipboard-exit/';let replacement=false,gone=false,queries=0;
+ const owner={},endpoint='http://clipboard-exit/';let replacement=false,gone=false,queries=0,identities=0,commandLines=0;
+ const proof={browserGone:()=>gone};
  const clipboard=new BrowserClipboard(()=>endpoint,async(url,operation)=>operation(async(method,args)=>{
-  if(method==='Browser.getBrowserCommandLine')return {arguments:['--headless=new']};
+  if(method==='Browser.getBrowserCommandLine'){commandLines++;return {arguments:['--headless=new']};}
   if(method==='Target.getTargetInfo')return {targetInfo:{type:'page'}};
   if(method==='Target.getBrowserContexts')return {browserContextIds:[]};
   if(method==='Target.createTarget')return {targetId:'control-exit'};
   if(method==='Runtime.evaluate')return {result:{value:clipboard.owners.get(owner).bridges.get('default').url}};
   if(method==='Page.getFrameTree')return {frameTree:{frame:{id:'frame',loaderId:'loader'}}};
   return {};
- }));
+ }),undefined,async(saved,socket)=>{assert.equal(saved,endpoint);assert.equal(socket,'old-browser');identities++;return proof;});
  clipboard.ensureServer=async()=> 'http://owned-control/';
  clipboard.json=async(_endpoint,route)=>{queries++;return route==='/json/version'?{webSocketDebuggerUrl:replacement?'new-browser':'old-browser'}:[{id:'control-exit',webSocketDebuggerUrl:'control'}];};
  clipboard.jobCall=async(_page,_job,phase)=>{
@@ -127,7 +128,7 @@ test('confirmed original browser exit retires uncertain jobs without touching a 
   return {state:phase==='register'?'armed':'running'};
  };
  await assert.rejects(clipboard.request(owner,{method:'writeText',targetId:'tab',value:'pending'}),/completion unresolved/);
- const bridge=clipboard.owners.get(owner).bridges.get('default');bridge.exitProof={browserGone:()=>gone};
+ const bridge=clipboard.owners.get(owner).bridges.get('default');assert.equal(bridge.exitProof,proof);assert.equal(identities,1);assert.equal(commandLines,1);
  assert.throws(()=>clipboard.assertSettled(),/completion unresolved/);
  replacement=true;
  await assert.rejects(clipboard.cleanup(owner),/browser changed/);
