@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import {EventEmitter} from "node:events";
 import { chmodSync, cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -255,4 +256,21 @@ test("browser-only plugin installation is discoverable without native artifacts"
   const output=captureStream(),error=captureStream();
   assert.equal(await main({packageRoot,platformPackages:{},argv:['help','install-codex-plugin'],output:output.stream,errorOutput:error.stream}),0);
   assert.match(output.value(),/--browser-only/);assert.match(output.value(),/--codex-home/);assert.match(output.value(),/JavaScript REPL/);assert.equal(error.value(),'');
+});
+
+
+test("JS MCP discovery and browser-only native rejection do not start native processes", async t => {
+  const fixture=makePackage();t.after(fixture.cleanup);const output=captureStream(),error=captureStream();
+  const report=inspectCapabilities({packageRoot:fixture.packageRoot,platformPackages:{}});
+  assert.equal(report.capabilities.nativeMcp.available,false);assert.equal(report.capabilities.jsMcp.available,true);assert.deepEqual(report.capabilities.jsMcp.toolSurface,['js','js_reset']);
+  assert.equal(await main({packageRoot:fixture.packageRoot,platformPackages:{},browserOnly:true,argv:['doctor'],output:output.stream,errorOutput:error.stream,spawnFn(){throw Error('Unexpected native startup');}}),1);
+  assert.match(error.value(),/No native runtime is bundled/);
+  assert.equal(await main({packageRoot:fixture.packageRoot,platformPackages:{},argv:['help','js-mcp'],output:output.stream,errorOutput:error.stream}),0);assert.match(output.value(),/js_reset/);
+});
+
+
+test("full-package mcp still dispatches the bundled native executable", async t => {
+  const fixture=makePackage();t.after(fixture.cleanup);let dispatched;
+  const code=await main({...fixture,argv:['mcp'],spawnFn(command,args){dispatched={command,args};const child=new EventEmitter();queueMicrotask(()=>child.emit('exit',0));return child;}});
+  assert.equal(code,0);assert.deepEqual(dispatched,{command:fixture.nativePath,args:['mcp']});
 });

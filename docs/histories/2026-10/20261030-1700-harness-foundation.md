@@ -1362,3 +1362,27 @@ processes and private VM test files were cleaned up; only the VM's browser runti
 system prerequisite remains installed. No project dependency or CI added. Native
 Windows, actual Codex reload, concurrent/crash recovery and separately published
 native-free npm artifacts remain open. The full harness goal stays active.
+
+
+## Browser-only npm artifact
+
+Added --browser-only staging with a distinct default dist/npm-browser directory,
+manifest flavor marker and native-free payload. It skips native builds/bundle
+verification without requiring --skip-build. Default full-package behavior stays
+available. Browser mcp exposes js/js_reset; full packages retain native mcp and
+both flavors provide explicit js-mcp. CLI capabilities/help/version and plugin
+installation reflect the package mode. No project dependency or CI was added.
+
+The isolated assert controller builds/packs/installs the actual tarball into local
+and global prefixes, blocks native toolchains, checks aliases/metadata, JS/REPL/
+reset, both MCP entries and browser-only plugin installation, then hides source
+and staging directories. A controlled full-package fixture checks explicit JS MCP;
+a unit check verifies default native MCP forwarding. Real disposable Chromium
+input and QuickJS DOM evaluation passed through source/Worker session classes,
+installed CLI and MCP for both npm layouts on macOS and arm64 Linux.
+151 Node checks passed on macOS; Linux passed 150 with one macOS-only skip.
+See [browser-only package](../../browser-only-package.md).
+
+No registry publication or real user profile/config modification was performed.
+Node 22 minimum, Windows runtime, actual Codex reload and broader transport/native
+parity remain unverified. The full harness goal remains active.

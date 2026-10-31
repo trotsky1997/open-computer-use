@@ -114,6 +114,8 @@ You can also manually download and install the
 
 See [browser-only source installation](docs/browser-only-installation.md) for a
 native-free plugin, custom target directories and installed-runtime verification.
+See [browser-only npm package](docs/browser-only-package.md) to build/install a
+local tarball without native toolchains; its MCP exposes `js/js_reset`.
 
 Besides the MCP JSON config above, you can also use the built-in commands:
 

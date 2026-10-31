@@ -90,7 +90,14 @@ export function inspectCapabilities({
       nativeMcp: {
         available: native.available,
         lifecycle: "stdio-session",
-        toolSurface: "9 native computer-use tools",
+        toolSurface: "Native tools advertised by the backend",
+      },
+      jsMcp: {
+        available: codeAvailable,
+        lifecycle: "stdio-session",
+        toolSurface: ["js", "js_reset"],
+        requires: ["node", "adapter", "kernel", "supportModules"],
+        unavailableReasons,
       },
       js: {
         available: codeAvailable,
@@ -113,7 +120,7 @@ function availabilityLabel(capabilities) {
   return js.available ? "available" : `unavailable: ${js.unavailableReasons.join("; ")}`;
 }
 
-export function launcherHelp(capabilities) {
+export function launcherHelp(capabilities, {browserOnly = false} = {}) {
   const codeStatus = availabilityLabel(capabilities);
   return `Open Computer Use
 
@@ -123,7 +130,8 @@ Usage:
   open-computer-use
 
 Commands:
-  mcp                  Start the native 9-tool stdio MCP server.
+  mcp                  ${browserOnly ? "Start the JavaScript stdio MCP server (js/js_reset)." : "Start the native stdio MCP server."}
+  js-mcp               Start the JavaScript stdio MCP server (js/js_reset).
   js <code>            Run JavaScript once with the asynchronous cua API.
   repl                 Start a persistent interactive JavaScript session.
   config               View or persist macOS screenshot settings.
@@ -154,7 +162,7 @@ Notes:
   js creates one JavaScript session; native automation starts on first use and exits after the evaluation.
   repl keeps one adapter/native session alive until .exit, Ctrl-D, or termination.
   The npm launcher requires Node.js 22 or newer to start; run 'ocu capabilities --json' for component details.
-  'ocu mcp' intentionally keeps the native 9-tool compatibility surface.
+  ${browserOnly ? "'ocu mcp' uses JavaScript; this package has no native runtime." : "'ocu mcp' keeps the native surface; 'ocu js-mcp' exposes JavaScript."}
   Use 'open-computer-use help <command>' for command-specific help.`;
 }
 
@@ -256,6 +264,7 @@ export function renderCapabilityReport(report) {
     `REPL adapter:  ${status(report.runtime.adapter.available)} (${report.runtime.adapter.path})`,
     `JS kernel:     ${status(report.runtime.kernel.available)} (${report.runtime.kernel.path})`,
     `Native MCP:    ${status(report.runtime.native.available)} (${report.runtime.native.platform}${report.runtime.native.path ? ` at ${report.runtime.native.path}` : ""})`,
+    `ocu js-mcp:    ${status(report.capabilities.jsMcp.available)} (stdio-session)`,
     `ocu js:        ${status(report.capabilities.js.available)} (one-shot)`,
     `ocu repl:      ${status(report.capabilities.repl.available)} (terminal-session)`,
     ...(reasons.length ? ["", "Unavailable because:", ...reasons.map(reason => `- ${reason}`)] : []),
@@ -274,6 +283,7 @@ async function loadReplRuntime(paths) {
   return {
     LazyNativePeer: adapter.LazyNativePeer,
     WorkerJavaScriptSession: adapter.WorkerJavaScriptSession,
+    runServer: adapter.runServer,
   };
 }
 
@@ -452,6 +462,7 @@ function installerUsage(command) {
 export async function main({
   packageRoot,
   platformPackages,
+  browserOnly = false,
   argv = process.argv.slice(2),
   input = process.stdin,
   output = process.stdout,
@@ -467,8 +478,8 @@ export async function main({
   const report = inspectCapabilities({ packageRoot, platformPackages, platform, arch, execPath, nodeVersion });
   const paths = runtimePaths({ packageRoot, platformPackages, platform, arch });
   try {
-    if (command === "-h" || command === "--help" || (command === "help" && argv.length <= 1)) {
-      writeLine(output, launcherHelp(report));
+    if (command === "-h" || command === "--help" || (browserOnly && command === "") || (command === "help" && argv.length <= 1)) {
+      writeLine(output, launcherHelp(report, {browserOnly}));
       return 0;
     }
     if (command === "help" && argv[1] === "js") {
@@ -477,6 +488,10 @@ export async function main({
     }
     if (command === "help" && argv[1] === "repl") {
       writeLine(output, replHelp());
+      return 0;
+    }
+    if (command === "help" && argv[1] === "js-mcp") {
+      writeLine(output, "Usage: open-computer-use js-mcp\nStarts the persistent stdio MCP server exposing js and js_reset.");
       return 0;
     }
     if (command === "help" && argv[1] === "capabilities") {
@@ -503,6 +518,19 @@ export async function main({
       else throw new Error(`Unknown capabilities option: ${extra.join(" ")}`);
       return 0;
     }
+    if (browserOnly && ["version", "--version", "-v"].includes(command)) {
+      const {version} = JSON.parse(readFileSync(path.join(packageRoot, "package.json"), "utf8"));
+      if (typeof version !== "string" || !version) throw new Error("Package version is missing");
+      writeLine(output, version);
+      return 0;
+    }
+    if (command === "js-mcp" || (browserOnly && command === "mcp")) {
+      if (argv.length !== 1) throw new Error("JS MCP does not accept command-line options");
+      assertCodeCapability(report);
+      const {runServer} = await loadReplRuntime(paths);
+      await runServer({command: paths.nativePath, args: ["mcp"]});
+      return 0;
+    }
     if (command === "js") {
       const options = parseJavaScriptArgs(argv.slice(1));
       if (options.help) {
@@ -525,8 +553,11 @@ export async function main({
       if (platform === "win32") throw new Error(`${command} currently requires a POSIX shell. Configure your MCP client with command "open-computer-use" and args ["mcp"] on Windows.`);
       const scriptPath = path.join(packageRoot, "scripts", installCommands.get(command));
       if (!existsSync(scriptPath)) throw new Error(`Missing installer helper at ${scriptPath}.`);
-      return await runChild(scriptPath, argv.slice(1), { env, spawnFn });
+      const args = argv.slice(1);
+      if (browserOnly && command === "install-codex-plugin" && !args.includes("--browser-only")) args.unshift("--browser-only");
+      return await runChild(scriptPath, args, { env, spawnFn });
     }
+    if (browserOnly) throw new Error("No native runtime is bundled in this browser-only package; use js, repl, or mcp");
     return await runChild(resolveNativeExecutable(report), argv, { env, spawnFn });
   } catch (error) {
     writeLine(errorOutput, `open-computer-use: ${asError(error).message}`);

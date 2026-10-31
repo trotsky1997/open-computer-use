@@ -78,9 +78,10 @@ function parseArgs(argv) {
   const options = {
     arch: "universal",
     configuration: "release",
-    outDir: defaultOutDir,
+    outDir: undefined,
     packageNames: [...packageNames],
     skipBuild: false,
+    browserOnly: false,
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -103,6 +104,9 @@ function parseArgs(argv) {
         options.packageNames = [argv[index + 1]];
         index += 1;
         break;
+      case "--browser-only":
+        options.browserOnly = true;
+        break;
       case "--skip-build":
         options.skipBuild = true;
         break;
@@ -121,6 +125,7 @@ function parseArgs(argv) {
     }
   }
 
+  options.outDir ??= options.browserOnly ? path.join(repoRoot, "dist", "npm-browser") : defaultOutDir;
   return options;
 }
 
@@ -133,6 +138,7 @@ Options:
   --out-dir <dir>
   --package <package-name>
   --skip-build
+  --browser-only     Stage JavaScript/browser support without native artifacts.
 
 Packages:
 ${packageNames.map((name) => `  - ${name}`).join("\n")}
@@ -213,17 +219,17 @@ function platformLaunchTable() {
   );
 }
 
-function renderLauncher() {
+function renderLauncher(browserOnly = false) {
   return `#!/usr/bin/env node
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 
-const platformPackages = ${JSON.stringify(platformLaunchTable(), null, 2)};
+const platformPackages = ${JSON.stringify(browserOnly ? {} : platformLaunchTable(), null, 2)};
 const packageRoot = path.resolve(__dirname, "..");
 const cliModule = pathToFileURL(path.join(packageRoot, "scripts", "node-repl", "open-computer-use-cli.mjs")).href;
 
 import(cliModule)
-  .then(({ main }) => main({ packageRoot, platformPackages }))
+  .then(({ main }) => main({ packageRoot, platformPackages, browserOnly: ${browserOnly} }))
   .then(code => { process.exitCode = Number.isInteger(code) ? code : 1; })
   .catch(error => {
     console.error(\`open-computer-use: \${error instanceof Error ? error.message : String(error)}\`);
@@ -232,7 +238,7 @@ import(cliModule)
 `;
 }
 
-function renderPostinstall(packageName, version) {
+function renderPostinstall(packageName, version, browserOnly = false) {
   return `#!/usr/bin/env node
 const mcpConfig = ${JSON.stringify({
   mcpServers: {
@@ -245,14 +251,14 @@ const mcpConfig = ${JSON.stringify({
 const lines = [
   "",
   "Installed ${packageName}@${version}.",
-  "Package: https://www.npmjs.com/package/${packageName}",
+  ${JSON.stringify(browserOnly ? "Package flavor: browser-only (no bundled native runtime)." : `Package: https://www.npmjs.com/package/${packageName}`)},
   "Commands: open-computer-use, ocu, open-computer-use-mcp, open-codex-computer-use-mcp",
-  "Native runtime will be selected from bundled artifacts for " + process.platform + "-" + process.arch + ".",
+  ${browserOnly ? JSON.stringify("MCP exposes js/js_reset; browser operations require OPEN_COMPUTER_USE_CDP_URL.") : '"Native runtime will be selected from bundled artifacts for " + process.platform + "-" + process.arch + "."'},
   "",
   "Next:",
   "1. Run open-computer-use --version or ocu capabilities",
   "2. Add the MCP config below to your host client, or use ocu js / ocu repl directly",
-  "3. On macOS, run open-computer-use doctor and grant Accessibility / Screen Recording if prompted",
+  ${JSON.stringify(browserOnly ? "3. Configure OPEN_COMPUTER_USE_CDP_URL for your browser endpoint" : "3. On macOS, run open-computer-use doctor and grant Accessibility / Screen Recording if prompted")},
   "",
   "MCP config:",
   JSON.stringify(mcpConfig, null, 2),
@@ -264,7 +270,27 @@ for (const line of lines) {
 `;
 }
 
-function renderReadme(packageName, version) {
+function renderReadme(packageName, version, browserOnly = false) {
+  if (browserOnly) return `# ${packageName} (browser-only)
+
+Native-free JavaScript/browser distribution from the open-computer-use fork.
+Requires Node.js 22+ and npm runtime dependencies. No Swift/Go build, native
+runtime payload, or desktop permission is required. Configure
+OPEN_COMPUTER_USE_CDP_URL for browser automation.
+
+Commands:
+
+- open-computer-use js <code> / ocu repl: JavaScript sessions
+- ocu mcp / ocu js-mcp: stdio MCP exposing js and js_reset
+- ocu capabilities --json: native unavailable, JavaScript available
+- ocu install-codex-plugin: browser-only plugin installation on POSIX hosts
+
+Native-only commands fail explicitly. This flavor does not provide native app
+input or screenshots. Full packages retain native MCP under mcp and expose the
+JavaScript surface under js-mcp. Registry publication is separate from building
+this local artifact. Version: ${version}.
+`;
+
   return `# ${packageName}
 
 Cross-platform npm distribution for the open-source **Open Computer Use** MCP server.
@@ -359,19 +385,21 @@ function packageKeywords(extraKeywords = []) {
   ];
 }
 
-function renderMetaPackageJson(packageName, version) {
+function renderMetaPackageJson(packageName, version, browserOnly = false) {
+  const repository = browserOnly ? "trotsky1997/open-computer-use" : "iFurySt/open-computer-use";
   return {
     name: packageName,
     version,
-    description: "Cross-platform Computer Use MCP server launcher. After install, configure open-computer-use mcp.",
+    description: browserOnly ? "Native-free JavaScript and browser Computer Use. MCP exposes js/js_reset; Node.js 22+ required." : "Cross-platform Computer Use MCP server launcher. After install, configure open-computer-use mcp.",
+    ...(browserOnly ? {openComputerUseRuntime: "browser-only"} : {}),
     license: "MIT",
-    homepage: "https://github.com/iFurySt/open-computer-use",
+    homepage: `https://github.com/${repository}`,
     repository: {
       type: "git",
-      url: "git+https://github.com/iFurySt/open-computer-use.git",
+      url: `git+https://github.com/${repository}.git`,
     },
     bugs: {
-      url: "https://github.com/iFurySt/open-computer-use/issues",
+      url: `https://github.com/${repository}/issues`,
     },
     keywords: packageKeywords(),
     engines: {
@@ -394,9 +422,7 @@ function renderMetaPackageJson(packageName, version) {
     files: [
       ".agents/plugins/marketplace.json",
       "bin/",
-      "dist/Open Computer Use.app/",
-      "dist/linux/",
-      "dist/windows/",
+      ...(browserOnly ? [] : ["dist/Open Computer Use.app/", "dist/linux/", "dist/windows/"]),
       "plugins/open-computer-use/.codex-plugin/",
       "plugins/open-computer-use/.mcp.json",
       "plugins/open-computer-use/assets/",
@@ -546,7 +572,7 @@ function copyBundledRuntimes(packageRoot, packageName) {
   }
 }
 
-function stageMetaPackage(packageName, version, outDir) {
+function stageMetaPackage(packageName, version, outDir, browserOnly = false) {
   const packageRoot = path.join(outDir, packageName);
   rmSync(packageRoot, { recursive: true, force: true });
 
@@ -562,27 +588,27 @@ function stageMetaPackage(packageName, version, outDir) {
   });
   cpSync(path.join(repoRoot, "LICENSE"), path.join(packageRoot, "LICENSE"));
   cpSync(path.join(repoRoot, "THIRD_PARTY_NOTICES.md"), path.join(packageRoot, "THIRD_PARTY_NOTICES.md"));
-  copyBundledRuntimes(packageRoot, packageName);
+  if (!browserOnly) copyBundledRuntimes(packageRoot, packageName);
   copyInstallerScripts(packageRoot);
 
-  const launcher = renderLauncher();
+  const launcher = renderLauncher(browserOnly);
   writeExecutable(path.join(packageRoot, "bin", "open-computer-use"), launcher);
   writeExecutable(path.join(packageRoot, "bin", "ocu"), launcher);
   writeExecutable(path.join(packageRoot, "bin", "open-computer-use-mcp"), launcher);
   writeExecutable(path.join(packageRoot, "bin", "open-codex-computer-use-mcp"), launcher);
-  writeFileSync(path.join(packageRoot, "scripts", "postinstall.mjs"), renderPostinstall(packageName, version), "utf-8");
-  writeFileSync(path.join(packageRoot, "README.md"), renderReadme(packageName, version), "utf-8");
-  writeFileSync(path.join(packageRoot, "package.json"), `${JSON.stringify(renderMetaPackageJson(packageName, version), null, 2)}\n`, "utf-8");
+  writeFileSync(path.join(packageRoot, "scripts", "postinstall.mjs"), renderPostinstall(packageName, version, browserOnly), "utf-8");
+  writeFileSync(path.join(packageRoot, "README.md"), renderReadme(packageName, version, browserOnly), "utf-8");
+  writeFileSync(path.join(packageRoot, "package.json"), `${JSON.stringify(renderMetaPackageJson(packageName, version, browserOnly), null, 2)}\n`, "utf-8");
 
   removeJunkFiles(packageRoot);
 }
 
-function stagePackage(packageName, version, outDir) {
+function stagePackage(packageName, version, outDir, browserOnly = false) {
   if (!metaPackageNames.includes(packageName)) {
     throw new Error(`Unsupported package name: ${packageName}`);
   }
 
-  stageMetaPackage(packageName, version, outDir);
+  stageMetaPackage(packageName, version, outDir, browserOnly);
 }
 
 function main() {
@@ -590,11 +616,11 @@ function main() {
   const pluginManifestPath = path.join(repoRoot, "plugins", "open-computer-use", ".codex-plugin", "plugin.json");
   const { version } = readJSON(pluginManifestPath);
 
-  if (!options.skipBuild) {
+  if (!options.skipBuild && !options.browserOnly) {
     ensureBuilt(options.configuration, options.arch);
   }
 
-  if (options.configuration === "release") {
+  if (options.configuration === "release" && !options.browserOnly) {
     run(path.join(repoRoot, "scripts", "verify-locked-use-bundle.sh"), [path.join(repoRoot, "dist", appBundleName)]);
   }
 
@@ -602,7 +628,7 @@ function main() {
   mkdirSync(options.outDir, { recursive: true });
 
   for (const packageName of options.packageNames) {
-    stagePackage(packageName, version, options.outDir);
+    stagePackage(packageName, version, options.outDir, options.browserOnly);
   }
 
   process.stdout.write(`${options.outDir}\n`);

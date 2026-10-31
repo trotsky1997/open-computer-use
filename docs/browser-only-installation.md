@@ -65,5 +65,5 @@ browser flow. The Linux browser needed its missing libasound runtime library.
 Native stdin pipe errors now close/reap the native peer and reject pending
 requests instead of escaping into JavaScript execution. A targeted stream error
 check and immediate-exit native fixture cover this boundary. Native Windows
-and actual Codex app reload remain unverified. A separately published native-free
-npm distribution and broader transport/platform coverage remain open.
+and actual Codex app reload remain unverified. A [native-free npm tarball](browser-only-package.md) can also be built and installed
+locally. Registry publication and broader transport/platform coverage remain open.
