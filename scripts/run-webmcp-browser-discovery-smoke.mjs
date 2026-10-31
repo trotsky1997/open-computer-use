@@ -16,13 +16,20 @@ async function until(check,label){const deadline=Date.now()+15000;while(!check()
 async function run(session,code){const result=await session.run(code,30000);assert.equal(result.isError,false,result.content.at(-1)?.text);return result;}
 function state(session){const owner=session.resourceOwner??session.resourceOwners.get(session.worker);return session.browserWebMcp.owners.get(owner);}
 function notice(result,target){return result.content.some(item=>item._meta?.id==='cua.webmcp'&&item.text.includes(target));}
+async function expectNotice(session,result,target){
+ if(!notice(result,target)){
+  await until(()=>state(session).notifications.has(target),'Initial asynchronous tool notice missing');
+  result=await run(session,'nodeRepl.write("discovery ready");');
+ }
+ assert.ok(notice(result,target),'Inventory discovery missed an unbound page');
+}
 try{
  for(const Session of [runtime.WorkerJavaScriptSession,runtime.PersistentJavaScriptSession]){
   const page=await context.newPage();let late;const session=new Session({native});
   try{
    await page.goto(url);await ready(page);const first=await id(page);
    const initial=await run(session,'await cua.listBrowsers({emit:false});nodeRepl.write("inventory");');
-   assert.ok(notice(initial,first),'Initial inventory missed an unbound page');assert.equal(state(session).collections.size,0);
+   await expectNotice(session,initial,first);assert.equal(state(session).collections.size,0);
    assert.equal(await page.evaluate(()=>window.calls),0,'Discovery executed a tool');
    assert.equal([...session.browserTabs.browsers.values()].some(entry=>entry.tabs.has(first)),false,'Discovery claimed an existing tab');
    late=await context.newPage();await late.goto(url+'late');await ready(late);const later=await id(late);
@@ -36,9 +43,9 @@ try{
    const listing=JSON.parse(text.slice(start,end));assert.equal(listing.length,1);
    await run(session,`nodeRepl.write(await tools.call(${JSON.stringify(listing[0].name)},{}));`);assert.equal(await page.evaluate(()=>window.calls),1);
    await session.endTurn();assert.equal(session.browserWebMcp.owners.size,0);assert.equal(page.isClosed(),false);
-   const resumed=await run(session,'await cua.listTabs({emit:false});nodeRepl.write("resumed");');assert.ok(notice(resumed,first));assert.equal(state(session).collections.size,0);
+   const resumed=await run(session,'await cua.listTabs({emit:false});nodeRepl.write("resumed");');await expectNotice(session,resumed,first);assert.equal(state(session).collections.size,0);
    await session.reset();assert.equal(session.browserWebMcp.owners.size,0);assert.equal(page.isClosed(),false);
-   const reset=await run(session,'await cua.listBrowsers({emit:false});nodeRepl.write("reset");');assert.ok(notice(reset,first));
+   const reset=await run(session,'await cua.listBrowsers({emit:false});nodeRepl.write("reset");');await expectNotice(session,reset,first);
    assert.equal(await page.evaluate(()=>window.calls),1);console.log(`${Session.name} PASS browser-wide initial/new/navigated/closed unbound discovery, no claims/calls, explicit tool call and turn/reset resubscription`);
   }finally{await session.close();await late?.close();await page.close();}
  }

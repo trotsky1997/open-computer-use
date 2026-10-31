@@ -2277,3 +2277,38 @@ Cross-host observer initialization during a preexisting dialog, sole-callback
 takeover and raw CDP/drop/navigation-wait deadline coordination remain open.
 Physical macOS headful and Windows validation remain outstanding. The full
 harness parity goal stays active.
+
+
+## Nonblocking inventory during another host's dialog
+
+A fresh process reproduced a 15s inventory timeout while another host owned a
+confirm dialog. Metadata discovery now returns after browser-level registration,
+without waiting for renderer-level Page.enable or initial WebMCP inventories.
+WebMCP initialization continues in the background with pending-page counts and
+later coalesced tool notices. Explicit tool fetches keep their readiness checks.
+
+Passive dialog teardown cancels only its own pending initialization when the last
+observer owner leaves. Owned dialogs and action cleanup retain their completion
+barriers. New targets still resume only after their capture session is ready.
+Whole-browser Playwright setup rejects live pending/failed observers with an
+explicit recovery message; current target IDs and readiness are rechecked so
+closed targets or initialization completing during the check cannot block input.
+
+Both JS hosts pass owned Chrome 158 source and source-relocated installed flows
+on macOS/Linux: inventory during an existing dialog, inventory beyond the page
+observer's 10s timeout, passive close and reset preserving the original response,
+explicit readiness refusal and fresh binding recovery. Existing initial/popup
+capture, observer-loss retention/recovery, WebMCP initial/new/navigated/closed
+unbound discovery, real dialogs and installation regressions pass. Linux isolated
+headful/MCP remains passing. Node: macOS 209/209; Linux 208/209, one platform-only
+skip. Browser-only build/pack verifies both runtime copies against current source.
+
+Updated the early-popup fixture to expect foreign-session binding rejection, and
+the layout fixture to compare exact page IDs across blocked creation rather than
+an aggregate CDP target count that also includes workers. No dependency, public
+configuration, version or CI changes.
+
+Capturing/responding to a dialog that predates a different host's observer still
+requires the owning host or existing native controls. Sole-callback takeover,
+raw CDP/drop/navigation-wait deadline coordination, physical macOS headful and
+Windows remain open. The full parity goal stays active.

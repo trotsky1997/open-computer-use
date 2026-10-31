@@ -204,10 +204,11 @@ test('browser-wide discovery observes unbound HTTP pages, reuses its connection 
    if(method==='Target.getTargets')return {targetInfos:[{type:'page',targetId:'initial',url:'https://owned.test'},{type:'page',targetId:'hidden',url:'chrome-extension://owned/bridge.html'},{type:'iframe',targetId:'child',url:'https://owned.test'}]};
    throw Error('Unexpected discovery call '+method);
   }};
- });const owner={},seen=[];
- host.observe=async(state,id)=>{seen.push(id);const observer={targetId:id,endpoint:host.endpoint(),ready:Promise.resolve(),connection:{async close(){closed++;}}};state.observers.set(id,observer);state.notifications.set(id,observer);};
+ });const owner={},seen=[];let finishInitial;
+ host.observe=async(state,id)=>{seen.push(id);const observer={targetId:id,endpoint:host.endpoint(),ready:Promise.resolve(),connection:{async close(){closed++;}}};state.observers.set(id,observer);if(!finishInitial)await state.wait(new Promise(resolve=>{finishInitial=resolve;}));state.notifications.set(id,observer);};
  try{
   await host.request(owner,{action:'discover'});await host.request(owner,{action:'discover'});assert.equal(opened,1);assert.deepEqual(seen,['initial']);
+  assert.match(host.notifications(owner)[0].text,/1 pages initializing/);finishInitial();await Promise.allSettled([...host.state(owner).pending]);
   assert.equal(host.state(owner).collections.size,0);assert.equal(host.notifications(owner).length,1);
   event({method:'Target.targetInfoChanged',params:{targetInfo:{type:'page',targetId:'late',url:'https://owned.test/late'}}});
   await new Promise(resolve=>setImmediate(resolve));assert.deepEqual(seen,['initial','late']);assert.equal(host.notifications(owner).length,1);

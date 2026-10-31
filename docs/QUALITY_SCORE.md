@@ -45,3 +45,14 @@ AbortSignal 执行超时与清理取消，timeout=0 仍支持会话取消；原�
 隔离 headful/MCP 回归通过。Node 为 207/207、206/207（一个平台专属跳过），
 browser-only npm build/pack 内容检查通过。跨进程既有弹窗观察初始化、原始 CDP /
 drop / 导航等待的计时协调、物理 macOS headful 与 Windows 继续待补。
+
+
+浏览器清单已与页面观察初始化解耦；已有弹窗导致 Page.enable 阻塞时，其他宿主仍可
+读取元数据。WebMCP 初始工具异步发现，并提示尚在初始化的页面数。被动观察器退出
+可取消自身初始化，保留原宿主弹窗；Playwright 连接会明确拒绝仍在初始化或失败的
+活页面观察器，并复核页面 ID 和完成状态。macOS/Linux 双会话源码及当前代码安装
+入口通过超过 10s 观察期限后的清单读取、被动退出/重置、原响应保留及重新绑定恢复。
+原有 popup、捕获断线恢复、WebMCP 发现和安装/MCP 回归通过，Linux 隔离 headful
+回归通过。Node 为 209/209、208/209（一个平台专属跳过）；npm build/pack 中两份
+运行模块与当前源码一致。跨宿主接管已有弹窗回调、其他原始动作计时、物理 macOS
+headful 与 Windows 继续待补。

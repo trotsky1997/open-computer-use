@@ -26,13 +26,15 @@ capabilities advertise `webmcp`; `.documentation()` provides the agent guidance.
 Browser inventory or tab use starts turn-owned browser-wide discovery on Chrome
 158+. Existing and newly created/navigated HTTP(S) pages are observed without
 claiming their tabs or fetching callable collections. Bound tabs also start their
-native frame observer.
+native frame observer. Inventory returns target metadata without waiting for
+per-page initialization. Initial tools arrive asynchronously as each page becomes
+ready; a coalesced incomplete-discovery notice reports pages still initializing.
 It reports initially available tools before an explicit fetch, later additions/
 removals, and tools in newly attached same-process/OOP frames. Navigations resync
 the observer; using a retained tab binding in a later turn restarts discovery.
 Older Chrome keeps ordinary tab actions working and explicit fetch still reports
-its unsupported-version error. Paused pages and active dialogs can consume the
-10-second discovery budget; incomplete discovery leaves ordinary browser access
+its unsupported-version error. Paused pages and active dialogs can consume a
+page observer's 10-second discovery budget; incomplete discovery leaves ordinary browser access
 available and asks for an explicit refresh after the page resumes.
 
 Repeated changes coalesce into one queued notice per tab, prepended to a later

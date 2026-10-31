@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { BrowserConsoleLogs, openConnection, createBrowserApi, keyEvent, screenshotPoint, screenshotRegion, imageDimensions } from "./browser-cdp.mjs";
+import { BrowserDialogs, BrowserConsoleLogs, openConnection, createBrowserApi, keyEvent, screenshotPoint, screenshotRegion, imageDimensions } from "./browser-cdp.mjs";
 import { createCuaApi } from "./open-computer-use-repl.mjs";
 const output = () => ({ write() {}, async emitImage() {} });
 
@@ -153,4 +153,29 @@ test('dialog observer cleanup skips native detachment only for a confirmed dead 
   if(dead)await dialogs.cleanup(owner);else await assert.rejects(dialogs.cleanup(owner),/reply lost/);
   assert.equal(commands,dead?0:1);assert.equal(closed,1);assert.equal(dialogs.browsers.size,0);
  }
+});
+
+
+test('passive dialog observation can close while Page.enable is blocked',async()=>{
+ const owner={},dialogs=new BrowserDialogs(()=>"http://owned-observation/"),commands=[];let closed=0;
+ const starting=dialogs.start(owner,'blocked',true,undefined,{sessionId:'owned',send(method){commands.push(method);return new Promise(()=>{});},close(){closed++;}});starting.catch(()=>{});
+ const entry=[...dialogs.targets.values()][0];assert.equal(entry.initialized,undefined);
+ await dialogs.stop(owner,'blocked');await assert.rejects(starting,/observation ended/);
+ assert.ok(closed>0);assert.equal(dialogs.targets.size,0);assert.deepEqual(commands,['Page.enable']);
+});
+
+
+test('Playwright readiness checks only block live pending dialog observers',async()=>{
+ const {createServer}=await import('node:http');let targets=[{type:'page',id:'blocked'}],readyDuringFetch;
+ const server=createServer((_request,response)=>{readyDuringFetch?.();response.setHeader('Content-Type','application/json');response.end(JSON.stringify(targets));});
+ await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+ const endpoint=`http://127.0.0.1:${server.address().port}`,owner={},dialogs=new BrowserDialogs(()=>endpoint);
+ dialogs.targets.set(`${endpoint}|own`,{endpoint,targetId:'own',owners:new Set([owner]),initialized:true});
+ dialogs.targets.set('blocked',{endpoint,targetId:'blocked'});
+ try{
+  await assert.rejects(dialogs.request(owner,{action:'checkPlaywright',targetId:'own'}),/observation.*not ready/);
+  readyDuringFetch=()=>{dialogs.targets.get('blocked').initialized=true;};await dialogs.request(owner,{action:'checkPlaywright',targetId:'own'});readyDuringFetch=undefined;dialogs.targets.get('blocked').initialized=false;
+  targets=[];await dialogs.request(owner,{action:'checkPlaywright',targetId:'own'});
+  targets={};await assert.rejects(dialogs.request(owner,{action:'checkPlaywright',targetId:'own'}),/Invalid browser target list/);
+ }finally{server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}
 });

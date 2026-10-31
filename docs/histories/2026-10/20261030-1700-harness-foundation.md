@@ -2937,3 +2937,35 @@ The phase's macOS preflight found a locked session with no active displays, so
 physical headful validation remains open. Cross-process observer initialization
 during a preexisting dialog, sole-callback takeover, raw CDP/drop/navigation-wait
 deadline coordination and Windows remain outstanding.
+
+
+## Inventory remains responsive during another host's dialog
+
+Decoupled browser metadata registration from renderer-level dialog and WebMCP
+initialization. Initial tools now arrive asynchronously; incomplete discovery
+notices include pending pages. Explicit per-tab tool fetches retain their existing
+readiness and frame checks. Passive dialog close/reset cancels its own pending
+Page.enable initialization when the entry loses its final owner. Owned dialogs,
+new-target capture-before-resume and native action cleanup retain their barriers.
+
+Whole-browser Playwright setup rejects live pending/failed page observers with
+recovery guidance. It checks current page IDs and rechecks readiness after that
+lookup, preventing closed targets and completed initialization from causing a
+stale refusal. Added focused cancellation/readiness assertions and an owned
+independent-process smoke controller. Installed tests run that controller after
+source relocation. The early-popup fixture now expects current foreign-session
+binding rejection; layout fencing checks exact page IDs and excludes worker
+inventory churn while retaining its blocked native creation assertion.
+
+Owned Chrome 158 source and current-runtime installed payloads pass both JS hosts
+on macOS/Linux: inventory before/after the 10s page-observer deadline, passive
+close/reset preserving the original dialog, explicit refusal and post-response
+fresh binding recovery. Existing early/popup dialogs, capture-loss retention and
+external recovery, asynchronous initial/new/navigated/closed WebMCP discovery,
+real dialogs and installed MCP regressions pass; Linux isolated headful/MCP also
+passes. Node: macOS 209/209; Linux 208/209, one platform-specific skip.
+Browser-only npm build/pack confirms both copied modules match current source.
+
+Capturing/responding to dialogs predating another host's observer, sole-callback
+takeover, broader raw action deadlines, physical macOS headful and Windows remain
+open. No dependency, version, configuration or CI changes.

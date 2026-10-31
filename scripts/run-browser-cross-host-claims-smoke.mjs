@@ -30,7 +30,8 @@ async function holdUpdate(entry){
 }
 async function updateStarted(entry){return (await entry.connection.send('Runtime.evaluate',{expression:'globalThis.ocuManagementFixture?.started===true',returnByValue:true},10000,entry.sessionId)).result.value;}
 async function finishUpdate(entry){await entry.connection.send('Runtime.evaluate',{expression:'if(globalThis.ocuManagementFixture){chrome.tabs.update=ocuManagementFixture.update;ocuManagementFixture.finish?.();delete globalThis.ocuManagementFixture;}',returnByValue:true},10000,entry.sessionId);}
-async function tabs(){return (await fetch(new URL('/json/list',process.env.OPEN_COMPUTER_USE_CDP_URL))).json();}
+// CDP inventories also include service workers; this fixture checks page layout.
+async function tabs(){return (await(await fetch(new URL('/json/list',process.env.OPEN_COMPUTER_USE_CDP_URL))).json()).filter(target=>target.type==='page');}
 async function until(check,label){const deadline=Date.now()+10000;for(;;){const value=await check();if(value)return value;assert.ok(Date.now()<deadline,label);await new Promise(resolve=>setTimeout(resolve,20));}}
 async function existing(target){for(const page of controller.contexts()[0].pages())if(await id(page)===target)return page;throw Error('Owned fixture tab missing');}
 async function id(page){const cdp=await page.context().newCDPSession(page);try{return (await cdp.send('Target.getTargetInfo')).targetInfo.targetId;}finally{await cdp.detach();}}
@@ -72,9 +73,9 @@ try{
    try{
     const timed=a.call('run',`await m.tabs.update(${nativeId},{autoDiscardable:false});`,300);timed.catch(()=>{});
     await until(()=>updateStarted(control),'Native management mutation did not reach dispatch');
-    const count=(await tabs()).length;let createdEarly=false;
+    const before=(await tabs()).map(target=>target.id).sort();let createdEarly=false;
     const waiting=run(b,`var waiting=await cua.createBrowserTab('cdp',${JSON.stringify(url+'waiting')},{visible:false});nodeRepl.write(JSON.stringify(waiting.id));`).then(value=>{createdEarly=true;return value;});waiting.catch(()=>{});
-    await new Promise(resolve=>setTimeout(resolve,700));assert.equal(createdEarly,false);assert.equal((await tabs()).length,count);
+    await new Promise(resolve=>setTimeout(resolve,700));assert.equal(createdEarly,false);const heldTargets=await tabs();assert.deepEqual(heldTargets.map(target=>target.id).sort(),before,JSON.stringify(heldTargets.map(({id,url})=>({id,url}))));
     await finishUpdate(control);const canceled=await timed;assert.equal(canceled.isError,true);assert.match(canceled.content.at(-1).text,/timed out/);
     assert.ok(await waiting);await b.call('endTurn');await a.call('reset');
     await run(a,`var browser=await cua.getBrowser({id:'cdp'});var tab=await cua.getTab(${reference});nodeRepl.write(JSON.stringify(true));`);

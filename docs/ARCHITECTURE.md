@@ -643,8 +643,18 @@ for limits, validation and remaining platform work.
 
 ## Early browser dialog observation
 
-Browser/tab discovery starts a shared endpoint observer. Newly auto-attached page
-targets keep their startup wait until their own capture session enables Page
+Browser/tab discovery starts a shared endpoint observer and returns metadata
+without waiting for renderer-level capture readiness. WebMCP browser discovery
+likewise starts per-page initialization in the background; pending counts and
+later tools remain turn-owned coalesced notices. Passive teardown cancels pending
+Page.enable initialization only when its entry loses the last observer owner.
+Owned dialogs and action cleanup retain their existing completion barriers.
+Whole-browser Playwright connections reject live pending/failed observers after
+checking current target identities, so a closed target cannot block a surviving
+page. An already-open dialog can still require its original host or native
+controls for resolution; cross-host inventory stays usable.
+
+Newly auto-attached page targets keep their startup wait until their own capture session enables Page
 events (or delivers a Page-domain event), then receive Runtime.runIfWaitingForDebugger.
 Popup dialogs route through native opener identity to the nearest active action
 watcher, retaining its owner, completion barrier and resumed errors. Passive

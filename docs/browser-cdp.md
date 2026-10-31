@@ -383,7 +383,16 @@ reset the session to clean up an uncertain failed response. Old handles fail
 when a dialog closes or the next dialog opens.
 
 Browser and tab discovery install an endpoint-wide CDP observer that remains
-host-owned across JS calls. New page targets wait for their capture session to
+host-owned across JS calls. Metadata inventory returns after browser-level
+registration, independently of each page's renderer readiness. A dialog already
+held by another host can block that page's Page.enable without blocking the tab
+list. Passive observer close/reset cancels its own pending initialization and
+preserves the original owner's dialog. Whole-browser Playwright connection setup
+fails explicitly if a live page observer is pending or failed; resolve the dialog
+through its owning host or existing native/browser controls, then bind again or
+reset. Closed targets are excluded from this readiness check.
+
+New page targets wait for their capture session to
 enable Page events before Runtime.runIfWaitingForDebugger is dispatched. A
 Page-domain event also establishes readiness when renderer startup or a dialog
 delays the enable reply. Capture uses the attached session directly; a second renderer connection
@@ -649,3 +658,10 @@ The controller covers waits beyond the default deadline, repeated prompts, file
 selection dialogs, resumed navigation failure and unlimited-action reset cleanup
 in both JS session types. It also runs against the installed plugin after source
 checkout removal in `scripts/tests/browser-only-install-smoke.mjs`.
+
+Independent-host dialog regression: run
+`node scripts/run-cross-host-dialog-smoke.mjs` with `OCU_TEST_CHROME_EXECUTABLE`
+pointing to an owned Chrome for Testing executable. It exercises inventory after
+page-observer timeout, passive teardown preserving the original dialog, explicit
+readiness refusal, fresh binding recovery and closed-target isolation in both JS
+hosts. The installed browser-only smoke also runs it after source relocation.

@@ -110,6 +110,12 @@ if(process.argv[2]==='codex-plugin-config') { (await import('node:fs')).chmodSyn
   await new Promise((resolve,reject)=>{budgets.once('error',reject);budgets.once('exit',code=>code===0?resolve():reject(Error(budgetOutput)));});
   for(const line of budgetOutput.split('\n').filter(line=>line.includes('PASS')))console.log(line);
   console.log('PASS installed dialog-aware locator deadlines after source checkout removal');
+  const dialogs=spawn(process.execPath,[path.join(source,'scripts/run-cross-host-dialog-smoke.mjs'),installed],{env:{...env,OCU_TEST_CHROME_EXECUTABLE:path.resolve(chrome)},stdio:['ignore','pipe','pipe']});let dialogOutput='';
+  dialogs.stdout.on('data',chunk=>{dialogOutput+=chunk;});dialogs.stderr.on('data',chunk=>{dialogOutput+=chunk;});
+  await new Promise((resolve,reject)=>{dialogs.once('error',reject);dialogs.once('exit',code=>code===0?resolve():reject(Error(dialogOutput)));});
+  for(const line of dialogOutput.split('\n').filter(line=>line.includes('PASS')))console.log(line);
+  console.log('PASS installed independent-host dialog inventory after source checkout removal');
+
 
 
 

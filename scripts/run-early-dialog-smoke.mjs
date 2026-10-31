@@ -28,8 +28,7 @@ try{
    assert.equal(await run(session,'await parent.playwright.getByRole("button",{name:"Popup",exact:true}).click();nodeRepl.write(JSON.stringify(true));'),true);
    const entry=await until(()=>[...session.browserDialogs.targets.values()].find(e=>e.openerId===opener&&e.dialog));popup=entry.targetId;assert.ok(entry.dialog.owner,'Popup dialog lost initiating owner');
    passive=new Session({native});
-   await run(passive,`var other=await cua.getTab(${JSON.stringify(popup)});nodeRepl.write(JSON.stringify(other.id));`);
-   const denied=await passive.run('await other.getJsDialog();');assert.equal(denied.isError,true);assert.match(JSON.stringify(denied.content),/another browser session/);await passive.close();
+   const denied=await passive.run(`await cua.getTab(${JSON.stringify(popup)});`);assert.equal(denied.isError,true);assert.match(JSON.stringify(denied.content),/another session/);await passive.close();
    assert.equal(await run(session,`var popup=await cua.getTab(${JSON.stringify(popup)});var pd=await popup.getJsDialog();nodeRepl.write(JSON.stringify(pd.type));`),'prompt');
    assert.equal(await run(session,'await pd.accept("popup 🙂");nodeRepl.write(JSON.stringify(await popup.playwright.locator("output").innerText()));'),'popup 🙂');
    const target=(await(await fetch(endpoint+'/json/list')).json()).find(t=>t.id===opener);
