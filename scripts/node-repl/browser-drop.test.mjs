@@ -110,3 +110,18 @@ test("dialog responses surface resumed action errors even when the watch finishe
    assert.equal(dialogs.waiters.size,0);
  }
 });
+
+test('popup dialog carries opener action ownership and errors across the dialog response',async()=>{
+ const endpoint='http://popup-errors/',owner={},dialogs=new BrowserDialogs(()=>endpoint);
+ const entry=id=>({key:endpoint+'|'+id,endpoint,targetId:id,owners:new Set(),passiveOwners:new Set(),watches:new Set(),dialogWaiters:new Set()});
+ const parent=entry('parent'),popup=entry('popup');popup.openerId='parent';dialogs.targets.set(parent.key,parent);dialogs.targets.set(popup.key,popup);
+ dialogs.claim(parent,owner);dialogs.claim(parent,owner,true);assert.equal(parent.passiveOwners.has(owner),false);
+ const id=await dialogs.request(owner,{action:'watch',targetId:'parent'});
+ dialogs.event(popup,{method:'Page.javascriptDialogOpening',params:{type:'prompt'}});
+ assert.equal((await dialogs.request(owner,{action:'wait',id})).opened,true);assert.equal(popup.dialog.owner,owner);
+ const dialog=await dialogs.request(owner,{action:'get',targetId:'popup'});
+ await dialogs.request(owner,{action:'end',id,error:'Opener action failed after popup'});
+ popup.connection={async send(){popup.dialog=undefined;}};
+ await assert.rejects(dialogs.request(owner,{action:'respond',targetId:'popup',id:dialog.id,response:'dismiss'}),/Opener action failed/);
+ assert.equal(dialogs.waiters.size,0);
+});

@@ -519,3 +519,19 @@ inside that window. The JS API exposes Linux listWindows()/getApp({windowId}),
 with numeric labels for diffs. Current bindings expose AX/semantic actions and
 reject unverified image/physical routing. See [native windows](native-window-binding.md)
 for limits, validation and remaining platform work.
+
+
+## Early browser dialog observation
+
+Browser/tab discovery starts a shared endpoint observer. Newly auto-attached page
+targets keep their startup wait until their own capture session enables Page
+events (or reports a dialog), then receive Runtime.runIfWaitingForDebugger.
+Popup dialogs route through native opener identity to the nearest active action
+watcher, retaining its owner, completion barrier and resumed errors. Passive
+inventory owners can leave without explicitly responding to dialogs; binding
+promotes ownership. The final owner releases auto-attach/connection resources.
+Capture-session identity fences delayed detach/events across resets. A lost
+observer blocks further discovery until reset. Real pre-binding/popup flows and
+cleanup are verified in both JS hosts on macOS and arm64 Linux. Existing dialogs
+that predate observer startup still require existing browser/native controls;
+raw CDP cannot replay their opening event. See [browser CDP](browser-cdp.md).

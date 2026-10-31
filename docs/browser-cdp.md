@@ -362,7 +362,12 @@ response dispatch consumes the captured identity, including command failure;
 reset the session to clean up an uncertain failed response. Old handles fail
 when a dialog closes or the next dialog opens.
 
-CDP observers attach during binding and remain host-owned across JS calls. An
+Browser and tab discovery install an endpoint-wide CDP observer that remains
+host-owned across JS calls. New page targets wait for their capture session to
+enable Page events before Runtime.runIfWaitingForDebugger is dispatched. The
+opening event itself also establishes readiness when a dialog delays the enable
+reply. Capture uses the attached session directly; a second renderer connection
+can stall while a target is paused. An
 input/navigation action that opens a dialog returns at that point, so the next
 call can inspect and respond. Native CDP input, locator actions and file-chooser
 setFiles use the same boundary. After a response, the harness waits for the
@@ -388,15 +393,31 @@ New tabs start at about:blank, install observers, then navigate to the requested
 URL, covering scripts that open a dialog during initial loading. Rebinding a
 known active dialog emits its type instead of requesting blocked AX data. Console
 startup for that new observer is deferred until a successful dev.logs call after
-dialog resolution. A dialog that predates the first harness binding can block
-Page.enable; resolve it through existing browser/native controls before binding.
+dialog resolution. A dialog that predates observer startup can still block Page.enable without
+replaying its opening event; resolve it through existing browser/native controls
+before observation starts. The early observer catches dialogs opened after
+discovery and before a tab binding, including initial popup scripts.
 When the resumed browser action fails, accept()/dismiss() reports its error,
 including a failure that settles during the response. An initial observation
 interrupted by a page dialog still returns the dialog for handling.
 
-A prompt during a cross-process frame drop has real Chrome coverage. Dialogs in
-popups and broader frame flows, system permission prompts, headful and
-cross-platform behavior remain open validation. Independent host processes and
+Popup capture follows native opener IDs to the nearest active action watcher.
+It preserves that action's session ownership, completion barrier and resumed error
+reporting even though the dialog is in another target. A passive inventory owner
+neither consumes a dialog nor explicitly dismisses it during cleanup. Binding a
+tab promotes that owner; subsequent inventory does not demote it. The last owner
+releases auto-attach and its root connection. Stale capture-session events are
+ignored; a lost root observer fails discovery until reset releases it and allows
+fresh observation. No document content is rewritten for capture.
+
+A prompt during a cross-process frame drop has real Chrome coverage. macOS and
+arm64 Linux disposable Chromium verified pre-binding prompts, synchronous popup
+prompts, Unicode response, competing-owner rejection, passive cleanup, root
+outage/reset recovery and popup dismissal during reset/close before obtaining a
+dialog handle. Real Chrome initial-load/alert/confirm/prompt/beforeunload,
+sequential and failure-recovery flows also passed. Broader frame flows, system
+permission prompts, dialogs predating observer startup, headful/external-client
+behavior and native Windows remain open validation. Independent host processes and
 external browser clients are not coordinated by the in-process identity guard.
 
 `OPEN_COMPUTER_USE_CDP_URL=http://127.0.0.1:9222 node scripts/run-dialog-smoke.mjs`
@@ -497,3 +518,11 @@ Tab capabilities now advertise cdp. Use
 command/event API. It provides event cursors, filtering, paging and attached child
 selectors with host-owned per-turn connections. See
 [tab CDP capability](browser-debugger.md) for exact policy, validation and limits.
+
+
+`OPEN_COMPUTER_USE_CDP_URL=http://127.0.0.1:9222 node scripts/run-early-dialog-smoke.mjs`
+verifies early capture and popup ownership/cleanup in both JS session hosts.
+Use a disposable browser profile; the controller creates and closes its own page
+and popup fixtures. It also intentionally closes the owned observer connection
+and checks explicit failure and recovery. It does not dismiss an existing user
+browser dialog to initialize capture.

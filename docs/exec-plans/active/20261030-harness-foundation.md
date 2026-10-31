@@ -726,3 +726,35 @@ Python checks. No dependency/CI or normal user desktop registration changed.
 See [native lifecycle](../../native-lifecycle.md). Terminal entries, real compositor
 activation-token/focus behavior, broader registry/locale/platform coverage and
 remaining harness parity stay open. The full goal remains active.
+
+## Early browser dialog capture and popup ownership
+
+Browser/tab discovery now starts one shared endpoint observer with page-only
+flattened auto-attachment. Newly attached targets retain their startup wait until
+the same capture session enables Page events or receives a dialog-opening event;
+then Runtime.runIfWaitingForDebugger is dispatched without blocking on a modal
+renderer response. This closes the second-connection/initial-navigation race.
+Native opener identity routes a popup dialog to the nearest active action's
+session and preserves completion/error reporting across the target boundary.
+Passive inventory owners do not dispatch dialog responses on cleanup; binding
+promotes ownership and repeated inventory keeps that promotion. The last owner
+releases auto-attach/root connections. Capture-session identity fences stale
+messages, and an observer disconnect fails discovery until reset recovers.
+
+Validation passed: 152 Node checks on macOS; arm64 Linux passed 151 with one
+macOS-only skip. Both platforms and JS session hosts passed real pre-binding
+prompt capture after getBrowser, synchronous popup prompts, Unicode responses,
+competing-owner rejection, passive cleanup, root outage/reset recovery and owned
+popup dismissal during reset/close without a captured dialog handle. The existing
+real alert/confirm/prompt/beforeunload, sequential/input/filechooser and cleanup
+failure-recovery dialog smoke passed on both platforms. macOS also passed the
+broader browser smoke (input, screenshots, clipboard, navigation/event waits,
+filechooser and stale state) and actual local/global npm tarball installation,
+installed CLI/JS sessions/MCP browser flows. The tested browser-only tarball was
+refreshed locally; no registry publication occurred. No dependency or CI added.
+
+See [browser CDP](../../browser-cdp.md). A raw CDP probe confirmed that a dialog
+already open before observer startup delays Page.enable without replaying its
+opening event. That boundary, broader frame/provider/extension/headful behavior,
+external-client coordination and native Windows remain open. The full harness
+goal stays active. All browser profiles/configs/targets were owned fixtures.
