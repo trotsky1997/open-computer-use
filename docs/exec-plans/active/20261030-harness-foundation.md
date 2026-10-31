@@ -623,3 +623,27 @@ focus. Owned processes and private VM files were cleaned up. No dependency or CI
 added. Precise pixel/paging calibration, wider providers/hardware/window managers,
 background/composited/Wayland and other-platform coordinate routes remain open.
 The full harness goal stays active.
+
+
+## Native-free browser source installation
+
+Add browser-only Codex plugin source installation without native build/artifact
+requirements, plus an explicit target home for isolated real installation tests.
+Stage complete runtime/dependencies and patched config before cache replacement;
+retain previous payload/config on dependency or preparation failure. Verify
+installed MCP JavaScript and real disposable Chrome discovery/input/evaluation,
+reinstallation/idempotence and normal existing native payload installation.
+Keep broader transport/platform/parity requirements active.
+
+See [browser-only source installation](../../browser-only-installation.md). The full goal remains active.
+
+Validation passed: 149 Node checks on macOS; 148 passed and one platform skip on
+arm64 Linux. Both platforms passed staged source installation, missing dependency
+and denied-config rollback, config/symlink/idempotence/mode switching, installed
+MCP JavaScript after source removal, and real disposable Chrome input/QuickJS DOM
+evaluation in both session modes plus the installed MCP launcher. macOS also
+passed against clean npm ci --ignore-scripts dependencies. Owned browser profiles,
+processes and private VM test files were cleaned up; only the VM's browser runtime
+system prerequisite remains installed. No project dependency or CI added. Native
+Windows, actual Codex reload, concurrent/crash recovery and separately published
+native-free npm artifacts remain open. The full harness goal stays active.

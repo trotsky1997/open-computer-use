@@ -1323,3 +1323,42 @@ focus. Owned processes and private VM files were cleaned up. No dependency or CI
 added. Precise pixel/paging calibration, wider providers/hardware/window managers,
 background/composited/Wayland and other-platform coordinate routes remain open.
 The full harness goal stays active.
+
+
+## Browser-only source plugin installation
+
+Added --browser-only to skip native lookup/build/payload requirements and
+--codex-home for an explicit isolated destination. Node.js 22+ and declared npm
+dependencies are required. The installer stages complete runtime assets and
+patched config before replacement, retains a prior cache for rollback, publishes
+config by same-directory rename and preserves existing config symlinks. Native
+payload/default mode behavior remains available; browser-only reinstall removes
+that version's previous payload. Unsafe version path names are rejected. CLI
+help and source installation instructions now expose the options.
+
+An owned temporary installation controller blocks native builds and checks missing
+dependencies, denied config publication rollback, unrelated config, idempotence,
+config symlinks and native/browser mode replacement. It hides the source checkout
+before initializing installed MCP JavaScript. macOS also passed real disposable
+Chrome browser inventory/native-error isolation, field input and installed
+QuickJS DOM evaluation in both session modes and through the installed launcher.
+Linux passed installer and installed MCP JavaScript checks, then the same real
+installed browser flows after supplying its missing libasound system library.
+That Linux flow exposed an unhandled native stdin EPIPE: the peer now handles
+pipe errors, closes/reaps the lease and rejects pending requests without aborting
+unrelated JavaScript/browser work. Updated old generic test backends to advertise
+the Linux text/selection capabilities they implement. A stream-error regression
+check covers the fix. No real user Codex
+home, normal browser profile or native desktop was modified. See
+[browser-only installation](../../browser-only-installation.md).
+
+Validation passed: 149 Node checks on macOS; 148 passed and one platform skip on
+arm64 Linux. Both platforms passed staged source installation, missing dependency
+and denied-config rollback, config/symlink/idempotence/mode switching, installed
+MCP JavaScript after source removal, and real disposable Chrome input/QuickJS DOM
+evaluation in both session modes plus the installed MCP launcher. macOS also
+passed against clean npm ci --ignore-scripts dependencies. Owned browser profiles,
+processes and private VM test files were cleaned up; only the VM's browser runtime
+system prerequisite remains installed. No project dependency or CI added. Native
+Windows, actual Codex reload, concurrent/crash recovery and separately published
+native-free npm artifacts remain open. The full harness goal stays active.

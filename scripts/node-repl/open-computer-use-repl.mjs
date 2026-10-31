@@ -232,6 +232,7 @@ export class JsonLinePeer extends EventEmitter {
     child.stderr.setEncoding("utf8");
     child.stdout.on("data", chunk => { if (this.child === child) this.#onData(chunk); });
     child.stderr.on("data", chunk => { if (this.child === child) this.stderr = (this.stderr + chunk).slice(-8192); });
+    child.stdin.on("error", error => { if (this.child === child) { this.#close(error); this.endSession(); } });
     child.on("error", error => { if (this.child === child) this.#close(error); });
     child.on("exit", (code, signal) => {
       if (this.child === child) this.#close(new Error(`native MCP exited (code=${code ?? "null"}, signal=${signal ?? "null"})${this.stderr ? `: ${this.stderr.trim()}` : ""}`));

@@ -112,6 +112,9 @@ You can also manually download and install the
 
 ## More
 
+See [browser-only source installation](docs/browser-only-installation.md) for a
+native-free plugin, custom target directories and installed-runtime verification.
+
 Besides the MCP JSON config above, you can also use the built-in commands:
 
 ```bash
@@ -120,6 +123,10 @@ open-computer-use install-codex-mcp
 
 # Install as a Codex plugin, mainly for Codex App
 open-computer-use install-codex-plugin
+
+# Browser/JavaScript-only plugin from this source checkout (Node.js 22+):
+# Run npm ci first; this skips native builds and artifacts.
+./scripts/install-codex-plugin.sh --browser-only
 
 # Install into Claude Code by writing to ~/.claude.json
 open-computer-use install-claude-mcp

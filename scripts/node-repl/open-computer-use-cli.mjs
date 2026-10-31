@@ -190,11 +190,13 @@ Reports Node, adapter, kernel, support-module and native-artifact availability. 
 }
 
 function installHelp(scriptName, usage) {
+  const detail = scriptName === "install-codex-plugin.sh"
+    ? "Installs the persistent Node.js JavaScript REPL plugin. --browser-only skips native builds and payloads; --codex-home selects the target directory."
+    : "This helper updates a local MCP config to run:\n  open-computer-use mcp";
   return `Usage:
   ${usage}
 
-This helper updates a local MCP or plugin config to run:
-  open-computer-use mcp
+${detail}
 
 Script:
   ${scriptName}`;
@@ -437,7 +439,7 @@ function resolveNativeExecutable(report) {
 function installerUsage(command) {
   const usages = {
     "install-dsh-mcp": "open-computer-use install-dsh-mcp [--profile <name>] [--command <path>] [--no-hook] [--no-skill]",
-    "install-codex-plugin": "open-computer-use install-codex-plugin",
+    "install-codex-plugin": "open-computer-use install-codex-plugin [--browser-only] [--codex-home DIR] [--rebuild] [--configuration debug|release]",
     "install-codex-mcp": "open-computer-use install-codex-mcp",
     "install-gemini-mcp": "open-computer-use install-gemini-mcp [--scope project|user]",
     "install-opencode-mcp": "open-computer-use install-opencode-mcp",

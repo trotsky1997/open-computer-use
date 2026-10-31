@@ -248,3 +248,11 @@ test("MCP adapter initializes and preserves JS bindings when the native binary i
   assert.equal(result.isError,false);
   assert.equal(result.content.at(-1).text,'42');
 });
+
+
+test("browser-only plugin installation is discoverable without native artifacts", async t => {
+  const packageRoot=mkdtempSync(path.join(os.tmpdir(),'ocu-install-help-'));t.after(()=>rmSync(packageRoot,{recursive:true,force:true}));
+  const output=captureStream(),error=captureStream();
+  assert.equal(await main({packageRoot,platformPackages:{},argv:['help','install-codex-plugin'],output:output.stream,errorOutput:error.stream}),0);
+  assert.match(output.value(),/--browser-only/);assert.match(output.value(),/--codex-home/);assert.match(output.value(),/JavaScript REPL/);assert.equal(error.value(),'');
+});

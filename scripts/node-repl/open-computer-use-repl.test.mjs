@@ -16,6 +16,10 @@ function mockNative() {
   const native = {
     calls,
     async request(method, params) {
+      if (method === "tools/list") return {tools: [
+        {name: "type_text", inputSchema: {properties: {element_index: {type: "integer"}}}},
+        {name: "select_text"},
+      ]};
       assert.equal(method, "tools/call");
       calls.push(params);
       switch (params.name) {
@@ -455,8 +459,9 @@ for (const Session of [PersistentJavaScriptSession, WorkerJavaScriptSession]) {
     const native = mockNative(), session = new Session({ native });
     t.after(() => session.close?.());
     await session.run(`var selectionApp = await cua.getApp("Text", { initialState: false });`);
+    const request = native.request.bind(native);
     for (const message of ["select_text could not verify the requested range", 'unsupportedTool("select_text")']) {
-      native.request = async () => textResult(message, true);
+      native.request = async (method, params) => method === "tools/list" ? request(method, params) : textResult(message, true);
       const result = await session.run(`await selectionApp.selectText(0,"target");`);
       assert.equal(result.isError, true);
       assert.ok(result.content.at(-1).text.includes(message), result.content.at(-1).text);
@@ -657,3 +662,12 @@ for (const Session of [PersistentJavaScriptSession, WorkerJavaScriptSession]) {
     assert.deepEqual(native.calls.at(-1).arguments,{app:'Text',x:10,y:20,direction:'right',pages:0.25});assert.equal(schemas,2);
   });
 }
+
+
+test("native pipe errors reject pending requests and end the lease without escaping the stream", async () => {
+  const child=new EventEmitter();child.stdout=new PassThrough();child.stderr=new PassThrough();child.stdin=new PassThrough();child.kill=()=>{};
+  const peer=new JsonLinePeer({child}),pending=peer.request('tools/call',{name:'list_apps'});
+  child.exitCode=0;child.stdin.destroy(Object.assign(new Error('write EPIPE'),{code:'EPIPE'}));
+  await assert.rejects(pending,error=>error.code==='EPIPE');assert.equal(peer.pending.size,0);assert.equal(peer.closed,true);assert.ok(peer.ending instanceof Promise);
+  await assert.rejects(peer.request('ping'),/closed/);await peer.close();
+});

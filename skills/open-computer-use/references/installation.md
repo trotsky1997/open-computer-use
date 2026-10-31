@@ -71,6 +71,22 @@ Codex App can also use the plugin installer:
 open-computer-use install-codex-plugin
 ```
 
+From this checkout, browser/JavaScript-only installation needs Node.js 22+ and
+npm dependencies, with no Swift/Go build or native artifact:
+
+```sh
+npm ci
+./scripts/install-codex-plugin.sh --browser-only
+# Optional explicit destination:
+./scripts/install-codex-plugin.sh --browser-only --codex-home /path/to/codex-home
+```
+
+The installed plugin still needs OPEN_COMPUTER_USE_CDP_URL for browser access.
+It uses the same managed plugin identity/version as normal installation and
+replaces that cache on reinstall. Source/Worker and installed MCP browser checks,
+prerequisites and limits are documented in [browser-only installation](../../../docs/browser-only-installation.md).
+
+
 Install into DeepSeek Harness (DSH):
 
 ```sh
