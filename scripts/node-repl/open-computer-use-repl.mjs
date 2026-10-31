@@ -954,6 +954,7 @@ export class PersistentJavaScriptSession {
       return { content, isError: true };
     } finally {
       clearTimeout(timer);
+      if(this.hostsBrowser)content.unshift(...this.browserWebMcp.notifications(active.resourceOwner));
       if(this.active===active)this.active = null;
     }
   }
@@ -1042,6 +1043,7 @@ export class WorkerJavaScriptSession {
       if (!pending || pending.worker !== worker) return;
       this.pending.delete(message.id);
       clearTimeout(pending.timer);
+      message.result.content.unshift(...this.browserWebMcp.notifications(this.resourceOwners.get(worker)));
       pending.resolve(message.result);
       return;
     }

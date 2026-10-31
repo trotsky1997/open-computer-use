@@ -23,7 +23,19 @@ No call is automatically replayed.
 Always fetch in each turn, and again after navigation, tool changes or a stale
 handle failure. Only call exact names in that returned listing. Current tab
 capabilities advertise `webmcp`; `.documentation()` provides the agent guidance.
-Tool discovery is explicit; automatic page-tool notifications remain open.
+Initial tool discovery is explicit. After a fetch, native registration additions
+and removals in its discovered frame tree produce an automatic tab-scoped notice
+in the next source/Worker JS result. Repeated changes coalesce into one notice per
+tab; notices precede explicit output and do not replace it. They carry a tab ID
+and refresh guidance, without tool definitions or execution. Fetch again for the
+current names/schema. Unfetched tabs and newly attached frames still need a fetch.
+
+Observers use Chrome's native [WebMCP protocol](https://chromedevtools.github.io/devtools-protocol/tot/WebMCP/)
+`toolsAdded`/`toolsRemoved` events on the exact discovered CDP frame sessions.
+Enabling the domain supplies an initial inventory; that initial burst is omitted
+from change notices. Unrelated frame IDs and other owners are excluded. Navigation,
+changed endpoints and turn cleanup discard old notices. Connections/observers
+close with their fetched collection. No page tool runs in response to an event.
 
 ## Native binding and browser requirements
 
@@ -104,6 +116,7 @@ sampling identified that wait. No normal profile/keychain settings were changed.
 native-free CLI/MCP and both sessions’ read-only evaluation regressions also
 passed on Chrome 158, including renderer-crash cleanup.
 The test runtime came from the official Chrome for Testing channel metadata.
-Automatic tool notifications, real user-interaction/consent dialogs, headful and
+Automatic discovery before an initial fetch, newly attached-frame notifications,
+real user-interaction/consent dialogs, headful and
 Linux/Windows behavior, browser crashes and broader external-site workflows remain
 unverified. Full transport/claims/native desktop parity remains an active goal.

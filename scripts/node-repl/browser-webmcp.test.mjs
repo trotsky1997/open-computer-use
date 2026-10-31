@@ -59,3 +59,29 @@ test('native cancel waits for the original invocation to settle after abort',asy
  finish(Error('Native invocation aborted'));await cancel;await assert.rejects(call,/Native invocation aborted/);
  await tools.cancel('invocation');assert.equal(settled,true);
 });
+
+test('native inventory notices are frame-scoped, coalesced and fenced by owner lifecycle',async()=>{
+ const {EventEmitter}=await import('node:events'),f=fixture(()=>{}),entry=f.state.collections.get('collection');entry.watchers=new Map();
+ const session=new EventEmitter();let enables=0;session.send=async()=>{enables++;session.emit('WebMCP.toolsAdded',{tools:[{frameId:'main'}]});return {};};
+ await f.host.watch(f.state,entry,{session,frameId:'main'});await f.host.watch(f.state,entry,{session,frameId:'child'});assert.equal(enables,1);assert.deepEqual(f.host.notifications(f.owner),[]);
+ session.emit('WebMCP.toolsAdded',{tools:{}});session.emit('WebMCP.toolsRemoved',{tools:[null]});session.emit('WebMCP.toolsAdded',{tools:[{frameId:'unrelated'}]});assert.deepEqual(f.host.notifications(f.owner),[]);
+ session.emit('WebMCP.toolsAdded',{tools:[{frameId:'child'}]});session.emit('WebMCP.toolsRemoved',{tools:[{frameId:'main'}]});
+ assert.deepEqual(f.host.notifications({}),[]);const notices=f.host.notifications(f.owner);assert.equal(notices.length,1);assert.match(notices[0].text,/tab "tab"/);assert.equal(notices[0]._meta.id,'cua.webmcp');assert.deepEqual(f.host.notifications(f.owner),[]);
+ session.emit('WebMCP.toolsAdded',{tools:[{frameId:'main'}]});entry.stale=true;assert.deepEqual(f.host.notifications(f.owner),[]);entry.stale=false;
+ session.emit('WebMCP.toolsAdded',{tools:[{frameId:'main'}]});f.host.endpoint=()=>{throw Error('Invalid endpoint');};assert.deepEqual(f.host.notifications(f.owner),[]);
+ await f.host.cleanup(f.owner);session.emit('WebMCP.toolsAdded',{tools:[{frameId:'main'}]});assert.deepEqual(f.host.notifications(f.owner),[]);
+});
+
+test('both JS hosts prepend pending notices without replacing explicit output',async()=>{
+ const {PersistentJavaScriptSession,WorkerJavaScriptSession}=await import('./open-computer-use-repl.mjs');
+ for(const Session of [PersistentJavaScriptSession,WorkerJavaScriptSession]){
+  const session=new Session({native:{async request(){throw Error('Unexpected native IO');}}});
+  try{
+   await session.run('nodeRepl.write("ready")');const owner=session.resourceOwner??session.resourceOwners.get(session.worker),host=session.browserWebMcp,state=host.state(owner);
+   state.notifications.set('owned',{targetId:'owned',endpoint:host.endpoint()});
+   const result=await session.run('nodeRepl.write("explicit")');assert.equal(result.isError,false);assert.equal(result.content[0]._meta.id,'cua.webmcp');assert.equal(result.content.at(-1).text,'explicit');
+   assert.equal((await session.run('nodeRepl.write("again")')).content.length,1);
+   state.notifications.set('owned',{targetId:'owned',endpoint:host.endpoint()});const failed=await session.run('throw Error("owned error")');assert.equal(failed.isError,true);assert.equal(failed.content[0]._meta.id,'cua.webmcp');assert.match(failed.content.at(-1).text,/owned error/);
+  }finally{await session.close();}
+ }
+});

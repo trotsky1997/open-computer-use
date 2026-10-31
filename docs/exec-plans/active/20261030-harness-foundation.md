@@ -1080,3 +1080,28 @@ This round did not revalidate Linux/Windows/headful WebMCP, tool notifications o
 interaction/consent dialogs. Native caller settlement confirms the browser-side
 invocation; it provides no rollback of a provider's accepted effects. Full harness
 parity remains active.
+
+## WebMCP tool-change notifications
+
+Fetched frame-tree collections now observe Chrome's native WebMCP toolsAdded and
+toolsRemoved events on their exact CDP sessions. Their owning turn coalesces
+changes by tab and prepends a generic refresh notice to the next JS result in
+both source and Worker hosts, including ordinary error results. Explicit output
+stays intact. Notices supply no page-defined tool instructions and execute no
+action; agents fetch current names/schema before calling updated tools.
+
+Initial enable inventories, foreign frame IDs, other owners, stale documents,
+changed/invalid endpoints and closed turns are excluded. Each collection's CDP
+connection owns its subscriptions and closes through existing cleanup. There is
+no new polling loop, public API, dependency or CI configuration.
+
+All 158 Node checks pass. Focused checks cover initial-event suppression, shared
+session/frame membership, coalescing, draining, ownership, stale/invalid endpoint
+fencing and both hosts' success/error output. Owned headless Chrome 158 passes
+both hosts with main/same-process/cross-origin OOP frame registration changes,
+unrelated-tab isolation, stale replacement, ordinary calls and turn/reset/close
+cleanup. The native WebMCP.enable capability was probed on that exact browser.
+
+Initial discovery of unfetched tabs and newly attached frames still requires a
+fetch. Real consent, headful/platform/crash and external-site notifications remain
+unverified. Full harness parity remains active; no package or registry release.

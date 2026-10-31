@@ -22,6 +22,7 @@ const server=createServer((req,res)=>{
 await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));const url=`http://127.0.0.1:${server.address().port}/`;
 const browser=await chromium.connectOverCDP(endpoint,{noDefaults:true}),native={async request(){throw Error('native unused');}};
 async function run(session,code){const result=await session.run(code,30000);assert.equal(result.isError,false,result.content.at(-1).text);return JSON.parse(result.content.at(-1).text);}
+async function until(fn){const end=Date.now()+5000;while(!fn()){assert.ok(Date.now()<end,'Native tool notice did not arrive');await new Promise(resolve=>setTimeout(resolve,20));}}
 function listing(text){const start=text.indexOf('['),end=text.lastIndexOf(']');return start<0?[]:JSON.parse(text.slice(start,end+1));}
 try{
  for(const Session of [WorkerJavaScriptSession,PersistentJavaScriptSession]){
@@ -41,9 +42,16 @@ try{
    const outputs=[];for(const tool of frames)outputs.push(await run(session,`nodeRepl.write(JSON.stringify(await tools.call(${JSON.stringify(tool.name)},{text:'frame'})));`));assert.equal(new Set(outputs).size,3);
    assert.equal(await run(session,`var denied=false;try{await tools.call('guessed',{});}catch(e){denied=/Unknown WebMCP/.test(e.message);}nodeRepl.write(JSON.stringify(denied));`),true);
    await page.evaluate(()=>fixture.replace());const calls=await page.evaluate(()=>fixture.calls);
+   await until(()=>[...session.browserWebMcp.owners.values()].some(state=>state.notifications.has(id)));
+   const notice=await session.run('nodeRepl.write("notice-check")');assert.equal(notice.isError,false);assert.equal(notice.content.filter(item=>item._meta?.id==='cua.webmcp').length,1);assert.match(notice.content[0].text,new RegExp(id));assert.equal(notice.content.at(-1).text,'notice-check');
    assert.equal(await run(session,`var stale=false;try{await tools.call(${JSON.stringify(echo.name)},{text:'stale'});}catch(e){stale=true;}nodeRepl.write(JSON.stringify(stale));`),true);assert.equal(await page.evaluate(()=>fixture.calls),calls);
    const fresh=listing(await run(session,`var fresh=await cap.fetchTools();nodeRepl.write(JSON.stringify(fresh.description()));`)),replacement=fresh.find(tool=>tool.name.startsWith('echo__'));
    assert.notEqual(replacement.name,echo.name);assert.equal(await run(session,`nodeRepl.write(JSON.stringify(await fresh.call(${JSON.stringify(replacement.name)},{})));`),'replacement');
+   for(const frame of page.frames().filter(frame=>new URL(frame.url()).pathname==='/child'))await frame.evaluate(()=>fixture.replace());
+   await until(()=>[...session.browserWebMcp.owners.values()].some(state=>state.notifications.has(id)));
+   const childNotice=await session.run('nodeRepl.write("child-notice")');assert.equal(childNotice.content.filter(item=>item._meta?.id==='cua.webmcp').length,1);
+   assert.equal((await session.run('nodeRepl.write("drained")')).content.filter(item=>item._meta?.id==='cua.webmcp').length,0);
+   const unrelated=await page.context().newPage();try{await unrelated.goto(url+'cancel?unrelated');await unrelated.evaluate(()=>fixture.ready);await unrelated.evaluate(()=>fixture.replace());assert.equal((await session.run('nodeRepl.write("unrelated")')).content.filter(item=>item._meta?.id==='cua.webmcp').length,0);}finally{await unrelated.close();}
    await run(session,`var pending=tools.call(${JSON.stringify(slow.name)},{}).catch(()=>{});nodeRepl.write(JSON.stringify(true));`);
    await page.waitForFunction(()=>fixture.started===1);const started=Date.now();await session.endTurn();assert.ok(Date.now()-started<5000);await page.waitForFunction(()=>fixture.aborted===1);
    assert.equal(session.browserWebMcp.owners.size,0);
@@ -64,7 +72,7 @@ try{
     await run(session,`var pending=current.call(${JSON.stringify(waiting.name)},{}).catch(()=>{});nodeRepl.write(JSON.stringify(true));`);await page.waitForFunction(()=>fixture.started===1);
     await session[ending]();await page.waitForFunction(()=>fixture.aborted===1);assert.equal(session.browserWebMcp.owners.size,0);
    }
-   console.log(`${Session.name} PASS native tools, isolated API, exact same-URL/OOP frames, stale replacement/turn/navigation, provider validation errors, turn/reset/close native cancellation settlement, declarative form and empty listing`);
+   console.log(`${Session.name} PASS native tools, isolated API, exact same-URL/OOP frames, stale replacement/turn/navigation, provider validation errors, coalesced main/child/OOP tool-change notices, turn/reset/close native cancellation settlement, declarative form and empty listing`);
   }finally{await session.close();await page?.close();}
  }
 }finally{await browser.close();await new Promise(resolve=>server.close(resolve));}
