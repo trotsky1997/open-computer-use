@@ -1363,3 +1363,46 @@ This additional regression remains open alongside fixture registration timing;
 the exit controller's passing evidence is scoped to its pending reads/tools and
 fresh-browser read/tool recovery, without screenshots. Raw failed controls and
 launchers were retained outside the source checkout for the next investigation.
+
+## Native registration lifecycle reduction
+
+Reduced the Linux registration timeout to a raw-CDP fixture, independent of this
+harness and Playwright. A live frame's registerTool Promise can remain pending
+while its ordinary JavaScript timer continues; a following getTools query can
+also stall. Chrome 158 reproduces it, and a full inline-fixture run on Chrome 159
+also failed. Chromium records an unordered ModelContextHost bind/document-commit
+race in its document-replacement implementation. The observed reduction is
+consistent with that mechanism, without a captured C++ trace.
+
+The owned complete fixture now starts registration explicitly after document
+load and awaits the same native acknowledgement. Its replacement uses the
+captured native context, preserving the main-world spoof check. All original
+inventory, native call, partial-frame, cancellation, crash and repeated OOP
+navigation assertions remain; the already initialized unrelated-tab binding
+still verifies initial inventory. The readiness bound remains five seconds.
+No runtime version gate, production behavior or automatic replay was changed.
+
+Added a standalone native registration control using only Node built-ins. It
+owns its Chrome/profile, bounds each CDP command and verifies twenty cycles of
+five exact frame inventories and native echo calls with distinct per-frame
+tokens. Default registration starts after load; --inline-registration retains
+the original reproduction and fails explicitly on a stuck native Promise.
+Mac/Linux Chrome 158 pass the new control and both hosts' complete WebMCP smoke;
+Linux Chrome 159 also passes both hosts' post-load complete smoke. No dependency,
+CI, registry release or normal browser/profile changes were added.
+
+The generic Linux browser smoke still has a screenshot timing failure. Capturing
+the native request's caller stack located one failure at the screenshot after
+pointer drag. The same run passed its preceding screenshots. A diagnostic run
+with logging and a shorter local capture deadline passed, while the unchanged
+run failed again. This investigation continues; no screenshot retry or longer
+production timeout was added. Native inline registration, external sites,
+Windows/headful and broader transport parity remain open. Full goal stays active.
+
+macOS Chrome 156 retains explicit unsupported-WebMCP failures in both hosts.
+The pointer-only reduction also reproduces the post-drag screenshot timeout.
+An acknowledged native Input.cancelDragging command did not unblock capture;
+enabling Page on the screenshot connection also failed. These controls were
+not adopted in production. The retained disposable test checkout and raw failed
+controls support continued screenshot investigation; no browser job remains
+running after the checks.

@@ -253,10 +253,35 @@ Unidentified/default profiles, remote/proxied process identity, Windows/headful
 exit, other in-flight capability types and recovery while the original browser
 stays alive remain open. The controller kills only the Chrome children it starts.
 
-The combined Linux regression has a timing-dependent fixture registration
-failure: a current frame's native registration Promise can remain pending past
-the five-second readiness bound. A baseline-only 50 ms scheduling perturbation
-also reproduced it. The owned exit controller passes independently; the combined
-Linux WebMCP regression remains open. The smoke controller includes target/frame
-diagnostics and retains its readiness assertion. See the active foundation plan
-for the failed controls and next investigation.
+The combined regression starts owned fixture registrations after document load,
+then awaits their native acknowledgement before assertions. This avoids the
+native inline-registration hang reproduced by an independent CDP-only control.
+The complete controller passes both JS hosts on macOS/Linux Chrome 158 and Linux
+Chrome 159. Its five-second readiness bound, frame diagnostics, native calls,
+initial inventory of an already initialized tab, cancellation and crash checks
+remain. The runtime's discovery/call/cancellation behavior is unchanged.
+
+## Native registration lifecycle control
+
+`scripts/run-webmcp-registration-smoke.mjs` launches and kills only its own Chrome
+with a temporary profile. It uses Node built-ins and raw CDP, without importing
+this harness or Playwright. Twenty cycles each await native registration in five
+frames, check each frame's exact native tool inventory, and call its own echo
+registration. Duplicate-URL siblings and an OOP frame's same-process child must
+return five distinct tokens. The default post-load mode passes on macOS/Linux
+Chrome 158. The optional inline mode retains the original timing reproduction:
+
+```sh
+# Set OCU_TEST_CHROME_EXECUTABLE to an owned Chrome 158+ testing executable.
+node scripts/run-webmcp-registration-smoke.mjs
+node scripts/run-webmcp-registration-smoke.mjs --inline-registration
+```
+
+Inline registration can leave a Promise pending while ordinary JavaScript timers
+continue. A following native getTools query also failed to settle in a reduced
+Linux case. Chromium's [document-replacement implementation](https://github.com/chromium/chromium/blob/158.0.8127.2/content/browser/renderer_host/render_frame_host_impl.cc#L6912)
+records an unordered ModelContextHost bind/commit race. The reduction is
+consistent with that mechanism; no C++ execution trace was captured. Chrome 159
+also reproduced the combined inline fixture failure, so no new version gate or
+automatic retry was added. An external page's inline-registration hang remains
+an engine/provider limitation. Headful/Windows and external sites are unverified.

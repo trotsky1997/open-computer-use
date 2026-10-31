@@ -12,12 +12,12 @@ const server=createServer((req,res)=>{
  const child=req.url.startsWith('/child'),empty=req.url.startsWith('/empty'),cancellation=req.url.startsWith('/cancel');
  res.end(`<title>Owned WebMCP fixture</title><p id="status">Ready</p>${!child&&!empty?'<form toolname="submit_echo" tooldescription="Submit an owned fixture value" toolautosubmit action="/empty" method="get"><input name="text" type="text" required><button type="submit">Submit fixture</button></form>':''}${!child&&!empty&&!cancellation?`<iframe src="/child"></iframe><iframe src="/child"></iframe><iframe src="http://localhost:${server.address().port}/child?nested" allow="tools"></iframe><iframe src="http://localhost:${server.address().port}/empty"></iframe>`:''}${child&&req.url.includes('?nested')?'<iframe src="/child?grand"></iframe>':''}<script>
  globalThis.fixture={calls:0,aborted:0,started:0,controller:new AbortController()};
- const mc=document.modelContext,token=crypto.randomUUID();
- fixture.ready=(async()=>{if(!mc||${empty})return;
+ const token=crypto.randomUUID();
+ fixture.start=async()=>{if(${empty})return;const mc=fixture.context=document.modelContext;if(!mc)return;
  await mc.registerTool({name:${JSON.stringify(child?'frame_echo':'echo')},description:'Owned echo fixture',inputSchema:{type:'object',properties:{text:{type:'string'}},required:['text']},annotations:{readOnlyHint:true},execute:({text})=>{if(typeof text!=='string')throw Error('Fixture text must be a string');fixture.calls++;return {content:[{type:'text',text:${child?"token+':'+text":"text"}}]};}},{signal:fixture.controller.signal});
  await mc.registerTool({name:'slow',description:'Owned cancelable wait',inputSchema:{type:'object'},execute:async(_input,{signal})=>{fixture.started++;await new Promise((resolve,reject)=>{signal.addEventListener('abort',()=>{fixture.aborted++;reject(Error('Stopped'));},{once:true});});return 'unused';}});
  ${!child?`await mc.registerTool({name:'navigate',description:'Owned fixture navigation',inputSchema:{type:'object'},execute:()=>{location.href='/empty';return new Promise(()=>{});}});`:''}
- })();fixture.replace=async()=>{fixture.controller.abort();await mc.registerTool({name:${JSON.stringify(child?'frame_echo':'echo')},description:'Replacement',inputSchema:{type:'object'},execute:()=>{fixture.calls++;return 'replacement';}});};
+ };fixture.replace=async()=>{const mc=fixture.context;fixture.controller.abort();await mc.registerTool({name:${JSON.stringify(child?'frame_echo':'echo')},description:'Replacement',inputSchema:{type:'object'},execute:()=>{fixture.calls++;return 'replacement';}});};
  </script>`);
 });
 await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));const url=`http://127.0.0.1:${server.address().port}/`;
@@ -38,7 +38,8 @@ async function fixtureReady(page){
   do{count=selected.size;for(const info of targetInfos)if(selected.has(info.parentId))selected.add(info.targetId);}while(selected.size!==count);
   for(const info of targetInfos.filter(info=>selected.has(info.targetId)&&['page','iframe'].includes(info.type))){
    const {sessionId}=await send('Target.attachToTarget',{targetId:info.targetId,flatten:true});
-   try{const result=await send('Runtime.evaluate',{expression:`(async function ready(w){try{await w.fixture.ready;}catch(error){if(error.name==='SecurityError')return;throw error;}for(let i=0;i<w.frames.length;i++)await ready(w.frames[i]);})(window)`,awaitPromise:true,returnByValue:true},5000,sessionId);assert.equal(result.exceptionDetails,undefined,JSON.stringify(result.exceptionDetails));}
+   // Start after load; inline binding can leave native registration promises pending.
+   try{const result=await send('Runtime.evaluate',{expression:`(async function ready(w){try{await (w.fixture.ready??=w.fixture.start());}catch(error){if(error.name==='SecurityError')return;throw error;}for(let i=0;i<w.frames.length;i++)await ready(w.frames[i]);})(window)`,awaitPromise:true,returnByValue:true},5000,sessionId);assert.equal(result.exceptionDetails,undefined,JSON.stringify(result.exceptionDetails));}
    catch(error){throw Error('Owned fixture readiness failed: '+JSON.stringify({root:page.url(),target:info,tree:await send('Page.getFrameTree',{},1000,sessionId).catch(error=>error.message)}),{cause:error});}
    finally{await send('Target.detachFromTarget',{sessionId});}
   }
