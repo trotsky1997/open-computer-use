@@ -975,3 +975,47 @@ See [Linux window images](../../linux-window-images.md) for the X.Org Shape
 protocol/library references. Shaped physical input, GNOME/KWin, other compositor
 and WM effects, GPU/full-screen, Wayland/portal and broader providers remain open.
 The full harness parity goal stays active.
+
+## Shaped X11 physical input
+
+Physical input now supports shaped frames. The native frame verifier checks
+Bounding/Input region membership for requested pointer positions in the target
+frame and mapped windows declaring the selected app PID. This covers a WM's
+rectangular outer frame around a client with an independent input hole. Region
+reads reuse native rectangle/time budgets and cleanup. Native errors fail before
+input. Active AT-SPI identity, native focus/PID/geometry/stacking, full on-screen
+bounds, pointer recipient, neutral input and grab checks remain required.
+
+Drag computes its 13 sent positions once, verifies all of them before initial
+pointer motion and the first press, then rechecks current/next positions before
+each move. Held clicks and wheel pairs recheck their targets. Timed keys preserve
+native keyboard-focus checks without requiring a pointer position. Root-image
+capture retains its noncomposited shape/depth restrictions. MCP metadata and JS
+instructions now describe region preflight rather than refusing all shapes.
+
+The receiving fixture records physical button events separately from GTK's
+synthetic double-click notifications, along with motions, wheels, keys, modifier
+state and timestamps. Its independent ShapeInput hole stays visibly filled in
+the image. A dedicated controller checks exact shaped recipients, dwell/chords,
+timed keys, wheel direction, held drag endpoints/motion, bounding/input hole
+refusal, pre-press path rejection, independent region reset and reset/close
+button/key releases. A unit check covers child input masks under a WM frame;
+another proves a drag hole fails before any pointer motion or button press.
+
+Validation passed: 94 Python checks on macOS and Ubuntu arm64; 155 Node checks;
+47 native Linux Go checks plus 10 subchecks. Both JS hosts passed the shaped
+controller with xcompmgr alone and with decorated/undecorated Openbox. Both hosts
+also passed the original five input controllers without compositing and under
+Openbox/xcompmgr, the noncomposited image controller, and updated compositor
+pixels/shape-hole/refusal checks under Openbox. Existing reset/close cancellation,
+interception/grab/inactive/occluded/stale rejection and fresh input continued to
+pass. No project dependency, CI, installation package or registry release was
+added. All GUI checks used owned private Xvfb/D-Bus contexts and private WM config/
+cache locations.
+
+See [Linux clicks](../../linux-click-input.md) and [drag](../../linux-drag-input.md).
+The X.Org Shape 1.1 protocol defines the effective input region as the intersection
+of default bounds, client bounding and client input regions. Broader child-window/
+provider hit testing, dynamic region changes during actions, GNOME/KWin, hardware,
+GPU/full-screen, Wayland/portal and external interruption/claims remain open.
+The full harness parity goal stays active.

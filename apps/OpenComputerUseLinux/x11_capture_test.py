@@ -104,6 +104,31 @@ class ImageTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'occluded'):
             client.verify_frame(42, (0, 0, 2, 1), float('inf'))
 
+    def test_child_input_region_is_checked_beneath_a_wm_frame(self):
+        client = self.client()
+        client.lib.XGetInputFocus.side_effect = lambda _d, focus, _r: setattr(focus._obj, 'value', 3)
+        client.tree = lambda window: (0, [2]) if window == 1 else (1, [3]) if window == 2 else (2, [])
+        client.pid = lambda window: 42 if window == 3 else None
+        client.rectangle = lambda _window: (0, 0, 3, 1)
+        client.capture_shape = mock.Mock(side_effect=lambda window, _attrs, _deadline, kind=0: None if kind == 0 else [(0, 0, 1 if window == 3 else 3, 1)])
+        self.assertEqual(client.verify_frame(42, (0, 0, 3, 1), float('inf'), input_points=((0, 0),)), 2)
+        with self.assertRaisesRegex(RuntimeError, 'input region'):
+            client.verify_frame(42, (0, 0, 3, 1), float('inf'), input_points=((1, 0),))
+
+    def test_drag_path_hole_is_rejected_before_motion_or_button_press(self):
+        client = self.client()
+        client.tree = lambda window: (0, [2]) if window == 1 else (1, [])
+        client.rectangle = lambda _window: (0, 0, 3, 1)
+        client.capture_shape = mock.Mock(return_value=[(0, 0, 1, 1), (2, 0, 1, 1)])
+        xtest = mock.Mock()
+        xtest.XTestQueryExtension.return_value = 1
+        with mock.patch.object(capture.C, 'CDLL', return_value=xtest):
+            with self.assertRaisesRegex(RuntimeError, 'drag path.*input region'):
+                client.drag(42, (0, 0, 3, 1), (0, 0), (2, 0))
+        xtest.XTestFakeMotionEvent.assert_not_called()
+        xtest.XTestFakeButtonEvent.assert_not_called()
+        client.lib.XUngrabServer.assert_called_once()
+
     def test_remote_display_and_mixed_depth_fail_before_pixel_read(self):
         with mock.patch.dict(capture.os.environ, {"DISPLAY": "localhost:10.0"}), mock.patch.object(capture, "X11") as native:
             with self.assertRaisesRegex(RuntimeError, 'local X11'):
@@ -160,6 +185,11 @@ class ImageTests(unittest.TestCase):
             return rectangles
         client.shape.XShapeGetRectangles.side_effect = region
         self.assertEqual(client.capture_shape(2, types.SimpleNamespace(border_width=2), float('inf')), [(0, 1, 3, 2), (5, 4, 5, 4)])
+        client.lib.XFree.assert_called_once_with(rectangles)
+        client.lib.XFree.reset_mock()
+        rectangles[0].width = 0
+        with self.assertRaisesRegex(RuntimeError, 'Invalid X11 shape rectangle'):
+            client.capture_shape(2, types.SimpleNamespace(border_width=2), float('inf'))
         client.lib.XFree.assert_called_once_with(rectangles)
         client.lib.XFree.reset_mock()
         client.shape.XShapeGetRectangles.side_effect = lambda _d, _w, _kind, count, order: (setattr(count._obj, 'value', 4097) or rectangles)

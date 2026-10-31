@@ -26,7 +26,8 @@ IME and shifted symbol coverage remain limited to the verified primary mapping.
 
 The runtime checks the logical keyboard map before starting, confirms native
 frame/pointer/key/modifier/button state during dwell and before subsequent clicks,
-and stops on a mismatch. Modifier masks come from the native modifier map.
+and stops on a mismatch. Native Bounding/Input regions are rechecked during
+held clicks; shaped frames are supported when the target stays inside both. Modifier masks come from the native modifier map.
 [XQueryKeymap](https://xorg.freedesktop.org/archive/current/doc/libX11/libX11/libX11.html)
 reports logical state, which can lag physical state when processing is frozen.
 Sequential checks cannot provide exclusive input ownership; concurrent hardware

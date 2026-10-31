@@ -21,7 +21,9 @@ geometry or screenshot point, exact active window identity, native focus/PID/
 frame/stacking agreement, no occlusion, neutral button/modifier state, available
 grab and confirmed pointer placement on supported local X11, including
 composited desktops.
-Scroll visibly moves the pointer to that target; it does not click or focus it.
+Bounding/Input regions of the native frame and app-PID windows must contain the
+target and are rechecked before each wheel pair. This includes input-only holes
+that leave screenshot pixels unchanged. Scroll visibly moves the pointer to that target; it does not click or focus it.
 
 The XTest route sends paired logical wheel buttons 4/5/6/7. It checks the native
 frame and pointer before each pair and input/error state after each pair. A

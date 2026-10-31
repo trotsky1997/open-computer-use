@@ -34,6 +34,7 @@ GLib.set_prgname(name)
 GLib.set_application_name(name)
 windows = {}
 events = {}
+motions, wheels, key_events = {}, {}, {}
 canvases = {}
 shaped = {}
 
@@ -57,7 +58,7 @@ def canvas_point(key, x=40, y=23):
 
 
 def state(*_args):
-    result = {'pid': os.getpid(), 'shaped': shaped, 'events': events, 'pointerPoints': {key: canvas_point(key) for key in windows}, 'holePoints': {key: canvas_point(key, 72, 30) for key in windows}, 'cornerPoints': {key: window_point(key, 2, 2) for key in windows}, 'windows': {key: {'x': window.get_position()[0], 'y': window.get_position()[1], 'visible': window.get_visible()} for key, window in windows.items()}}
+    result = {'pid': os.getpid(), 'shaped': shaped, 'events': events, 'motions': motions, 'wheels': wheels, 'keys': key_events, 'pointerPoints': {key: canvas_point(key) for key in windows}, 'holePoints': {key: canvas_point(key, 72, 30) for key in windows}, 'inputHolePoints': {key: canvas_point(key, 112, 30) for key in windows}, 'dragPoints': {key: [canvas_point(key, 20, 55), canvas_point(key, 140, 55)] for key in windows}, 'cornerPoints': {key: window_point(key, 2, 2) for key in windows}, 'windows': {key: {'x': window.get_position()[0], 'y': window.get_position()[1], 'visible': window.get_visible()} for key, window in windows.items()}}
     with open(os.path.join(root, 'state.next'), 'w') as output:
         json.dump(result, output)
     os.replace(os.path.join(root, 'state.next'), os.path.join(root, 'state.json'))
@@ -68,6 +69,7 @@ def create(key, position, rgba=False):
     window = Gtk.Window(title=name + (' same title' if key in ('A', 'B') else ' ' + key))
     windows[key] = window
     events[key] = []
+    motions[key], wheels[key], key_events[key] = [], [], []
     window.set_decorated(os.environ.get('OCU_WINDOW_FIXTURE_DECORATED') == '1')
     window.set_default_size(280, 180)
     window.move(*position)
@@ -84,13 +86,33 @@ def create(key, position, rgba=False):
     canvas = Gtk.DrawingArea()
     canvases[key] = canvas
     canvas.set_size_request(260, 80)
-    canvas.add_events(Gdk.EventMask.BUTTON_PRESS_MASK | Gdk.EventMask.BUTTON_RELEASE_MASK)
+    canvas.set_can_focus(True)
+    canvas.add_events(Gdk.EventMask.BUTTON_PRESS_MASK | Gdk.EventMask.BUTTON_RELEASE_MASK | Gdk.EventMask.POINTER_MOTION_MASK | Gdk.EventMask.SCROLL_MASK | Gdk.EventMask.KEY_PRESS_MASK | Gdk.EventMask.KEY_RELEASE_MASK)
     def received(_widget, event, phase):
-        events[key].append({'phase': phase, 'button': event.button, 'x': event.x, 'y': event.y})
+        if phase == 'press' and event.type != Gdk.EventType.BUTTON_PRESS:
+            return False
+        events[key].append({'phase': phase, 'button': event.button, 'x': event.x, 'y': event.y, 'state': int(event.state), 'time': event.time})
+        if phase == 'press':
+            canvas.grab_focus()
         state()
         return False
     canvas.connect('button-press-event', received, 'press')
     canvas.connect('button-release-event', received, 'release')
+    def motion(_widget, event):
+        motions[key].append({'x': event.x, 'y': event.y, 'state': int(event.state)})
+        state()
+    def wheel(_widget, event):
+        wheels[key].append(event.direction.value_nick)
+        state()
+        return True
+    def key_received(_widget, event, phase):
+        key_events[key].append({'phase': phase, 'key': Gdk.keyval_name(event.keyval), 'code': event.hardware_keycode, 'state': int(event.state), 'time': event.time})
+        state()
+        return True
+    canvas.connect('motion-notify-event', motion)
+    canvas.connect('scroll-event', wheel)
+    canvas.connect('key-press-event', key_received, 'press')
+    canvas.connect('key-release-event', key_received, 'release')
     def paint(_widget, context):
         context.set_operator(cairo.OPERATOR_SOURCE)
         context.set_source_rgba(0 if key in ('B', 'Black') else 1, 0, 1 if key == 'B' else 0, 0.5 if rgba else 1)
@@ -105,15 +127,18 @@ def create(key, position, rgba=False):
         windows['B'].move(360, 10)
     def focus(_button):
         window.present()
+        canvas.grab_focus()
         window.get_window().focus(Gdk.CURRENT_TIME)
-    def shape(target):
+    def shape(target, kind=0):
         destination = windows[target]
-        shaped[target] = not shaped.get(target, False)
+        tag = target if kind == 0 else 'input:' + target
+        shaped[tag] = not shaped.get(tag, False)
         region = None
-        if shaped[target]:
+        if shaped[tag]:
             region = cairo.Region(cairo.RectangleInt(0, 0, destination.get_allocated_width(), destination.get_allocated_height()))
-            region.subtract(cairo.RectangleInt(0, 0, 12, 12))
-            x, y = canvases[target].translate_coordinates(destination, 60, 20)
+            if kind == 0:
+                region.subtract(cairo.RectangleInt(0, 0, 12, 12))
+            x, y = canvases[target].translate_coordinates(destination, 60 if kind == 0 else 100, 20)
             region.subtract(cairo.RectangleInt(x, y, 24, 20))
         display = xlib.XOpenDisplay(None)
         if not display:
@@ -121,11 +146,11 @@ def create(key, position, rgba=False):
         try:
             xid = destination.get_window().get_xid()
             if region is None:
-                xshape.XShapeCombineMask(display, xid, 0, 0, 0, 0, 0)
+                xshape.XShapeCombineMask(display, xid, kind, 0, 0, 0, 0)
             else:
                 rectangles = [region.get_rectangle(i) for i in range(region.num_rectangles())]
                 native = (NativeRectangle * len(rectangles))(*(NativeRectangle(r.x, r.y, r.width, r.height) for r in rectangles))
-                xshape.XShapeCombineRectangles(display, xid, 0, 0, 0, native, len(rectangles), 0, 0)
+                xshape.XShapeCombineRectangles(display, xid, kind, 0, 0, native, len(rectangles), 0, 0)
             xlib.XSync(display, 0)
         finally:
             xlib.XCloseDisplay(display)
@@ -138,6 +163,7 @@ def create(key, position, rgba=False):
                ('Grow Alpha', lambda _b: windows['Alpha'].resize(420, 280)),
                ('Shape A', lambda _b: shape('A')),
                ('Shape Alpha', lambda _b: shape('Alpha')),
+               ('Input Alpha', lambda _b: shape('Alpha', 2)),
                ('Hide A', lambda _b: windows['A'].hide()),
                ('Close A', lambda _b: windows['A'].destroy())]
     row = Gtk.Grid()

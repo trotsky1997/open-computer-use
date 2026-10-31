@@ -188,7 +188,7 @@ class X11:
             if data:
                 self.lib.XFree(data)
 
-    def verify_frame(self, expected_pid, rectangle, deadline, *, root_pixels=False):
+    def verify_frame(self, expected_pid, rectangle, deadline, *, root_pixels=False, input_points=()):
         x, y, width, height = rectangle
         if min(x, y) < 0 or min(width, height) <= 0 or width * height > 16_000_000:
             raise RuntimeError("X11 window bounds unavailable")
@@ -222,7 +222,7 @@ class X11:
         root = self.attributes(self.root)
         shaped, bx, by, bw, bh = C.c_int(), C.c_int(), C.c_int(), C.c_uint(), C.c_uint()
         clipped, cx, cy, cw, ch = C.c_int(), C.c_int(), C.c_int(), C.c_uint(), C.c_uint()
-        if not self.shape.XShapeQueryExtents(self.display, window, C.byref(shaped), C.byref(bx), C.byref(by), C.byref(bw), C.byref(bh), C.byref(clipped), C.byref(cx), C.byref(cy), C.byref(cw), C.byref(ch)) or shaped.value:
+        if root_pixels and (not self.shape.XShapeQueryExtents(self.display, window, C.byref(shaped), C.byref(bx), C.byref(by), C.byref(bw), C.byref(bh), C.byref(clipped), C.byref(cx), C.byref(cy), C.byref(cw), C.byref(ch)) or shaped.value):
             raise RuntimeError("Shaped native frame routing is unsupported")
         pending, visited = [(window, 0)], set()
         while pending:
@@ -237,6 +237,16 @@ class X11:
                 continue
             if root_pixels and attributes.window_class == 1 and attributes.depth != root.depth:
                 raise RuntimeError("Mixed-depth native frame routing is unsupported")
+            if input_points and (child == window or self.pid(child) == expected_pid):
+                bounds = self.rectangle(child)
+                points = [(px - bounds[0], py - bounds[1]) for px, py in input_points if bounds[0] <= px < bounds[0] + bounds[2] and bounds[1] <= py < bounds[1] + bounds[3]]
+                if points:
+                    for kind in (0, 2):
+                        region = self.capture_shape(child, attributes, deadline, kind=kind)
+                        if region is not None:
+                            for px, py in points:
+                                if not any(x <= px < x + w and y <= py < y + h for x, y, w, h in region):
+                                    raise RuntimeError("Pointer point or drag path is outside the native input region")
             _, children = self.tree(child)
             pending.extend((entry, depth + 1) for entry in children)
         if x + width > root.width or y + height > root.height:
@@ -252,6 +262,8 @@ class X11:
                 raise RuntimeError("Selected window is occluded")
         if time.monotonic() > deadline:
             raise RuntimeError("X11 verification time budget reached")
+        if self.error:
+            raise RuntimeError("Native X11 frame verification failed")
         return window
 
     def read(self, expected_pid, rectangle):
@@ -313,15 +325,15 @@ class X11:
             raise RuntimeError("XComposite frame PID/geometry is absent or ambiguous")
         return matches[0]
 
-    def capture_shape(self, window, attrs, deadline):
+    def capture_shape(self, window, attrs, deadline, kind=0):
         shaped, bx, by, bw, bh = C.c_int(), C.c_int(), C.c_int(), C.c_uint(), C.c_uint()
         clipped, cx, cy, cw, ch = C.c_int(), C.c_int(), C.c_int(), C.c_uint(), C.c_uint()
-        if not self.shape.XShapeQueryExtents(self.display, window, C.byref(shaped), C.byref(bx), C.byref(by), C.byref(bw), C.byref(bh), C.byref(clipped), C.byref(cx), C.byref(cy), C.byref(cw), C.byref(ch)):
+        if kind == 0 and not self.shape.XShapeQueryExtents(self.display, window, C.byref(shaped), C.byref(bx), C.byref(by), C.byref(bw), C.byref(bh), C.byref(clipped), C.byref(cx), C.byref(cy), C.byref(cw), C.byref(ch)):
             raise RuntimeError("X11 frame shape unavailable")
-        if not shaped.value:
+        if kind == 0 and not shaped.value:
             return None
         count, order = C.c_int(), C.c_int()
-        rectangles = self.shape.XShapeGetRectangles(self.display, window, 0, C.byref(count), C.byref(order))
+        rectangles = self.shape.XShapeGetRectangles(self.display, window, kind, C.byref(count), C.byref(order))
         try:
             if not 0 <= count.value <= 4096 or order.value not in (0, 1, 2, 3) or (count.value and not rectangles) or time.monotonic() > deadline:
                 raise RuntimeError("Invalid or over-budget X11 frame shape")
@@ -329,7 +341,10 @@ class X11:
                 return []
             # Shape coordinates start at the window interior; the pixmap includes its border.
             border = attrs.border_width
-            return [(r.x + border, r.y + border, r.width, r.height) for r in rectangles[:count.value]]
+            region = [(r.x + border, r.y + border, r.width, r.height) for r in rectangles[:count.value]]
+            if any(w <= 0 or h <= 0 for _x, _y, w, h in region):
+                raise RuntimeError("Invalid X11 shape rectangle")
+            return region
         finally:
             if rectangles:
                 self.lib.XFree(rectangles)
@@ -457,13 +472,13 @@ class X11:
             raise RuntimeError("XTest pointer synthesis unavailable")
         return xtest
 
-    def prepare_pointer(self, expected_pid, rectangle, point):
+    def prepare_pointer(self, expected_pid, rectangle, point, path=()):
         px, py = map(int, point)
         xtest = self.xtest()
         self.lib.XGrabServer(self.display)
         try:
             deadline = time.monotonic() + 0.25
-            frame = self.verify_frame(expected_pid, rectangle, deadline)
+            frame = self.verify_frame(expected_pid, rectangle, deadline, input_points=(point, *path))
             self.require_neutral(self.pointer()[3])
             status = self.lib.XGrabPointer(self.display, frame, 0, 0, 1, 1, 0, 0, 0)
             if status != 0:
@@ -522,7 +537,7 @@ class X11:
         return keys, mask
 
     def check_held_click(self, expected_pid, rectangle, frame, point, keys, modifiers, button_mask):
-        if self.verify_frame(expected_pid, rectangle, time.monotonic() + 0.25) != frame:
+        if self.verify_frame(expected_pid, rectangle, time.monotonic() + 0.25, input_points=(point,)) != frame:
             raise RuntimeError("Held click frame changed; inspect before retrying")
         child, x, y, state = self.pointer()
         if self.error or (child, x, y) != (frame, *point) or state != (modifiers | button_mask) or self.keyboard_state() != set(keys):
@@ -603,7 +618,7 @@ class X11:
         xtest, frame = self.prepare_pointer(expected_pid, rectangle, point)
         for step in range(count):
             check_cancelled()
-            if self.verify_frame(expected_pid, rectangle, time.monotonic() + 0.25) != frame:
+            if self.verify_frame(expected_pid, rectangle, time.monotonic() + 0.25, input_points=(point,)) != frame:
                 raise RuntimeError("Scroll frame changed; inspect before retrying")
             child, x, y, state = self.pointer()
             self.require_neutral(state)
@@ -660,7 +675,8 @@ class X11:
     def drag(self, expected_pid, rectangle, start, end):
         self.require_point(rectangle, start)
         self.require_point(rectangle, end)
-        xtest, frame = self.prepare_pointer(expected_pid, rectangle, start)
+        path = [(round(start[0] + (end[0] - start[0]) * step / 12), round(start[1] + (end[1] - start[1]) * step / 12)) for step in range(13)]
+        xtest, frame = self.prepare_pointer(expected_pid, rectangle, start, path=path)
         px, py = map(int, start)
         attempted = False
         try:
@@ -675,15 +691,14 @@ class X11:
                 # Release the server between steps so receivers can process grabs and motion.
                 self.lib.XGrabServer(self.display)
                 try:
-                    if self.verify_frame(expected_pid, rectangle, time.monotonic() + 0.25) != frame:
+                    if self.verify_frame(expected_pid, rectangle, time.monotonic() + 0.25, input_points=((px, py), path[step])) != frame:
                         raise RuntimeError("Drag frame changed; inspect before retrying")
                     child, actual_x, actual_y, state = self.pointer()
                     self.require_neutral(state & ~0x100)
                     if (child, actual_x, actual_y) != (frame, px, py) or not state & 0x100 or self.error:
                         raise RuntimeError("Drag pointer/button state changed; inspect before retrying")
                     previous = (px, py)
-                    px = round(start[0] + (end[0] - start[0]) * step / 12)
-                    py = round(start[1] + (end[1] - start[1]) * step / 12)
+                    px, py = path[step]
                     if not xtest.XTestFakeMotionEvent(self.display, self.lib.XDefaultScreen(self.display), px, py, 0):
                         raise RuntimeError("Drag motion failed; inspect before retrying")
                     self.lib.XSync(self.display, 0)

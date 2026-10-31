@@ -28,8 +28,8 @@ need broader provider coverage.
 Root-image compositor/depth restrictions apply only to the root-pixel capture
 route. Input verifies the receiving frame independently and accepts ARGB visual
 depths; it still requires focus, full on-screen bounds and no occlusion. Shaped
-frames remain unsupported for physical input, including when their composited
-image is available; semantic AX actions remain available.
+frames support physical input inside verified native Bounding/Input regions;
+semantic AX actions remain available.
 
 The helper checks existing core buttons/action modifiers, briefly probes pointer
 grab availability, moves the pointer and verifies its root child/window and pixel
@@ -103,7 +103,24 @@ grabs. Fixture points use client origins and frame extents so borders/titlebars
 are included in screenshot coordinates; the transparent input-only interceptor
 keeps keyboard focus and is explicitly raised above the receiving window.
 RGB/ARGB image checks now also cover mixed-depth decorated/reparented Openbox
-frames and exact ARGB pointer recipients. Broader GNOME/KWin, other WM themes/
-shapes, GPU/full-screen and physical input behavior remain open. The [XAllowEvents specification](https://xorg.freedesktop.org/archive/X11R7.5/doc/man/man3/XAllowEvents.3.html)
+frames and exact ARGB pointer recipients. Broader GNOME/KWin, other WM/compositor behavior, GPU/full-screen and physical input behavior remain open. The [XAllowEvents specification](https://xorg.freedesktop.org/archive/X11R7.5/doc/man/man3/XAllowEvents.3.html)
 describes the window manager's replay mechanism; this runtime never releases
 another client's grab.
+
+Before pointer motion or button delivery, the frame verifier reads [Shape 1.1](https://xorg.freedesktop.org/archive/X11R7.5/doc/Xext/shape.html)
+Bounding/Input rectangles for the target frame and mapped native windows that
+declare the selected app PID. Points within those windows must be in both regions
+and the default frame bounds. This catches input-only holes even when the window
+manager keeps its outer frame rectangular. Region reads reuse the image path's
+rectangle/time limits and allocation cleanup. Missing/invalid metadata fails
+before input; the actual root pointer recipient and grab checks still apply.
+Held clicks and wheel pairs recheck regions while running. Explicit timed keys
+keep their native keyboard-focus checks and do not require a pointer position.
+
+Both hosts pass shaped receiver tests without a WM and with decorated/undecorated
+Openbox: exact click coordinates/modifiers/dwell, timed keys, wheel direction,
+held drag motion, separate visible and input-only hole refusal, region reset,
+and reset/close button/key release. The independent Input hole is visibly filled
+in the screenshot. Broader child-window/provider hit testing and regions changing
+during an action remain open. Run `linux-shaped-input-js-smoke.mjs` with the same
+owned compositor/WM desktop setup as the other input controllers.

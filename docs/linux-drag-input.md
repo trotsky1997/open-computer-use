@@ -9,7 +9,9 @@ window-ID bindings and application-name bindings and visibly moves the pointer.
 The runtime reuses [verified click preflight](linux-click-input.md): exact AT-SPI
 window identity/active geometry, native focus/PID/frame/stacking agreement, local
 X11 with or without a compositor, no occlusion, neutral input state, available pointer grab and
-confirmed pointer placement. Both endpoints are validated before pointer motion.
+confirmed pointer placement. All 13 emitted/interpolated positions are checked against native Bounding/Input
+regions before the initial pointer motion and first press. Each step rechecks the
+current and next point before moving; region failures release the owned button.
 The legacy AT-SPI global drag route has been removed. No opt-in global fallback
 is involved; unsupported desktop routes return an error.
 

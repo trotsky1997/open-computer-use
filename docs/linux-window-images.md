@@ -43,8 +43,10 @@ clipped rectangle-pixel work budget and the existing 250 ms native verification
 deadline. Native rectangle storage is freed on every exit. Missing/invalid
 region evidence returns no image.
 
-Physical input and the noncomposited root-image fallback retain their current
-shape refusal. Semantic AX actions remain available for shaped windows.
+Physical input validates native Bounding/Input regions and supports shaped
+frames under the existing focus/exposure rules; see [Linux clicks](linux-click-input.md).
+The noncomposited root-image fallback retains its shape refusal. Semantic AX
+actions remain available for shaped windows.
 
 
 ## Exposed frames without a compositor
@@ -87,7 +89,7 @@ PID/geometry validation, mixed-depth frame acceptance with foreign-PID refusal,
 identity changes, shape clipping/union/empty regions, border translation,
 rectangle/pixel budget failures and native region cleanup. Both hosts also verify
 real opaque/ARGB corner cuts and interior holes, zero RGB outside shape, preserved
-half-alpha inside shape, shape reset and refusal of shaped physical clicks. The
+half-alpha inside shape, shape reset and refusal of hole-targeted physical clicks. The
 fixture sets server bounding regions via XShape on its own native window IDs and
 keeps errors in its private test directory.
 
