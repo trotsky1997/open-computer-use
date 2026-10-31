@@ -456,7 +456,7 @@ def capture_bound_window_png(app, window, bounds):
         return None
 
 
-def send_verified_click(app, window, bounds, element, x, y, button, count, key=None, duration=None):
+def verified_pointer_target(app, window, bounds, element, x, y):
     identity = verified_window_identity(app, window, bounds)
     if element is not None:
         if not state_contains(element, Atspi.StateType.VISIBLE) or not state_contains(element, Atspi.StateType.SHOWING):
@@ -467,9 +467,14 @@ def send_verified_click(app, window, bounds, element, x, y, button, count, key=N
         x, y = live["x"] + live["width"] / 2, live["y"] + live["height"] / 2
     else:
         x, y = screen_point(bounds, None, x, y)
+    return identity["pid"], int(round(x)), int(round(y))
+
+
+def send_verified_click(app, window, bounds, element, x, y, button, count, key=None, duration=None):
+    pid, x, y = verified_pointer_target(app, window, bounds, element, x, y)
     from x11_capture import click_visible_window
     try:
-        click_visible_window(identity["pid"], bounds, int(round(x)), int(round(y)), button, count, held_keysyms(key), duration)
+        click_visible_window(pid, bounds, x, y, button, count, held_keysyms(key), duration)
     except Exception as exc:
         raise RuntimeError("Verified pointer click failed; inspect before retrying: " + str(exc)) from exc
 
@@ -969,18 +974,13 @@ def invoke_secondary_action(node, action):
     raise RuntimeError("{} is not a valid secondary action for element".format(action))
 
 
-def scroll_element(direction, pages):
-    key = "Page_Down"
-    if direction == "up":
-        key = "Page_Up"
-    elif direction == "left":
-        key = "Left"
-    elif direction == "right":
-        key = "Right"
-    repeat = max(1, int(math.ceil(float(pages or 1))))
-    for _ in range(repeat):
-        send_key(key)
-        time.sleep(0.04)
+def send_verified_scroll(app, window, bounds, element, x, y, direction, pages):
+    pid, x, y = verified_pointer_target(app, window, bounds, element, x, y)
+    from x11_capture import scroll_visible_window
+    try:
+        scroll_visible_window(pid, bounds, x, y, direction, pages)
+    except Exception as exc:
+        raise RuntimeError("Verified scroll failed; inspect before retrying: " + str(exc)) from exc
 
 
 def perform_operation(operation):
@@ -1014,7 +1014,7 @@ def perform_operation(operation):
     bound = query.startswith(WINDOW_PREFIX)
     bounds = operation.get("windowBounds") or extents(window)
     element_record = operation.get("element")
-    element = find_element(app, element_record, window=window, strict=bound or (tool in ("type_text", "select_text", "click") and element_record is not None))
+    element = find_element(app, element_record, window=window, strict=bound or (tool in ("type_text", "select_text", "click", "scroll") and element_record is not None))
 
     def physical(force=False):
         if not bound and not force:
@@ -1062,8 +1062,7 @@ def perform_operation(operation):
     elif tool == "perform_secondary_action":
         invoke_secondary_action(element, operation.get("action", ""))
     elif tool == "scroll":
-        physical()
-        scroll_element(operation.get("direction", "down"), operation.get("pages", 1))
+        send_verified_scroll(app, window, bounds, element, operation.get("x"), operation.get("y"), operation.get("direction", "down"), operation.get("pages", 1))
     elif tool == "drag":
         send_verified_drag(app, window, bounds, operation.get("from_x"), operation.get("from_y"), operation.get("to_x"), operation.get("to_y"))
     elif tool == "select_text":

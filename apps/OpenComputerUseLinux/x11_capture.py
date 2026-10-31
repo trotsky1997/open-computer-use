@@ -418,6 +418,37 @@ class X11:
         if self.error or (extended and self.keyboard_state()):
             raise RuntimeError("Native click delivery/release failed; inspect before retrying")
 
+    def scroll(self, expected_pid, rectangle, point, direction, pages):
+        buttons = {"up": 4, "down": 5, "left": 6, "right": 7}
+        if direction not in buttons or type(pages) not in (int, float) or not math.isfinite(pages) or pages <= 0:
+            raise RuntimeError("Scroll requires up/down/left/right and positive finite pages")
+        self.require_point(rectangle, point)
+        # Match the repository's 12-unit page approximation, capped at its native int32 range.
+        count = 2147483647 if pages >= 2147483647 / 12 else max(1, int(math.floor(pages * 12 + 0.5)))
+        xtest, frame = self.prepare_pointer(expected_pid, rectangle, point)
+        for step in range(count):
+            check_cancelled()
+            if self.verify_frame(expected_pid, rectangle, time.monotonic() + 0.25) != frame:
+                raise RuntimeError("Scroll frame changed; inspect before retrying")
+            child, x, y, state = self.pointer()
+            self.require_neutral(state)
+            if self.error or (child, x, y) != (frame, *point):
+                raise RuntimeError("Scroll pointer target changed; inspect before retrying")
+            with defer_cancellation():
+                check_cancelled()
+                try:
+                    if not xtest.XTestFakeButtonEvent(self.display, buttons[direction], 1, 0):
+                        raise RuntimeError("Wheel press failed; inspect before retrying")
+                finally:
+                    if not xtest.XTestFakeButtonEvent(self.display, buttons[direction], 0, 0):
+                        raise RuntimeError("Wheel release failed; inspect pointer state before retrying")
+                self.lib.XSync(self.display, 0)
+            self.require_neutral(self.pointer()[3])
+            if self.error:
+                raise RuntimeError("Wheel delivery failed; inspect before retrying")
+            if step + 1 < count:
+                time.sleep(0.01)
+
     def press_key(self, expected_pid, rectangle, symbols, duration):
         if type(duration) not in (int, float) or not math.isfinite(duration) or duration < 0 or not symbols:
             raise RuntimeError("Timed key requires a chord and finite non-negative duration")
@@ -539,5 +570,14 @@ def press_visible_keys(pid, bounds, symbols, duration):
     client = X11()
     try:
         return client.press_key(pid, rectangle, symbols, duration)
+    finally:
+        client.close()
+
+
+def scroll_visible_window(pid, bounds, x, y, direction, pages):
+    rectangle = local_rectangle(bounds)
+    client = X11()
+    try:
+        return client.scroll(pid, rectangle, (x, y), direction, pages)
     finally:
         client.close()

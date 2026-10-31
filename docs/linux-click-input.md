@@ -44,7 +44,8 @@ window movement or a newly acquired grab can race the sequential checks; user
 interruption/claim handling remains open. A post-send error can follow a partial
 UI effect, so inspect before retrying. Cooperative [native cancellation](linux-native-cancellation.md) has reset/close
 and active-child cleanup coverage. Hard interruption and XTest withdrawal can prevent release
-confirmation. [Verified within-window drag](linux-drag-input.md) shares the pointer preflight.
+confirmation. [Verified within-window drag](linux-drag-input.md) and
+[coordinate/index scroll](linux-scroll-input.md) share pointer target/preflight checks.
 Wider keymap/layout, background,
 Wayland/composited and wider window-manager/provider routes remain open.
 

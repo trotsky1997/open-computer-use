@@ -323,12 +323,25 @@ func (s *service) callTool(name string, args map[string]any) toolCallResult {
 			requiredString(args, "action"),
 		)
 	case "scroll":
-		return s.scroll(
-			requiredString(args, "app"),
-			requiredString(args, "direction"),
-			requiredElementIndex(args),
-			floatValue(optionalFloat(args, "pages"), 1),
-		)
+		if _, present := args["element_index"]; present && optionalElementIndex(args) == "" {
+			return textResult("Invalid scroll element_index", true)
+		}
+		if _, indexed := args["element_index"]; indexed {
+			_, hasX := args["x"]
+			_, hasY := args["y"]
+			if hasX || hasY {
+				return textResult("scroll requires one target: element_index or x/y", true)
+			}
+		}
+		pages := 1.0
+		if _, present := args["pages"]; present {
+			value := optionalFloat(args, "pages")
+			if value == nil {
+				return textResult("pages must be a finite positive number", true)
+			}
+			pages = *value
+		}
+		return s.scroll(requiredString(args, "app"), requiredString(args, "direction"), optionalElementIndex(args), optionalFloat(args, "x"), optionalFloat(args, "y"), pages)
 	case "drag":
 		return s.drag(
 			requiredString(args, "app"),
@@ -517,29 +530,44 @@ func (s *service) performSecondaryAction(app, elementIndex, action string) toolC
 	return s.actionResult(app, linuxRequest{Tool: "perform_secondary_action", App: app, Element: record, Action: action})
 }
 
-func (s *service) scroll(app, direction, elementIndex string, pages float64) toolCallResult {
+func (s *service) scroll(app, direction, elementIndex string, x, y *float64, pages float64) toolCallResult {
 	if app == "" {
 		return textResult("Missing required argument: app", true)
 	}
-	if elementIndex == "" {
-		return textResult("Missing required argument: element_index", true)
+	if elementIndex == "" && (x == nil || y == nil) {
+		return textResult("scroll requires element_index or x/y", true)
+	}
+	if elementIndex != "" && (x != nil || y != nil) {
+		return textResult("scroll requires one target: element_index or x/y", true)
+	}
+	for _, coordinate := range []*float64{x, y} {
+		if coordinate != nil && (math.IsNaN(*coordinate) || math.IsInf(*coordinate, 0)) {
+			return textResult("scroll coordinates must be finite", true)
+		}
 	}
 	normalized := strings.ToLower(direction)
 	if normalized != "up" && normalized != "down" && normalized != "left" && normalized != "right" {
 		return textResult("Invalid scroll direction: "+direction, true)
 	}
-	if pages <= 0 {
-		return textResult("pages must be > 0", true)
+	if math.IsNaN(pages) || math.IsInf(pages, 0) || pages <= 0 {
+		return textResult("pages must be a finite positive number", true)
 	}
 	snapshot := s.currentSnapshot(app)
 	if snapshot == nil {
 		return textResult("No app state is available for "+app+". Run get_app_state before action tools.", true)
 	}
-	record, err := lookupElement(snapshot, elementIndex)
-	if err != nil {
-		return textResult(err.Error(), true)
+	if elementIndex == "" && snapshot.ScreenshotOmitted {
+		return textResult("Screenshot omitted by include_screenshot=false; request a screenshot before screenshot-coordinate actions.", true)
 	}
-	return s.actionResult(app, linuxRequest{Tool: "scroll", App: app, Element: record, Direction: normalized, Pages: pages})
+	request := linuxRequest{Tool: "scroll", App: app, X: x, Y: y, Direction: normalized, Pages: pages, WindowBounds: snapshot.WindowBounds}
+	if elementIndex != "" {
+		record, err := lookupElement(snapshot, elementIndex)
+		if err != nil {
+			return textResult(err.Error(), true)
+		}
+		request.Element = record
+	}
+	return s.actionResult(app, request)
 }
 
 func (s *service) drag(app string, fromX, fromY, toX, toY *float64) toolCallResult {
@@ -1552,14 +1580,16 @@ func toolDefinitions() []toolDefinition {
 		},
 		{
 			Name:        "scroll",
-			Description: "Scroll an element in a direction by a number of pages. This tool is part of plugin `Computer Use`.",
+			Description: "Scroll at an exact element or screenshot point through verified local noncomposited X11 wheel input. Visibly moves the pointer. This tool is part of plugin `Computer Use`.",
 			Annotations: defaultAnnotations(),
 			InputSchema: objectSchema(map[string]any{
 				"app":           stringProperty("App name or bundle identifier"),
 				"direction":     stringProperty("Scroll direction: up, down, left, or right"),
 				"element_index": stringProperty("Element identifier"),
-				"pages":         numberProperty("Number of pages to scroll. Fractional values are supported. Defaults to 1"),
-			}, []string{"app", "element_index", "direction"}),
+				"x":             numberProperty("X coordinate in screenshot pixels; use with y instead of element_index"),
+				"y":             numberProperty("Y coordinate in screenshot pixels"),
+				"pages":         numberProperty("Positive finite page amount, approximated as 12 native wheel steps per page. Fractional values supported; actual displacement depends on the toolkit. Defaults to 1"),
+			}, []string{"app", "direction"}),
 		},
 		{
 			Name:        "set_value",

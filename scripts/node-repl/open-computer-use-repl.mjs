@@ -140,7 +140,7 @@ The runtime exposes an asynchronous app-bound API:
 - \`await app.click(elementIndexOrPoint, { mouseButton?, clickCount?, clickMethod?, key?, durationMs? })\`
 - Held key duration requires a backend advertising press_key.duration_ms (macOS auto and Linux verified visible X11 auto). It holds the whole chord and owns reverse releases on cancellation/shutdown. Unsupported methods/platforms reject before input.
 - Held click options require a backend advertising key/duration_ms (macOS/Linux). key holds a native key/chord across the sequence; durationMs holds each mouse press. macOS auto uses targeted app_post; Linux auto uses verified visible X11 input and current primary native key mappings. Click counts are 1...3. Unsupported backends and explicit non-event methods throw before input.
-- \`await app.scroll(elementIndex, direction, pages?)\`
+- \`await app.scroll(elementIndexOrPoint, direction, pages?)\`: Linux coordinate/index routes use verified visible X11 wheel input; page displacement is toolkit-dependent. Coordinate support is discovered from the native schema.
 - \`await app.drag([fromX, fromY], [toX, toY])\`
 - \`await app.paste(text, {format?})\` on Linux X11: text (default), literal md or html. Replaces the clipboard until native-session cleanup; inspect state after paste or errors. Linux does not restore the previous clipboard.
 - \`await app.typeCharacters(text)\` on Linux sends printable keys to current focus without finding a field or pasting; returns \`{charactersSent}\` counting native synthesis acknowledgments. Inspect after errors before retrying.
@@ -610,8 +610,18 @@ export function createCuaApi(native, activeOutput, onDispose, {tabRequest,platfo
         await call("press_key", { app, key, ...args }, args.duration_ms!==undefined ? 0 : undefined);
       },
       async scroll(target, direction, pages = 1) {
-        if (Array.isArray(target)) throw new Error("coordinate scroll is not supported by this Open Computer Use runtime");
-        await call("scroll", { app, element_index: target, direction, pages });
+        if(typeof direction!=="string" || !["up","down","left","right"].includes(direction.toLowerCase()) || typeof pages!=="number" || !Number.isFinite(pages) || pages<=0) throw new Error("Scroll requires up/down/left/right and positive finite pages");
+        let args;
+        if(Array.isArray(target)) {
+          if(target.length!==2 || !target.every(value=>typeof value==="number"&&Number.isFinite(value))) throw new Error("Scroll point requires two finite pixel coordinates");
+          const schema=(await native.request("tools/list",{}))?.tools?.find(tool=>tool.name==="scroll")?.inputSchema?.properties;
+          if(!schema || !Object.hasOwn(schema,"x") || !Object.hasOwn(schema,"y")) throw new Error("Native runtime does not advertise coordinate scroll support");
+          args={x:target[0],y:target[1]};
+        } else {
+          if(!(Number.isSafeInteger(target)&&target>=0) && !(typeof target==="string"&&/^\d+$/u.test(target))) throw new Error("Scroll requires an element index or point");
+          args={element_index:target};
+        }
+        await call("scroll", { app, ...args, direction:direction.toLowerCase(), pages });
       },
       async setValue(elementIndex, value) { await call("set_value", { app, element_index: elementIndex, value }); },
       async selectText(elementIndex, text, options = {}) {

@@ -358,5 +358,55 @@ class TimedKeyTests(unittest.TestCase):
         self.assertEqual(xtest.XTestFakeKeyEvent.call_args_list, [mock.call(1, 50, 1, 0), mock.call(1, 37, 1, 0), mock.call(1, 37, 0, 0), mock.call(1, 50, 0, 0)])
 
 
+class ScrollTests(unittest.TestCase):
+    client = ImageTests.client
+
+    def prepared(self):
+        client, xtest = self.client(), mock.Mock()
+        client.prepare_pointer = mock.Mock(return_value=(xtest, 2))
+        client.verify_frame = mock.Mock(return_value=2)
+        client.pointer = mock.Mock(return_value=(2, 1, 0, 0))
+        client.require_neutral = mock.Mock()
+        return client, xtest
+
+    def test_four_directions_and_fractional_wheel_counts(self):
+        for direction, code in [('up', 4), ('down', 5), ('left', 6), ('right', 7)]:
+            client, xtest = self.prepared()
+            with mock.patch.object(capture.time, 'sleep'):
+                client.scroll(42, (0, 0, 2, 1), (1, 0), direction, 0.125)
+            self.assertEqual(xtest.XTestFakeButtonEvent.call_args_list, [mock.call(1, code, down, 0) for _ in range(2) for down in (1, 0)])
+            xtest.XTestFakeKeyEvent.assert_not_called()
+
+    def test_failed_and_cancelled_press_release_before_stopping(self):
+        import native_cancel as cancel
+        for failure in ('press', 'cancel'):
+            with self.subTest(failure=failure), mock.patch.object(cancel, '_requested', False):
+                client, xtest = self.prepared()
+                if failure == 'press':
+                    xtest.XTestFakeButtonEvent.side_effect = [0, 1]
+                else:
+                    def signal_on_down(_display, _code, down, _delay):
+                        if down:
+                            cancel.handle_signal(None, None)
+                        return 1
+                    xtest.XTestFakeButtonEvent.side_effect = signal_on_down
+                with self.assertRaises((RuntimeError, cancel.OperationCancelled)):
+                    client.scroll(42, (0, 0, 2, 1), (1, 0), 'down', 1)
+                self.assertEqual(xtest.XTestFakeButtonEvent.call_args_list, [mock.call(1, 5, 1, 0), mock.call(1, 5, 0, 0)])
+
+    def test_invalid_and_changed_target_send_no_wheel(self):
+        for direction, pages in [('bad', 1), ('down', 0), ('down', True), ('down', float('nan')), ('down', float('inf'))]:
+            client, xtest = self.prepared()
+            with self.assertRaises(RuntimeError):
+                client.scroll(42, (0, 0, 2, 1), (1, 0), direction, pages)
+            client.prepare_pointer.assert_not_called()
+            xtest.XTestFakeButtonEvent.assert_not_called()
+        client, xtest = self.prepared()
+        client.pointer.return_value = (99, 1, 0, 0)
+        with self.assertRaisesRegex(RuntimeError, 'target changed'):
+            client.scroll(42, (0, 0, 2, 1), (1, 0), 'down', 1)
+        xtest.XTestFakeButtonEvent.assert_not_called()
+
+
 if __name__ == '__main__':
     unittest.main()

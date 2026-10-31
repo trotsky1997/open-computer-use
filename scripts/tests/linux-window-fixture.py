@@ -14,6 +14,7 @@ os.close(error_fd)
 GLib.set_prgname(name)
 GLib.set_application_name(name)
 windows, entries, notes, keys = {}, {}, {}, {}
+scrollers, scroll_events = {}, {}
 clipboard_data = []
 image_windows, popup_menus = [], []
 pointer_events, pointer_areas, pointer_motion, key_events = {}, {}, {}, {}
@@ -24,6 +25,10 @@ def state(*_args):
     with open(root + '/state.tmp', 'w', encoding='utf-8') as output:
         json.dump({'pid': os.getpid(), 'windows': list(windows), 'keys': keys, 'clipboard': clipboard_data, 'popups': sum(menu.get_visible() for menu in popup_menus), 'pointer': pointer_events, 'pointerMotion': pointer_motion, 'keyEvents': key_events, 'pointerGrabbed': pointer_grabbed, 'interceptors': len(interceptors), 'pointerSizes': {key: [area.get_allocated_width(), area.get_allocated_height()] for key, area in pointer_areas.items() if key in windows},
                    'pointerPoints': {key: area.translate_coordinates(windows[key], area.get_allocated_width() // 2, area.get_allocated_height() // 2) for key, area in pointer_areas.items() if key in windows},
+                   'windowPositions': {key: window.get_position() for key, window in windows.items()}, 'scroll': scroll_events,
+                   'scrollOffsets': {key: [pane.get_hadjustment().get_value(), pane.get_vadjustment().get_value()] for key, pane in scrollers.items() if key in windows},
+                   'scrollLimits': {key: [pane.get_hadjustment().get_upper() - pane.get_hadjustment().get_page_size(), pane.get_vadjustment().get_upper() - pane.get_vadjustment().get_page_size()] for key, pane in scrollers.items() if key in windows},
+                   'scrollPoints': {key: notes[key].translate_coordinates(windows[key], notes[key].get_allocated_width() // 2, notes[key].get_allocated_height() // 2) for key in scrollers if key in windows},
                    'values': {key: entry.get_text() for key, entry in entries.items()},
                    'selections': {key: entry.get_selection_bounds() for key, entry in entries.items()},
                    'carets': {key: entry.get_position() for key, entry in entries.items()},
@@ -60,7 +65,21 @@ def create(key, value):
     view.get_buffer().set_text('line1\nline2')
     view.get_buffer().connect('changed', state)
     notes[key] = view
-    box.pack_start(view, True, True, 0)
+    pane = Gtk.ScrolledWindow()
+    pane.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+    pane.set_min_content_height(34)
+    pane.add(view)
+    scrollers[key], scroll_events[key] = pane, []
+    for adjustment in (pane.get_hadjustment(), pane.get_vadjustment()):
+        adjustment.connect('value-changed', state)
+        adjustment.connect('changed', state)
+    view.add_events(Gdk.EventMask.SCROLL_MASK)
+    def record_scroll(_view, event):
+        scroll_events[key].append({'direction': event.direction.value_nick, 'x': event.x, 'y': event.y, 'rootX': event.x_root, 'rootY': event.y_root, 'state': int(event.state), 'time': event.time})
+        state()
+        return False
+    view.connect('scroll-event', record_scroll)
+    box.pack_start(pane, True, True, 0)
     def black_image(_button):
         black = Gtk.Window(title=name + ' black image')
         black.set_decorated(False)

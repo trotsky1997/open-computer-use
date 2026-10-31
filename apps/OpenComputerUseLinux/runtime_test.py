@@ -467,7 +467,7 @@ class RuntimeActionReadBackTests(unittest.TestCase):
         self.stack.enter_context(mock.patch.object(self.runtime, "resolve_app"))
         self.stack.enter_context(mock.patch.object(self.runtime, "main_window", return_value=(0, object())))
         for name in ("extents", "find_element", "send_key", "send_verified_drag", "send_verified_click",
-                     "invoke_secondary_action", "scroll_element", "insert_text", "set_element_value"):
+                     "invoke_secondary_action", "send_verified_scroll", "insert_text", "set_element_value"):
             self.stack.enter_context(mock.patch.object(self.runtime, name))
         self.snapshot = self.stack.enter_context(mock.patch.object(self.runtime, "build_snapshot", return_value={"elements": []}))
         self.sleep = self.stack.enter_context(mock.patch.object(self.runtime.time, "sleep"))
@@ -747,6 +747,17 @@ class HeldKeyParsingTests(unittest.TestCase):
             for key in ('', '+shift', 'ctrl++a', 1):
                 with self.assertRaises(RuntimeError):
                     runtime.held_keysyms(key)
+
+
+class VerifiedScrollTests(unittest.TestCase):
+    def test_scroll_uses_fresh_index_geometry_without_key_fallback(self):
+        runtime = load_runtime()
+        bounds = {'x': 100, 'y': 200, 'width': 400, 'height': 300}
+        with mock.patch.object(runtime, 'verified_window_identity', return_value={'pid': 42}), mock.patch.object(runtime, 'state_contains', return_value=True), mock.patch.object(runtime, 'extents', return_value={'x': 120, 'y': 220, 'width': 40, 'height': 20}), mock.patch('x11_capture.scroll_visible_window', side_effect=RuntimeError('wheel failed')) as send, mock.patch.object(runtime, 'send_key') as key:
+            with self.assertRaisesRegex(RuntimeError, 'wheel failed'):
+                runtime.send_verified_scroll(object(), object(), bounds, object(), None, None, 'right', 0.5)
+        send.assert_called_once_with(42, bounds, 140, 230, 'right', 0.5)
+        key.assert_not_called()
 
 
 class VerifiedTimedKeyTests(unittest.TestCase):

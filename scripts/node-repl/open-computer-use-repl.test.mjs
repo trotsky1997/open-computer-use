@@ -640,3 +640,20 @@ test('native EOF cleanup can finish before termination signals',async()=>{
  const peer=new JsonLinePeer({command:process.execPath,args:['--input-type=module','-e',source]});
  try {await peer.initialize();await peer.endSession();assert.equal(peer.child.exitCode,0);assert.equal(peer.child.signalCode,null);}finally{await peer.close();}
 });
+
+
+for (const Session of [PersistentJavaScriptSession, WorkerJavaScriptSession]) {
+  test(`${Session.name}: native coordinate scroll requires advertised schema and validates targets`, async t => {
+    const native=mockNative(),request=native.request.bind(native);let supported=false,schemas=0;
+    native.request=async(method,params)=>{if(method==='tools/list'){schemas++;return {tools:[{name:'scroll',inputSchema:{properties:supported?{x:{},y:{}}:{}}}]};}return request(method,params);};
+    const session=new Session({native});t.after(()=>session.close());
+    assert.equal((await session.run(`var app=await cua.getApp('Text',{initialState:false});await app.scroll(7,'DOWN',0.5);`)).isError,false);
+    assert.deepEqual(native.calls.at(-1).arguments,{app:'Text',element_index:7,direction:'down',pages:0.5});assert.equal(schemas,0);
+    for(const code of [`await app.scroll([], 'down');`,`await app.scroll([1,Infinity],'down');`,`await app.scroll(-1,'down');`,`await app.scroll(7,'invalid');`,`await app.scroll(7,'down',0);`,`await app.scroll(7,'down',NaN);`])assert.equal((await session.run(code)).isError,true);
+    assert.equal(native.calls.length,1);assert.equal(schemas,0);
+    assert.equal((await session.run(`await app.scroll([10,20],'down');`)).isError,true);assert.equal(native.calls.length,1);
+    supported=true;
+    assert.equal((await session.run(`await app.scroll([10,20],'RIGHT',0.25);`)).isError,false);
+    assert.deepEqual(native.calls.at(-1).arguments,{app:'Text',x:10,y:20,direction:'right',pages:0.25});assert.equal(schemas,2);
+  });
+}

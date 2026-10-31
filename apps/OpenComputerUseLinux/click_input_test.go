@@ -108,3 +108,49 @@ func TestHeldKeyValidationAndBridge(t *testing.T) {
 		t.Fatalf("timed key options lost: %s", data)
 	}
 }
+
+func TestScrollTargetsAndValidationBeforeInput(t *testing.T) {
+	requestPath := fakePythonResponse(t, `{"ok":true}`)
+	t.Setenv("OPEN_COMPUTER_USE_ACTION_READ_BACK", "0")
+	service := newService()
+	snapshot := &appSnapshot{App: appDescriptor{Name: "Editor", PID: 42}, WindowBounds: &frame{Width: 400, Height: 300}, Elements: []elementRecord{{Index: 1}}}
+	service.rememberSnapshot("Editor", snapshot)
+	for _, change := range []map[string]any{{"pages": nil}, {"pages": true}, {"pages": 0.0}, {"pages": math.NaN()}, {"pages": math.Inf(1)}, {"direction": "bad"}, {"x": true}, {"x": math.Inf(1)}, {"element_index": 1.0}, {"element_index": nil}} {
+		args := map[string]any{"app": "Editor", "x": 10.0, "y": 20.0, "direction": "down"}
+		for k, v := range change {
+			args[k] = v
+		}
+		if !service.callTool("scroll", args).IsError {
+			t.Fatalf("invalid scroll accepted: %#v", args)
+		}
+	}
+	if _, err := os.Stat(requestPath); !os.IsNotExist(err) {
+		t.Fatal("invalid scroll reached bridge")
+	}
+	if result := service.callTool("scroll", map[string]any{"app": "Editor", "x": 10.0, "y": 20.0, "direction": "RIGHT", "pages": 0.25}); result.IsError {
+		t.Fatal(result)
+	}
+	data, _ := os.ReadFile(requestPath)
+	var request linuxRequest
+	if err := json.Unmarshal(data, &request); err != nil {
+		t.Fatal(err)
+	}
+	if request.X == nil || *request.X != 10 || request.Y == nil || *request.Y != 20 || request.Direction != "right" || request.Pages != 0.25 || request.WindowBounds == nil || request.Element != nil {
+		t.Fatalf("coordinate request lost fields: %s", data)
+	}
+	snapshot.ScreenshotOmitted = true
+	if !service.callTool("scroll", map[string]any{"app": "Editor", "x": 1.0, "y": 2.0, "direction": "down"}).IsError {
+		t.Fatal("omitted screenshot admitted coordinates")
+	}
+	if result := service.callTool("scroll", map[string]any{"app": "Editor", "element_index": 1.0, "direction": "down"}); result.IsError {
+		t.Fatal(result)
+	}
+	data, _ = os.ReadFile(requestPath)
+	request = linuxRequest{}
+	if err := json.Unmarshal(data, &request); err != nil {
+		t.Fatal(err)
+	}
+	if request.Element == nil || request.Element.Index != 1 || request.X != nil || request.Pages != 1 {
+		t.Fatalf("index request lost fields: %s", data)
+	}
+}

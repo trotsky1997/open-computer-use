@@ -599,3 +599,27 @@ cancellation). Owned processes and private VM files were cleaned up. No dependen
 or CI added. Wider layouts/IME, real window managers/hardware, background/
 composited/Wayland and Windows input remain open. Hard interruption can prevent
 confirmed releases; accepted effects remain applied. The full goal stays active.
+
+
+## Verified Linux coordinate/index scroll
+
+Replace the legacy focused PageDown/arrow fallback, which ignores element_index,
+with verified X11 wheel delivery to fresh indexed geometry or screenshot points.
+Share click target/preflight verification, validate finite pages/direction/targets,
+and pair wheel press/releases through cancellation without keyboard replay.
+Expose coordinate support through native schema discovery in both REPLs. Use the
+repo's 12-unit page approximation with explicit native-wheel/toolkit limits.
+Verify four directions, fractional requests, actual GTK scrolled-pane offsets,
+focus isolation, rejection and cancellation; retain the broader parity goal.
+
+See [Linux scroll](../../linux-scroll-input.md). The full goal remains active.
+
+Validation passed: 147 Node checks, 83 Python checks (56 runtime, 24 X11,
+3 clipboard), 47 Linux Go top-level checks plus 10 subchecks, CLI SIGTERM and
+parent-death probes, and both REPL modes across eleven isolated GTK controllers
+(scroll, timed keys, held clicks, drag, click, image, paste, text, window, launch
+and cancellation). The final scroll check explicitly confirms the Entry retains
+focus. Owned processes and private VM files were cleaned up. No dependency or CI
+added. Precise pixel/paging calibration, wider providers/hardware/window managers,
+background/composited/Wayland and other-platform coordinate routes remain open.
+The full harness goal stays active.

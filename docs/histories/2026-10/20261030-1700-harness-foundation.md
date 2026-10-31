@@ -1292,3 +1292,34 @@ cancellation). Owned processes and private VM files were cleaned up. No dependen
 or CI added. Wider layouts/IME, real window managers/hardware, background/
 composited/Wayland and Windows input remain open. Hard interruption can prevent
 confirmed releases; accepted effects remain applied. The full goal stays active.
+
+
+## Linux coordinate and exact indexed wheel scroll
+
+Removed the focused PageDown/arrow path, which ignored the supplied element.
+Both index and screenshot point now use shared click/scroll fresh pointer target
+resolution plus verified native X11 frame/pointer routing. Four wheel directions
+use paired XTest button events, per-pair checks and cancellation release without
+keyboard fallback. Native/JS boundaries validate finite pages/coordinates,
+directions and target exclusivity. The facade discovers coordinate capability
+from native schema; other platforms retain indexed calls.
+
+Pages use an explicit 12-native-wheel-step approximation with fractional rounding;
+actual displacement remains toolkit-dependent, with precise pixel/smooth/paging
+calibration open. The fixture wraps its existing notes view in a real GTK
+ScrolledWindow and records wheel recipients/root coordinates and adjustment
+positions. Both REPLs passed actual offsets on both axes independent of keyboard
+focus, fractional/default counts, AX-only indexed use, invalid/intercepted/grabbed/
+occluded/inactive/stale rejection and reset/close stop plus fresh input. Targeted
+checks cover routing, schema rejection, invalid arguments and failed/cancelled
+press release. See [verified scroll](../../linux-scroll-input.md).
+
+Validation passed: 147 Node checks, 83 Python checks (56 runtime, 24 X11,
+3 clipboard), 47 Linux Go top-level checks plus 10 subchecks, CLI SIGTERM and
+parent-death probes, and both REPL modes across eleven isolated GTK controllers
+(scroll, timed keys, held clicks, drag, click, image, paste, text, window, launch
+and cancellation). The final scroll check explicitly confirms the Entry retains
+focus. Owned processes and private VM files were cleaned up. No dependency or CI
+added. Precise pixel/paging calibration, wider providers/hardware/window managers,
+background/composited/Wayland and other-platform coordinate routes remain open.
+The full harness goal stays active.
