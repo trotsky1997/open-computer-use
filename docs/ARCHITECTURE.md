@@ -371,6 +371,16 @@ the input lease, paste down/up and failed cleanup. The queue awaits the whole ma
 blocks later clipboard jobs before data access/mutation. The clipboard service
 owns only its control-page resources; target focus/release has one owner.
 
+Each clipboard call registers a job in its private control page before sending
+its single start. A lost CDP reply opens a fresh connection, verifies the browser
+route and control frame/loader, then cancels an armed job or queries the original
+promise. A pending or unverifiable result retains the control page and an
+endpoint-wide fence against new managed input and clipboard access. Reset retries
+settlement before permission/target cleanup; it never repeats the write. Known
+completion survives a cleanup reply loss. The fence is held in host memory:
+host-process death, destroyed completion contexts and confirmed browser-exit
+retirement still require further recovery work.
+
 Raw tab pressKey shares BrowserInputs ownership even without an explicit duration.
 The client transfers the observed AX role/name/backend node and loader. Under
 the origin lease, the host validates and focuses that target, then checks its

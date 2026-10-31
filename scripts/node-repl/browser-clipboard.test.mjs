@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import {BrowserClipboard,validateClipboardWrite} from "./browser-clipboard.mjs";
+import {BrowserClipboard,validateClipboardWrite,nativeClipboardJob} from "./browser-clipboard.mjs";
 
 test("clipboard writes validate payloads before dispatch", () => {
   const entry = {mimeType:"text/plain",text:"valid"};
@@ -79,4 +79,32 @@ test('cancel after control focus stops clipboard script and still restores focus
  await assert.rejects(clipboard.request(owner,{method:'writeText',targetId:'tab',value:'late'}),/session closed/);
  assert.equal(scripted,false);assert.equal(released,true);
  await clipboard.cleanup(owner);assert.deepEqual(clipboard.internalTargets(),[]);
+});
+
+
+test('native clipboard evidence survives duplicate starts, pending queries and canceled delivery',async()=>{
+ const {runInNewContext}=await import('node:vm');
+ const context={location:{href:'http://control/'},setTimeout,clearTimeout};
+ const invoke=runInNewContext(`(${nativeClipboardJob.toString()})`,context);
+ let calls=0,release;
+ const operation=()=>{calls++;return new Promise(resolve=>{release=resolve;});};
+ await invoke('register','job','http://control/');
+ const first=invoke('start','job','http://control/',operation);
+ const duplicate=invoke('start','job','http://control/',operation);
+ assert.equal((await invoke('settle','job','http://control/')).state,'running');
+ assert.equal(calls,1);
+ await assert.rejects(invoke('drop','job','http://control/'),/still active/);
+ release('saved');
+ assert.equal((await first).value,'saved');assert.equal((await duplicate).value,'saved');
+ assert.equal((await invoke('settle','job','http://control/')).value,'saved');
+ await invoke('drop','job','http://control/');
+ await assert.rejects(invoke('settle','job','http://control/'),/evidence unavailable/);
+ await invoke('register','late','http://control/');
+ assert.equal((await invoke('settle','late','http://control/')).state,'canceled');
+ assert.equal((await invoke('start','late','http://control/',operation)).state,'canceled');
+ assert.equal(calls,1);
+ await invoke('register','reject','http://control/');
+ const rejected=await invoke('start','reject','http://control/',()=>{throw Error('native denied');});
+ assert.equal(rejected.state,'rejected');assert.match(rejected.error,/native denied/);
+ await assert.rejects(invoke('settle','reject','http://other/'),/page changed/);
 });

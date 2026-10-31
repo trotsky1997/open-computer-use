@@ -46,7 +46,7 @@ const HOST_BROWSER_CHROME=new BrowserChrome(()=>browserEndpoint(process.env)?.hr
 const HOST_BROWSER_VIEWPORT = new BrowserViewport(() => browserEndpoint(process.env)?.href,openConnection,withConnection,()=>{const hidden=HOST_BROWSER_CHROME.hidden();return [...HOST_BROWSER_CLIPBOARD.internalTargets(),...hidden.ids,...hidden.urls];},(owner,error)=>BROWSER_FAILURE_HANDLERS.get(owner)?.(error));
 const HOST_BROWSER_DROPS = new BrowserDrops(() => browserEndpoint(process.env)?.href,openConnection,withConnection,()=>HOST_BROWSER_VIEWPORT.request(null,{action:"state"}));
 const HOST_BROWSER_TABS = new BrowserTabs(()=>browserEndpoint(process.env)?.href,openConnection);
-const HOST_BROWSER_INPUTS = new BrowserInputs(()=>browserEndpoint(process.env)?.href,openConnection,()=>HOST_BROWSER_VIEWPORT.request(null,{action:"state"}),HOST_BROWSER_FOCUS,(owner,targetId)=>HOST_BROWSER_DIALOGS.request(owner,{action:"state",targetId}));
+const HOST_BROWSER_INPUTS = new BrowserInputs(()=>browserEndpoint(process.env)?.href,openConnection,()=>HOST_BROWSER_VIEWPORT.request(null,{action:"state"}),HOST_BROWSER_FOCUS,(owner,targetId)=>HOST_BROWSER_DIALOGS.request(owner,{action:"state",targetId}),()=>HOST_BROWSER_CLIPBOARD.assertSettled());
 
 const HOST_BROWSER_CDP=new BrowserDebugger(()=>browserEndpoint(process.env)?.href,openConnection);
 const HOST_BROWSER_WEBMCP=new BrowserWebMcp(()=>browserEndpoint(process.env)?.href,openConnection);

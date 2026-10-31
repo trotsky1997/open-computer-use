@@ -4,6 +4,8 @@ import {randomUUID} from "node:crypto";
 const LIMIT = 16 * 1024 * 1024;
 const queues = new Map();
 const controls = new Map();
+// shortcut: this fence is host-memory scoped; durable host-crash recovery needs a journal.
+const unsettled = new Map();
 
 export function validateClipboardWrite(method, value) {
   if (method === "writeText") {
@@ -67,6 +69,34 @@ async function clipboardOperation(method, value, limit) {
   return result;
 }
 
+// The owned control page keeps completion evidence across CDP connections.
+export async function nativeClipboardJob(phase, key, url, operation) {
+  if (location.href !== url) throw new Error("Clipboard control page changed");
+  if (phase === "register") {
+    if (Object.hasOwn(globalThis,key)) throw new Error("Clipboard job already registered");
+    globalThis[key] = {state:"armed"};
+    return {state:"armed"};
+  }
+  const job = globalThis[key];
+  if (!job) throw new Error("Clipboard completion evidence unavailable");
+  if (phase === "start" && job.state === "armed") {
+    job.state = "running";
+    job.promise = Promise.resolve().then(operation).then(value => job.result={state:"fulfilled",value},error => job.result={state:"rejected",error:String(error)}).then(result=>{job.state=result.state;return result;});
+  }
+  if (phase === "settle" && job.state === "armed") job.result={state:job.state="canceled"};
+  if (phase === "drop") {
+    if (["armed","running"].includes(job.state)) throw new Error("Clipboard job still active");
+    delete globalThis[key];
+    return;
+  }
+  if (phase === "settle" && job.state === "running") {
+    let timer;
+    try {return await Promise.race([job.promise,new Promise(resolve=>{timer=setTimeout(()=>resolve({state:"running"}),1000);})]);}
+    finally {clearTimeout(timer);}
+  }
+  return job.promise ?? job.result ?? {state:job.state};
+}
+
 export class BrowserClipboard {
   constructor(endpoint, connect, input) {
     this.endpoint = endpoint;
@@ -75,6 +105,32 @@ export class BrowserClipboard {
     this.owners = new Map();
     this.closedOwners = new WeakSet();
     this.tokens = new Set();
+  }
+  assertSettled() {
+    if ([...(unsettled.get(this.endpoint()) ?? [])].some(job=>job.uncertain)) throw new Error("Native clipboard completion unresolved; reset the owning session before more browser input");
+  }
+  async jobCall(page,job,phase,args) {
+    const expression = `(${nativeClipboardJob.toString()})(${JSON.stringify(phase)},${JSON.stringify(job.key)},${JSON.stringify(job.bridge.url)}${phase === "start" ? `,()=>(${clipboardOperation.toString()})(${JSON.stringify(args.method)},${JSON.stringify(args.value) ?? "undefined"},${LIMIT})` : ""})`;
+    const result=await page("Runtime.evaluate",{expression,awaitPromise:true,returnByValue:true,userGesture:true});
+    if(result.exceptionDetails)throw new Error(result.exceptionDetails.exception?.description ?? result.exceptionDetails.text ?? "Clipboard job failed");
+    return result.result.value;
+  }
+  async settle(job) {
+    const {bridge}=job;
+    const version=await this.json(job.endpoint,"/json/version");
+    if(version.webSocketDebuggerUrl!==job.browser)throw new Error("Clipboard browser changed; completion unresolved");
+    return this.connect(job.socket,async page=>{
+      const {frameTree}=await page("Page.getFrameTree");
+      if(frameTree.frame.id!==job.frame.id || frameTree.frame.loaderId!==job.frame.loaderId)throw new Error("Clipboard control context changed; completion unresolved");
+      const result=job.result ?? await this.jobCall(page,job,"settle");
+      if(!["fulfilled","rejected","canceled"].includes(result?.state))throw new Error("Native clipboard completion unresolved; reset the owning session");
+      job.result=result;
+      await page("Emulation.setFocusEmulationEnabled",{enabled:false});
+      await this.jobCall(page,job,"drop").catch(()=>{});
+      bridge.jobs.delete(job);unsettled.get(job.endpoint)?.delete(job);
+      if(!unsettled.get(job.endpoint)?.size)unsettled.delete(job.endpoint);
+      return result;
+    });
   }
   internalTargets() {
     return [...(controls.get(this.endpoint()) ?? [])];
@@ -123,6 +179,7 @@ export class BrowserClipboard {
     const work = this.enqueue(endpoint,async () => {
       ticket.started = true;
       if (this.closedOwners.has(owner)) throw new Error("Browser clipboard session closed");
+      this.assertSettled();
       await this.input?.(owner,{action:"checkClipboard"});
       const version = await this.json(endpoint,"/json/version");
       return this.connect(version.webSocketDebuggerUrl,async send => {
@@ -137,7 +194,7 @@ export class BrowserClipboard {
         const key = targetInfo.browserContextId ?? "default";
         let bridge = state.bridges.get(key);
         if (!bridge) {
-          bridge = {context};
+          bridge = {context,jobs:new Set()};
           state.bridges.set(key,bridge);
           const origin = await this.ensureServer();
           bridge.path = `/__ocu_clipboard_${randomUUID()}`;
@@ -166,12 +223,36 @@ export class BrowserClipboard {
           catch (error) {error.browserCleanupFailed=true;throw error;}
           try {
             if(this.closedOwners.has(owner))throw new Error("Browser clipboard session closed");
-            const result = await page("Runtime.evaluate",{expression:`(${clipboardOperation.toString()})(${JSON.stringify(args.method)},${JSON.stringify(args.value) ?? "undefined"},${LIMIT})`,awaitPromise:true,returnByValue:true,userGesture:true});
-            if (result.exceptionDetails) throw new Error(result.exceptionDetails.exception?.description ?? result.exceptionDetails.text ?? "Clipboard operation failed");
-            return result.result.value;
+            const {frameTree}=await page("Page.getFrameTree");
+            const job={bridge,endpoint,browser:version.webSocketDebuggerUrl,socket:target.webSocketDebuggerUrl,frame:frameTree.frame,key:`__ocu_job_${randomUUID()}`};
+            // Register first: a lost start reply can then be settled without replay.
+            await this.jobCall(page,job,"register");
+            bridge.jobs.add(job);
+            if(!unsettled.has(endpoint))unsettled.set(endpoint,new Set());
+            unsettled.get(endpoint).add(job);
+            let result;
+            try {
+              if(this.closedOwners.has(owner))throw new Error("Browser clipboard session closed");
+              result=await this.jobCall(page,job,"start",args);
+              if(!["fulfilled","rejected","canceled"].includes(result?.state))throw new Error("Clipboard job returned no completion");
+              job.result=result;
+              await page("Emulation.setFocusEmulationEnabled",{enabled:false});
+              await this.jobCall(page,job,"drop").catch(()=>{});
+              bridge.jobs.delete(job);unsettled.get(endpoint).delete(job);
+              if(!unsettled.get(endpoint).size)unsettled.delete(endpoint);
+            } catch(error) {
+              job.uncertain=true;
+              try {result=await this.settle(job);}
+              catch(recovery) {recovery.browserCleanupFailed=true;throw recovery;}
+            }
+            if(result.state!=="fulfilled")throw new Error(result.error ?? "Clipboard operation canceled before execution");
+            return result.value;
           } finally {
             try {await page("Emulation.setFocusEmulationEnabled",{enabled:false});}
-            catch (error) {error.browserCleanupFailed=true;throw error;}
+            catch (error) {
+              try {await this.connect(target.webSocketDebuggerUrl,fresh=>fresh("Emulation.setFocusEmulationEnabled",{enabled:false}));}
+              catch {error.browserCleanupFailed=true;throw error;}
+            }
           }
         });
         if (args.method === "paste") {
@@ -197,6 +278,10 @@ export class BrowserClipboard {
     await Promise.allSettled([...state.pending]);
     const endpoint = this.endpoint();
     for (const [key,bridge] of state.bridges) {
+      for(const job of bridge.jobs ?? []) {
+        try {await this.settle(job);}
+        catch(error) {job.uncertain=true;error.browserCleanupFailed=true;throw error;}
+      }
       if (bridge.targetId) {
         const version = await this.json(endpoint,"/json/version");
         await this.connect(version.webSocketDebuggerUrl,async send => {

@@ -672,7 +672,7 @@ export function createBrowserApi(activeOutput, environment = process.env, {focus
   const dialogOwner = {};
   if (dialogs) cleanups.push(() => dialogs.cleanup(dialogOwner));
   const requestDialog = dialogRequest ?? (args => dialogs.request(dialogOwner,args));
-  const inputs=inputRequest ? undefined : new BrowserInputs(()=>endpoint()?.href,openConnection,()=>requestViewport({action:"state"}),undefined,(_owner,targetId)=>requestDialog({action:"state",targetId}));
+  const inputs=inputRequest ? undefined : new BrowserInputs(()=>endpoint()?.href,openConnection,()=>requestViewport({action:"state"}),undefined,(_owner,targetId)=>requestDialog({action:"state",targetId}),()=>clipboard?.assertSettled());
   const inputOwner={};
   if(inputs) cleanups.push(()=>inputs.cleanup(inputOwner));
   const requestInput=inputRequest ?? (args=>inputs.request(inputOwner,args));

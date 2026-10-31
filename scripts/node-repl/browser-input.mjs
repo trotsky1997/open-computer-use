@@ -44,11 +44,12 @@ export function validatePressKey(key,options={}) {
 }
 
 export class BrowserInputs {
-  constructor(endpoint,open,revision=()=>0,focus,dialog=()=>undefined) {
+  constructor(endpoint,open,revision=()=>0,focus,dialog=()=>undefined,ready=()=>{}) {
     this.endpoint=endpoint;this.open=open;this.revision=revision;this.focus=focus;this.dialog=dialog;
-    this.leases=new Map();this.closedOwners=new WeakSet();
+    this.ready=ready;this.leases=new Map();this.closedOwners=new WeakSet();
   }
   request(owner,args) {
+    this.ready();
     if(this.closedOwners.has(owner)) throw new Error("Browser input session closed");
     if(args?.action==="check") {
       if(active.has(this.endpoint())) throw new Error("A native input action already owns this browser");
@@ -83,7 +84,7 @@ export class BrowserInputs {
     if(element && !keyboard) {required.Page.push("createIsolatedWorld");required.DOM=["scrollIntoViewIfNeeded","resolveNode"];required.Runtime=["callFunctionOn","releaseObject"];}
     if(!Object.entries(required).every(([domain,names])=>names.every(name=>protocol.domains?.find(item=>item.domain===domain)?.commands?.some(command=>command.name===name)))) throw new Error("Managed inputs require CDP input, cancellation, dialog, focus and requested AX target support");
   }
-  check(record) {if(record.canceled) throw new Error("Browser input canceled");}
+  check(record) {this.ready();if(record.canceled) throw new Error("Browser input canceled");}
   async idle(record) {
     this.check(record);
     while(await this.dialog(record.owner,record.targetId)) {await delay(20,undefined,{signal:record.abort.signal});this.check(record);}
@@ -166,6 +167,7 @@ export class BrowserInputs {
     while(remaining>0) {const start=performance.now();await delay(Math.min(remaining,1000),undefined,{signal:record.abort.signal});remaining-=performance.now()-start;this.check(record);}
   }
   async perform(owner,args,options,keyboard=false,prepare) {
+    this.ready();
     const endpoint=this.endpoint();
     if(!endpoint || typeof args.targetId!=="string" || !args.targetId) throw new Error("Browser input target unavailable");
     if(this.closedOwners.has(owner)) throw new Error("Browser input session closed");

@@ -2457,3 +2457,42 @@ Persistent/Worker and MCP launcher flows pass managed paste too. Linux retains
 CDPScreenshotNewSurface. Headful/Windows, atomic focus/edit dispatch and native
 preparation settlement after transport loss remain open; that last failure mode
 was not exercised in these runs.
+
+
+## Clipboard completion across lost CDP replies
+
+Private control pages now register each clipboard task before its single start
+and retain its native promise/result across connections. Recovery verifies the
+browser websocket route and control frame/loader, then settles that exact job:
+armed tasks are canceled, running tasks get a bounded status query, completed
+writes return the original result. No write or paste preparation is replayed.
+Unconfirmed tasks keep their control page and an endpoint-wide fence against
+managed input and clipboard reads/writes. Cleanup retries settlement before
+restoring permissions or closing control targets; native key/button releases
+remain available while the fence is held. Known terminal results remain cached
+through focus-cleanup retries; dropping completed page records is best effort.
+
+Added `scripts/run-clipboard-transport-smoke.mjs`, using owned HTTP fixtures and
+actual control-CDP connection closure. Both JS hosts pass four scenarios each:
+completed write with lost reply, completed paste preparation with lost reply,
+pending write and pending paste preparation. They check exactly one native
+write, cross-session input/clipboard refusal, zero edits for interrupted pending
+paste and recovery after native completion plus reset. A small VM check covers
+duplicate starts, cancel-before-start, pending settlement, rejection and lost
+completion contexts.
+
+Validation: macOS Node 26 passes 175/175 checks with test-file concurrency set to
+one; arm64 Linux Node 24 passes 174 with one macOS-only skip. The macOS process
+identity check failed in an earlier parallel full run and in an isolated retry;
+it passed the diagnostic run and final serial full suite. Its existing one-second
+lsof timeout remains unchanged. Chrome 158 on both systems passes the eight new
+fault scenarios, native text/HTML/PNG clipboard suite, 27 paste / 21 text /
+10 indexed-key cases, existing held-input suite and 53 pointer cases. macOS
+desktop text-clipboard hash stays unchanged. Source-removed installed
+Persistent/Worker and MCP browser flows pass on both platforms. Linux keeps
+CDPScreenshotNewSurface enabled.
+
+Remaining: the uncertain-job fence is host-memory scoped. Host-process death,
+a destroyed control execution context and confirmed browser-exit retirement
+still need recovery work. Headful/Windows and atomic focus/edit dispatch remain
+open. The overall harness-parity goal stays active.
