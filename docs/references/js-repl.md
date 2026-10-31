@@ -275,7 +275,9 @@ until timed native key delivery is implemented. See
 `cua.computer.target` reports the local Node executor platform (`mac`, `linux`,
 `windows`) without loading native MCP. Linux/Windows expose
 `await cua.computer.launch_app({app})` for a literal executable name/path, backed
-by an advertised native tool. Observe the resulting app before input; started
+by an advertised native tool. Linux additionally accepts installed desktop IDs,
+desktop-file paths and exact display names (ambiguity fails with candidate IDs).
+Observe the resulting app before input; started
 processes survive REPL cleanup. macOS keeps launch in `getApp` and omits the
 optional explicit method. See [native lifecycle](../native-lifecycle.md).
 

@@ -41,7 +41,10 @@ var x11CaptureScript string
 //go:embed native_cancel.py
 var nativeCancelScript string
 
-const serverInstructions = "Computer Use tools let you interact with Linux desktop apps by performing UI actions.\n\nUse launch_app only for an explicitly requested application start; it accepts one literal executable name/path without arguments. The started application outlives this native session. Verify its readiness with get_app_state.\n\nBegin by calling `get_app_state` every turn you want to use Computer Use to get the latest state before acting. The available tools are list_windows, bind_window, launch_app, list_apps, get_app_state, click, perform_secondary_action, scroll, drag, type_text, type_characters, select_text, paste, press_key, and set_value.\n\nPrefer element-targeted interactions over coordinate clicks when an index for the targeted element is available. Linux actions use AT-SPI2 semantic actions and editable text APIs first. Coordinate mouse and key synthesis are best-effort fallbacks and are not a universal Wayland background input model."
+//go:embed desktop_launch.py
+var desktopLaunchScript string
+
+const serverInstructions = "Computer Use tools let you interact with Linux desktop apps by performing UI actions.\n\nUse launch_app only for an explicitly requested application start; it accepts one literal executable name/path, installed desktop ID or exact display name without caller-supplied arguments. The started application outlives this native session. Verify its readiness with get_app_state.\n\nBegin by calling `get_app_state` every turn you want to use Computer Use to get the latest state before acting. The available tools are list_windows, bind_window, launch_app, list_apps, get_app_state, click, perform_secondary_action, scroll, drag, type_text, type_characters, select_text, paste, press_key, and set_value.\n\nPrefer element-targeted interactions over coordinate clicks when an index for the targeted element is available. Linux actions use AT-SPI2 semantic actions and editable text APIs first. Coordinate mouse and key synthesis are best-effort fallbacks and are not a universal Wayland background input model."
 
 type toolDefinition struct {
 	Name        string         `json:"name"`
@@ -228,7 +231,7 @@ func (s *service) callTool(name string, args map[string]any) toolCallResult {
 	case "list_windows", "bind_window":
 		return s.windowTool(name, args)
 	case "launch_app":
-		return launchApplication(args)
+		return s.launchApplication(args)
 	case "list_apps":
 		return s.listApps()
 	case "get_app_state":
@@ -813,6 +816,9 @@ func (s *service) runPython(request linuxRequest) (*linuxResponse, error) {
 		return nil, err
 	}
 	if err := os.WriteFile(filepath.Join(tempDir, "native_cancel.py"), []byte(nativeCancelScript), 0o600); err != nil {
+		return nil, err
+	}
+	if err := os.WriteFile(filepath.Join(tempDir, "desktop_launch.py"), []byte(desktopLaunchScript), 0o600); err != nil {
 		return nil, err
 	}
 	operationData, err := json.Marshal(request)
@@ -1505,9 +1511,9 @@ func toolDefinitions() []toolDefinition {
 		{Name: "bind_window", Description: "Bind an exact native Linux window from a fresh list_windows ID. Returns an opaque app selector for observations/actions; closed or replaced windows fail.", Annotations: readOnlyAnnotations(), InputSchema: objectSchema(map[string]any{"window_id": integerProperty("Positive safe-integer window ID from list_windows")}, []string{"window_id"})},
 		{
 			Name:        "launch_app",
-			Description: "Explicitly launch one application executable by its literal name or path. Arguments, command lines and shell syntax are not accepted. The application persists after the automation session ends. Observe it with get_app_state before acting.",
+			Description: "Explicitly launch one application by literal executable name/path, desktop ID (.desktop) or exact display name. Ambiguous names fail. Caller arguments, command lines and shell syntax are not accepted. The application persists after the automation session ends. Observe it with get_app_state before acting.",
 			Annotations: defaultAnnotations(),
-			InputSchema: objectSchema(map[string]any{"app": stringProperty("Executable name on PATH or executable path; a single literal value")}, []string{"app"}),
+			InputSchema: objectSchema(map[string]any{"app": stringProperty("Executable name/path, installed desktop ID or exact display name; a single literal value")}, []string{"app"}),
 		},
 		{
 			Name:        "click",

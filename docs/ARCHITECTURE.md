@@ -497,7 +497,9 @@ CLI readiness and npm copy lists include the host module. See [WebMCP](browser-w
 The JS computer binding reports the local executor platform without starting the
 native peer. Linux/Windows dispatch explicit launch_app calls after native
 capability discovery; macOS retains getApp's launch behavior. The Go runtimes
-resolve a single literal executable, discard protocol stdio and start an
+resolve a single literal executable; Linux additionally delegates desktop ID/path
+and exact display-name startup to GIO, rejecting ambiguous names. They discard
+protocol stdio and start an
 independent application process/session. Started apps persist across automation
 cleanup; the peer reaps child exits while alive. Source/Worker Linux GTK fixtures
 verify startup, AX observation and turn/native/reset/close persistence. See

@@ -6,10 +6,10 @@ import (
 	"strings"
 )
 
-func launchApplication(args map[string]any) toolCallResult {
+func (s *service) launchApplication(args map[string]any) toolCallResult {
 	app, ok := args["app"].(string)
 	if !ok || strings.TrimSpace(app) == "" || len(app) > 4096 || strings.ContainsAny(app, "\x00\r\n") {
-		return textResult("launch_app requires an executable name or path of at most 4096 bytes", true)
+		return textResult("launch_app requires an executable name/path, desktop ID or display name of at most 4096 bytes", true)
 	}
 	for key := range args {
 		if key != "app" {
@@ -17,8 +17,15 @@ func launchApplication(args map[string]any) toolCallResult {
 		}
 	}
 	executable, err := exec.LookPath(app)
-	if err != nil {
-		return textResult(fmt.Sprintf("Cannot resolve application executable: %v", err), true)
+	if strings.HasSuffix(app, ".desktop") || err != nil {
+		response, launchErr := s.runPython(linuxRequest{Tool: "launch_app", App: app})
+		if launchErr != nil {
+			return textResult(launchErr.Error(), true)
+		}
+		if !response.OK {
+			return textResult(response.Error, true)
+		}
+		return textResult(response.Text, false)
 	}
 	command := exec.Command(executable)
 	prepareApplicationProcess(command)

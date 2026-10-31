@@ -671,3 +671,30 @@ See [browser-only package](../../browser-only-package.md).
 No registry publication or real user profile/config modification was performed.
 Node 22 minimum, Windows runtime, actual Codex reload and broader transport/native
 parity remain unverified. The full harness goal remains active.
+
+## Linux desktop application launch
+
+Extended explicit launch_app with installed desktop IDs, .desktop file paths and
+exact executor-localized display names. Existing executable inputs retain
+LookPath/no-argument startup precedence. GIO owns XDG registry lookup, configured
+Exec field codes and desktop activation; ambiguous names return candidate IDs,
+and hidden/missing/invalid entries fail without replay. The embedded GI helper
+uses the existing native deadline/cancellation path. Spawned apps have independent
+sessions and detached protocol stdio. Shared JS/native instructions, schema,
+architecture, lifecycle docs and parity tracking now describe Linux resolution.
+No project dependency or CI was added.
+
+Validation passed: 151 Node checks on macOS; arm64 Linux passed 150 with one
+macOS-only skip, 47 Go top-level checks plus 10 subchecks, and 83 Python checks.
+Both source and Worker sessions passed real GTK starts by executable, desktop ID,
+exact display name (including slash) and desktop file path. All eight successful
+starts preserved literal Unicode/$() paths, desktop %c/%k/%% expansion and omitted
+no-URI %f/%u codes, private stdio, independent sessions and AX readiness across
+turn end/native replacement/reset/close. Duplicate names, Hidden entries, missing
+IDs and missing executable definitions were rejected without launching the
+fixture. Checks used owned temporary XDG registries and D-Bus/Xvfb desktops;
+normal desktop registrations and user settings were untouched.
+
+See [native lifecycle](../../native-lifecycle.md). D-Bus activation, terminal
+entries, broader registry/locale precedence, native Windows and the full remaining
+harness parity goal stay open. The full goal remains active.

@@ -985,6 +985,9 @@ def send_verified_scroll(app, window, bounds, element, x, y, direction, pages):
 
 def perform_operation(operation):
     tool = operation.get("tool")
+    if tool == "launch_app":
+        from desktop_launch import launch_desktop
+        return launch_desktop(operation["app"])
     if tool == "list_windows":
         return {"ok": True, "text": json.dumps(list_windows())}
     if tool == "bind_window":
