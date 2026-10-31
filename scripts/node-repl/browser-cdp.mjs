@@ -352,6 +352,11 @@ export class BrowserDialogs {
     if (browser.error) throw browser.error;
     for (const entry of this.targets.values()) if (entry.endpoint === endpoint) this.claim(entry,owner,true);
   }
+  changed(watch) {
+    watch.revision++;const state={revision:watch.revision,active:watch.dialogs.size>0,done:watch.done===true};
+    for(const resolve of watch.changes)resolve(state);watch.changes.clear();
+  }
+  finished(watch) {watch.done=true;this.changed(watch);watch.finish();}
   event(entry, event) {
     if (entry.closed) return;
     if (event.method.startsWith("Page.")) entry.captureReady?.();
@@ -372,10 +377,13 @@ export class BrowserDialogs {
       for (const notify of entry.dialogWaiters) notify();
       for (const waiting of watches) {
         waiting.dialog = entry.dialog;
-        waiting.opened = true;
+        waiting.opened = true;waiting.dialogs.add(entry.dialog.id);this.changed(waiting);
         waiting.resolve({opened:true});
       }
-    } else if (event.method === "Page.javascriptDialogClosed") entry.dialog = undefined;
+    } else if (event.method === "Page.javascriptDialogClosed") {
+      const dialog=entry.dialog;entry.dialog=undefined;
+      for(const watch of dialog?.watches??[]){watch.dialogs.delete(dialog.id);this.changed(watch);}
+    }
   }
   claim(entry, owner, passive = false) {
     if (passive && !entry.owners.has(owner)) entry.passiveOwners?.add(owner);
@@ -430,15 +438,20 @@ export class BrowserDialogs {
     if (args?.action === "observe") return this.observe(owner);
     if (args?.action === "start") return this.start(owner,args.targetId);
     if (args?.action === "stop") return this.stop(owner,args.targetId);
-    if (args?.action === "wait" || args?.action === "end") {
+    if (["wait","changes","end"].includes(args?.action)) {
       const watch = this.waiters.get(args.id);
       if (!watch || watch.owner !== owner) throw new Error("Unknown browser action watcher");
       if (args.action === "wait") return watch.waiting;
+      if(args.action==='changes'){
+        if(!Number.isSafeInteger(args.after)||args.after < -1||args.after>watch.revision)throw Error('Invalid browser action revision');
+        if(args.after<watch.revision||watch.done)return {revision:watch.revision,active:watch.dialogs.size>0,done:watch.done===true};
+        return new Promise(resolve=>watch.changes.add(resolve));
+      }
       if(args.error!==undefined && typeof args.error!=="string") throw new Error("Invalid browser action error");
       watch.error=args.error;
       if(watch.opened && (watch.dialog ?? watch.entry.dialog)?.owner===owner && args.error!==undefined) (watch.dialog ?? watch.entry.dialog).actionError=args.error;
       watch.resolve({opened:false});
-      watch.finish();
+      this.finished(watch);
       watch.entry.watches.delete(watch);
       this.waiters.delete(args.id);
       return;
@@ -457,7 +470,7 @@ export class BrowserDialogs {
     if (args.action === "watch") {
       if (entry.dialog) throw new Error("Resolve the active JavaScript dialog with getJsDialog() first");
       if ([...entry.watches].some(watch => !watch.opened || watch.owner !== owner)) throw new Error("A browser input action is already active for this tab");
-      const watch = {id:++this.nextId,owner,entry,opened:false};
+      const watch = {id:++this.nextId,owner,entry,opened:false,revision:0,dialogs:new Set(),changes:new Set()};
       watch.waiting = new Promise(resolve => {watch.resolve=resolve;});
       watch.finished = new Promise(resolve => {watch.finish=resolve;});
       entry.watches.add(watch);
@@ -553,7 +566,7 @@ export class BrowserDialogs {
       if (!this.closedOwners.has(owner)) await Promise.all([...entry.watches].filter(watch => watch.owner === owner).map(watch => watch.finished));
       for (const watch of entry.watches) if (watch.owner === owner) {
         watch.resolve({opened:false});
-        watch.finish();
+        this.finished(watch);
         this.waiters.delete(watch.id);
         entry.watches.delete(watch);
       }
@@ -623,7 +636,7 @@ Navigation waits: tab.playwright.expectNavigation(async action, {url?,waitUntil?
 Playwright actions invalidate prior AX and screenshot indices. Read current state afterwards. File chooser events: start tab.playwright.waitForEvent("filechooser", {timeoutMs?}) before clicking, then await the handle and use isMultiple() / setFiles(absolutePaths, {timeoutMs?}). The file handle is one-shot. Downloads: start waitForEvent("download") before clicking, then await download.path({timeoutMs?}) for the completed local artifact. It includes new descendant popups opened during that wait. Bind an existing popup separately to collect its downloads.
 Developer logs: await tab.dev.logs({filter?,levels?,limit?}) returns chronological console entries with level/message/timestamp/url. Capture begins at tab binding, continues across calls/navigation, and ends on close/reset/timeout. Levels: debug/info/log/warn/error (warning aliases warn). Default limit 100; retained cap 1000 entries, each at most 16,384 UTF-16 code units. Objects use shallow CDP descriptions; no page getters are executed. Prior console history and out-of-process frame/worker logs are excluded.
 paste keeps clipboard writing and native editor input in the clipboard queue under a host input/focus lease. AX targets are validated before preparation and before paste down. Failed release blocks later clipboard API jobs until reset cleanup succeeds. Accepted clipboard writes remain after cancellation; paste down is never replayed.
-JavaScript dialogs: await tab.getJsDialog() returns undefined or a handle with type. alert/beforeunload support dismiss(); confirm supports accept()/dismiss(); prompt supports accept(text)/dismiss(). Actions return when they open a dialog; answer it before further page reads/input. accept()/dismiss() reports failures from the resumed action. Handles are scoped to the observed dialog and owning session. Reset/timeout/close dismiss owned active dialogs. Beforeunload dismiss cancels navigation. Browser/tab discovery starts early dialog observation. New page targets resume after their capture session is ready; popup dialogs inherit an active opener action. Created tabs attach observers before loading their URL. A dialog already open before observation starts may prevent CDP initialization; resolve it through existing browser/native controls first.
+JavaScript dialogs: await tab.getJsDialog() returns undefined or a handle with type. alert/beforeunload support dismiss(); confirm supports accept()/dismiss(); prompt supports accept(text)/dismiss(). Actions return when they open a dialog; answer it before further page reads/input. accept()/dismiss() reports failures from the resumed action. Locator and file-chooser action deadlines pause while their owned dialog waits, then resume remaining active time; timeoutMs:0 still permits session cancellation. Handles are scoped to the observed dialog and owning session. Reset/timeout/close dismiss owned active dialogs. Beforeunload dismiss cancels navigation. Browser/tab discovery starts early dialog observation. New page targets resume after their capture session is ready; popup dialogs inherit an active opener action. Created tabs attach observers before loading their URL. A dialog already open before observation starts may prevent CDP initialization; resolve it through existing browser/native controls first.
 Clipboard: tab.clipboard.read()/readText()/write(items)/writeText(text) uses the browser native process clipboard. Items contain entries [{mimeType,text? ,base64?}] and optional presentationStyle. Exactly one payload per entry; native Chrome validates supported formats. Requires --enable-automation and verified headless Chromium (virtual clipboard) or the host-owned managed headful browser (system/display clipboard shared with apps). The browser must reach the host loopback bridge. Browser clipboard state is shared across tabs/JS sessions and survives js_reset. Internal control tabs are hidden and cleaned up on reset/timeout/close. paste(index,text,{format:"text"|"html"}) writes the selected clipboard backend and dispatches trusted native paste under a host input lease; typeText remains clipboard-independent. Unowned headful clipboard APIs fail explicitly. System clipboard writes are retained and can outlive the host; outside apps may change them.
 Read-only scripting: playwright.evaluate(fnOrExpression,arg?,{timeoutMs?}), locator.evaluate(...) and locator.evaluateAll(...) run in a host-owned QuickJS Worker. Native DOM read facades support text/attributes/traversal/styles/geometry and frame scopes. Live setters, mutation methods, page functions, network/storage and Node APIs are unavailable. Functions cannot capture REPL variables. Local data, URL helpers and timers are supported. Navigation, deadline and turn/reset/close cancel execution; inner deadlines preserve JS bindings. Default 10 seconds, timeoutMs:0 disables the operation deadline. Unsupported DOM members are unavailable; this is an explicit read schema.
 Media: locator.downloadMedia({timeoutMs?}) downloads a matched image/audio/video/source or file link to a private local file. Default 120 seconds; timeoutMs:0 disables its operation deadline. Load lazy sources first. Completed private files survive reset; changed sources/navigation and cancellation remove partial files. Read docs/browser-media.md for provider and permission-integration limits.
@@ -692,8 +705,9 @@ export function createBrowserApi(activeOutput, environment = process.env, {runti
   async function withDialogAction(targetId, operation) {
     const id = await requestDialog({action:"watch",targetId});
     const opened = requestDialog({action:"wait",id});
+    const changes=after=>requestDialog({action:'changes',id,after},0);
     let failure;
-    const work = Promise.resolve().then(() => operation(opened)).catch(error=>{
+    const work = Promise.resolve().then(() => operation(opened,changes)).catch(error=>{
       failure=String(error?.message ?? error).slice(0,16_384);
       throw error;
     }).finally(() => requestDialog({action:"end",id,error:failure}));

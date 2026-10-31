@@ -35,3 +35,13 @@ WebMCP 发现已覆盖配置浏览器中的未绑定 HTTP(S) 页面及后续创�
 原生管理写入已接入同机布局屏障、受影响窗口租约和写入前布局指纹复核；跨进程外部租约冲突不会留下部分新租约或写审计。建页、接管与显式/清理关闭经过屏障，已占用页的观察与输入可继续。macOS/Linux 双会话源码和安装入口通过 tab/group/window 拒绝、独立后台窗口/书签、原生写入超时确认及 SIGKILL/reset 新建页拦截；组织流程、worker 重启/空闲、弹窗、剪贴板、会话选择和 Linux 安装后的 headful/MCP 回归通过。Node 为 macOS 200/200、Linux 199/200（一个平台专属跳过）。扩展协议升级为 5；未知原生完成仍需浏览器重启恢复，visibility、原始/物理/page-driven 协调、跨机器和 Windows 仍待补齐。
 
 托管 headful visibility 已接入同机布局屏障和全窗口页面租约，写入前复核 target/window/bounds；队列准备可取消，已发动作等待确认，未知完成会停止 JS 并持续拦截到原浏览器进程退出。Linux 隔离 Xvfb/Openbox 双会话源码与安装入口通过跨宿主/同宿主拒绝、原生映射/缓存保持、布局变化拒绝、实际最小化后的延迟确认、超时期间建页拦截和丢失回执后的退出/重置/新实例恢复。原有 GTK 剪贴板、cookies、空窗、MCP 和生命周期回归通过；macOS/Linux Node 为 204/204、203/204（一个平台专属跳过）。物理桌面/macOS headful、Windows、外部/原始/物理 actor、跨机器及原生崩溃接管继续待补。
+
+
+Locator 与文件选择动作已按活动时间计时：等待归属明确的 JavaScript 弹窗时暂停，
+关闭后恢复剩余预算，连续 prompt 同样适用。通过固定版本 Playwright 的公开
+AbortSignal 执行超时与清理取消，timeout=0 仍支持会话取消；原生连接和焦点清理
+保持完成确认。macOS/Linux 双会话源码与源码移除后的安装入口通过 >10s 确认框、
+连续弹窗、文件选择、恢复导航失败及无限动作重置清理；原有弹窗、剪贴板和 Linux
+隔离 headful/MCP 回归通过。Node 为 207/207、206/207（一个平台专属跳过），
+browser-only npm build/pack 内容检查通过。跨进程既有弹窗观察初始化、原始 CDP /
+drop / 导航等待的计时协调、物理 macOS headful 与 Windows 继续待补。

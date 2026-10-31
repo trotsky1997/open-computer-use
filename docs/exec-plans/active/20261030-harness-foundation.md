@@ -2253,3 +2253,27 @@ accepted drain, native rejection and lost-ack proof-based cleanup.
 Physical desktop/macOS headful, Windows, raw/physical/page-driven actors, external
 browser visibility and cross-machine/native crash takeover remain open. The full
 parity goal stays active.
+
+## Dialog-aware locator action deadlines
+
+The macOS preflight during this phase found a locked session with zero active
+displays, leaving physical headful verification open. An owned cross-host probe
+exposed locator timeouts continuing while a JavaScript dialog waits for the agent.
+
+Implemented owner-bound revision updates for dialog opening/closing and watcher
+termination. Locator actions and file-chooser setFiles pause their active-time
+budget across known dialogs, resume remaining time after each response, and abort
+through the pinned Playwright public AbortSignal when active time expires or the
+watcher is cleaned up. Lifecycle IPC polls have no request deadline. Existing
+native connection/focus cleanup acknowledgement remains required.
+
+Owned Chrome 158 on macOS/Linux passes both JS hosts: >10s confirm waits,
+sequential prompt pauses, file selection dialogs, missing locator deadlines,
+resumed navigation failure and timeout=0 reset cleanup. Source-removed installed
+verification also exercises these flows. Node: macOS 207/207, Linux 206/207 with
+one platform-specific skip. Existing native dialog/clipboard regressions pass.
+
+Cross-host observer initialization during a preexisting dialog, sole-callback
+takeover and raw CDP/drop/navigation-wait deadline coordination remain open.
+Physical macOS headful and Windows validation remain outstanding. The full
+harness parity goal stays active.

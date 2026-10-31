@@ -105,6 +105,12 @@ if(process.argv[2]==='codex-plugin-config') { (await import('node:fs')).chmodSyn
   await new Promise((resolve,reject)=>{hosts.once('error',reject);hosts.once('exit',code=>code===0?resolve():reject(Error(hostOutput)));});
   for(const line of hostOutput.split('\n').filter(line=>line.includes('PASS')))console.log(line);
   console.log('PASS installed independent-host tab coordination after source checkout removal');
+  const budgets=spawn(process.execPath,[path.join(source,'scripts/run-dialog-budget-smoke.mjs'),installed],{env:{...env,OCU_TEST_CHROME_EXECUTABLE:path.resolve(chrome)},stdio:['ignore','pipe','pipe']});let budgetOutput='';
+  budgets.stdout.on('data',chunk=>{budgetOutput+=chunk;});budgets.stderr.on('data',chunk=>{budgetOutput+=chunk;});
+  await new Promise((resolve,reject)=>{budgets.once('error',reject);budgets.once('exit',code=>code===0?resolve():reject(Error(budgetOutput)));});
+  for(const line of budgetOutput.split('\n').filter(line=>line.includes('PASS')))console.log(line);
+  console.log('PASS installed dialog-aware locator deadlines after source checkout removal');
+
 
 
   if(process.platform==='linux'&&process.argv.includes('--headful')){

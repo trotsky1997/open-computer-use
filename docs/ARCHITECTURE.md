@@ -305,6 +305,14 @@ let a triggering input return while its dialog is pending; the original action
 connection stays attached until response and cleanup. Response waits for that
 cleanup or yields for the next sequential dialog. Host teardown dismisses owned
 dialogs before releasing focus and other observers, retaining ownership on failure.
+Action watchers also expose owner-bound revision long-polls for dialog open,
+close and watcher termination. Locator/file-chooser active-time budgets pause for
+known owned dialogs and resume after each close, using the pinned Playwright
+public AbortSignal. Watcher termination aborts pending work even with timeout=0;
+normal completion settles outstanding polls. IPC lifecycle polls have no request
+deadline, so agent think time does not consume an RPC timeout. Native cleanup
+acknowledgement remains required. Raw CDP/drop/navigation-wait deadlines and
+cross-process observer initialization remain separate work.
 New tabs install observers at about:blank before navigating to their requested URL.
 
 BrowserClipboard owns empty loopback control pages, private-origin permissions

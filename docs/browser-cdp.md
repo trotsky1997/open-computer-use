@@ -397,6 +397,17 @@ explicitly while a known dialog is active. Playwright connection setup also fail
 explicitly if another observed tab has an active dialog, since CDP connection
 initialization can stall on such pages.
 
+Locator actions and file-chooser `setFiles` count their default 10s or explicit
+`timeoutMs` budget only while active. A known action-owned JavaScript dialog
+pauses that budget; closing it resumes the remaining time, including across
+sequential prompts. Readiness and resumed work still have a deadline, and
+`accept()`/`dismiss()` surfaces a resumed-action failure. Inspect state before
+retrying an uncertain action. The pinned Playwright public AbortSignal cancels
+expired work; connection/focus cleanup must still acknowledge completion.
+`timeoutMs: 0` disables the action deadline while turn/reset/close cancellation
+remains active. Connection setup, raw CDP input/navigation, native drop and
+navigation-wait deadlines retain their separate policies.
+
 One observer per endpoint/tab is shared inside the host process. An action's
 dialog belongs to its initiating session; an unclaimed asynchronous dialog belongs
 to the first session that obtains a handle. Other sessions cannot respond to that
@@ -631,3 +642,10 @@ disconnect/reset and hidden-window reads in both session implementations and
 source/installed MCP entries. Default-headless text/HTML/PNG, copy/cut/paste, undo,
 editability, password and cleanup regressions pass on macOS/Linux. Physical
 macOS/system clipboard, physical desktop interference and Windows remain open.
+
+Dialog budget regression: run `node scripts/run-dialog-budget-smoke.mjs` with
+`OCU_TEST_CHROME_EXECUTABLE` pointing to an owned Chrome for Testing executable.
+The controller covers waits beyond the default deadline, repeated prompts, file
+selection dialogs, resumed navigation failure and unlimited-action reset cleanup
+in both JS session types. It also runs against the installed plugin after source
+checkout removal in `scripts/tests/browser-only-install-smoke.mjs`.

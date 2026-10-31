@@ -2914,3 +2914,26 @@ dialog/clipboard and installation regressions pass. Node: macOS 204/204; Linux
 
 Physical desktop/macOS headful, Windows, raw/physical/page-driven actors, external
 visibility, cross-machine coordination and native crash takeover remain open.
+
+
+## Dialog waits preserve locator action budgets
+
+Added owner-bound dialog watcher revisions and pending-change settlement on
+normal end or teardown. Locator actions and file-chooser setFiles pause active
+budgets while known owned dialogs wait for the agent, then resume remaining time
+across repeated prompts. The pinned Playwright public AbortSignal cancels expired
+or torn-down work, including timeout=0 actions. Lifecycle IPC long-polls have no
+request timeout. Existing native cleanup acknowledgement and resumed-action error
+reporting remain intact; no dependency or configuration changes were needed.
+
+Owned Chrome 158 source and source-removed installed tests pass on macOS and
+arm64 Linux in both JS session types: confirmation after >10s, sequential prompt
+pauses, file selection dialogs, missing locator timeout, resumed navigation
+failure and timeout=0 reset cleanup. Existing dialog/clipboard, installation and
+Linux isolated headful/MCP regressions pass. Node: macOS 207/207; Linux 206/207,
+one platform-specific skip. Browser-only npm build/pack content checks pass.
+
+The phase's macOS preflight found a locked session with no active displays, so
+physical headful validation remains open. Cross-process observer initialization
+during a preexisting dialog, sole-callback takeover, raw CDP/drop/navigation-wait
+deadline coordination and Windows remain outstanding.

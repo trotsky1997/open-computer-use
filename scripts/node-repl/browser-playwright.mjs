@@ -16,10 +16,10 @@ export function createPlaywrightApi(endpoint, targetId, invalidate, focusLease, 
   const actions = ["click", "dblclick", "fill", "press", "check", "uncheck", "setChecked", "selectOption", "hover", "scrollIntoViewIfNeeded", "pressSequentially", "type", "drop"];
   async function invoke(path, method, args) {
     if (checkDialog) await checkDialog(actions.includes(method));
-    if (withAction && actions.includes(method)) return withAction(opened => perform(path,method,args,opened));
+    if (withAction && actions.includes(method)) return withAction((opened,changes) => perform(path,method,args,opened,changes));
     return perform(path,method,args);
   }
-  async function perform(path, method, args, dialogOpened) {
+  async function perform(path, method, args, dialogOpened, dialogChanges) {
     const {chromium} = await import("playwright-core");
     const browser = await chromium.connectOverCDP(endpoint(), {timeout:10_000, noDefaults:true});
     for (const context of browser.contexts()) context.on("dialog", () => {});
@@ -105,11 +105,11 @@ export function createPlaywrightApi(endpoint, targetId, invalidate, focusLease, 
               if (!Array.isArray(paths) || paths.some(file => typeof file !== "string" || !isAbsolute(file))) throw new Error("setFiles requires absolute file paths");
               if (!multiple && paths.length > 1) throw new Error("File chooser accepts only one file");
               validateWaitOptions(fileOptions, ["timeoutMs"]);
-              const select = async () => {
+              const select = async (_opened,changes) => {
                 await waitForBrowserEventReady(endpoint(),targetId);
                 consumed = true;
                 invalidate();
-                try { await chooser.setFiles(paths, {timeout:fileOptions.timeoutMs ?? 10_000}); }
+                try { await withBrowserActionBudget(options=>chooser.setFiles(paths,options),{timeout:fileOptions.timeoutMs??10_000},changes); }
                 finally { try { await cleanup(); } finally { done(); } }
               };
               return withAction ? withAction(select) : select();
@@ -141,7 +141,12 @@ export function createPlaywrightApi(endpoint, targetId, invalidate, focusLease, 
           for (const frame of page.frames()) snapshots.push(`${frame === page.mainFrame() ? "Page" : "Frame"}: ${frame.url()}\n${await frame.locator("body").ariaSnapshot()}`);
           return snapshots.join("\n\n");
         }
-        return await locator[method](...args.map(convert));
+        const values=args.map(convert);
+        if(actions.includes(method)){
+          const index=['fill','press','setChecked','selectOption','pressSequentially','type'].includes(method)?1:0;
+          return await withBrowserActionBudget(options=>{const parameters=[...values];parameters[index]=options;return locator[method](...parameters);},values[index]??{},dialogChanges);
+        }
+        return await locator[method](...values);
       }
       finally { if (actions.includes(method)) invalidate(); }
     } finally {
@@ -232,6 +237,29 @@ export function createPlaywrightApi(endpoint, targetId, invalidate, focusLease, 
   return binding();
 }
 
+
+export async function withBrowserActionBudget(operation,options,changes){
+  if(!changes)return operation(options);
+  const timeout=options.timeout??10_000;
+  if(typeof timeout!=='number'||!Number.isFinite(timeout)||timeout<0)throw Error('Action timeout must be non-negative and finite');
+  const control=new AbortController(),signal=options.signal?AbortSignal.any([options.signal,control.signal]):control.signal;
+  let remaining=timeout,started,timer,stopped=false;
+  const update=active=>{
+    clearTimeout(timer);if(started!==undefined)remaining-=performance.now()-started;started=undefined;
+    if(!active&&timeout){started=performance.now();timer=setTimeout(()=>control.abort(Error(`Timeout ${timeout}ms exceeded while browser action was active`)),Math.max(0,remaining));}
+  };
+  update(false);
+  const monitor=(async()=>{
+    let revision=-1;
+    while(!stopped){
+      const state=await changes(revision);if(stopped)return;revision=state.revision;
+      if(state.done){control.abort(Error('Browser action watcher ended'));return;}
+      update(state.active);
+    }
+  })();monitor.catch(error=>{if(!stopped)control.abort(error);});
+  try{return await operation({...options,timeout:0,signal});}
+  finally{stopped=true;clearTimeout(timer);}
+}
 
 async function nativeDropPoint(locator,page,session,options,request) {
   const handle = await locator.elementHandle({timeout:0});

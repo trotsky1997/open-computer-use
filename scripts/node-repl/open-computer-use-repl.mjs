@@ -683,7 +683,7 @@ export function createCuaApi(native, activeOutput, onDispose, {tabRequest,platfo
     focusLease: native.browserHost ? args => native.request("browser/focus", args) : undefined,
     downloadRequest: native.browserHost ? args => native.request("browser/download",args) : undefined,
     logRequest: native.browserHost ? args => native.request("browser/logs",args) : undefined,
-    dialogRequest: native.browserHost ? args => native.request("browser/dialog",args) : undefined,
+    dialogRequest: native.browserHost ? (args,timeoutMs) => native.request("browser/dialog",args,timeoutMs) : undefined,
     clipboardRequest: native.browserHost ? args => native.request("browser/clipboard",args) : undefined,
     chromeRequest: native.browserHost ? args=>native.request("browser/chrome",args,0) : undefined,
     evaluateRequest: native.browserHost ? args=>native.request("browser/evaluate",args,0) : undefined,
