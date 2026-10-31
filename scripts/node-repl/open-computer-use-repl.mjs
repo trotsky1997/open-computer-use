@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import {browserRuntime} from './browser-runtime.mjs';
 import {BrowserWebMcp} from './browser-webmcp.mjs';
 import {BrowserContent} from "./browser-content.mjs";
 import {BrowserChrome} from "./browser-chrome.mjs";
@@ -57,11 +58,14 @@ const HOST_BROWSER_WEBMCP=new BrowserWebMcp(()=>browserEndpoint(process.env)?.hr
 const HOST_BROWSER_CONTENT=new BrowserContent(()=>browserEndpoint(process.env)?.href);
 const HOST_BROWSER_ASSETS=new BrowserAssets(()=>browserEndpoint(process.env)?.href);
 const HOST_BROWSER_EVALUATOR=new BrowserEvaluator(()=>browserEndpoint(process.env)?.href);
-const HOST_BROWSER_SERVICES={browserWebMcp:HOST_BROWSER_WEBMCP,browserContent:HOST_BROWSER_CONTENT,browserChrome:HOST_BROWSER_CHROME,browserEvaluator:HOST_BROWSER_EVALUATOR,browserAssets:HOST_BROWSER_ASSETS,browserCdp:HOST_BROWSER_CDP,browserTabs:HOST_BROWSER_TABS,browserFocusLeases:HOST_BROWSER_FOCUS,browserDownloads:HOST_BROWSER_DOWNLOADS,browserLogs:HOST_BROWSER_LOGS,browserDialogs:HOST_BROWSER_DIALOGS,browserClipboard:HOST_BROWSER_CLIPBOARD,browserViewport:HOST_BROWSER_VIEWPORT,browserDrops:HOST_BROWSER_DROPS,browserInputs:HOST_BROWSER_INPUTS};
+const HOST_BROWSER_SERVICES={browserRuntime,browserWebMcp:HOST_BROWSER_WEBMCP,browserContent:HOST_BROWSER_CONTENT,browserChrome:HOST_BROWSER_CHROME,browserEvaluator:HOST_BROWSER_EVALUATOR,browserAssets:HOST_BROWSER_ASSETS,browserCdp:HOST_BROWSER_CDP,browserTabs:HOST_BROWSER_TABS,browserFocusLeases:HOST_BROWSER_FOCUS,browserDownloads:HOST_BROWSER_DOWNLOADS,browserLogs:HOST_BROWSER_LOGS,browserDialogs:HOST_BROWSER_DIALOGS,browserClipboard:HOST_BROWSER_CLIPBOARD,browserViewport:HOST_BROWSER_VIEWPORT,browserDrops:HOST_BROWSER_DROPS,browserInputs:HOST_BROWSER_INPUTS};
 
 async function hostRequest(services,owner,tabOwner,method,params,timeoutMs) {
   let result;
-  if (method === "browser/focus") {
+  if (method === "browser/runtime") {
+    if(params&&Object.keys(params).length)throw new Error("Browser runtime accepts no executable or launch arguments");
+    result=await services.browserRuntime.ensure();
+  } else if (method === "browser/focus") {
     if (params?.action === "acquire") result = await services.browserFocusLeases.acquire(owner, params.targetId);
     else if (params?.action === "release") result = await services.browserFocusLeases.release(owner, params.lease);
     else throw new Error("Unknown browser focus action");
@@ -133,7 +137,7 @@ The runtime exposes an asynchronous app-bound API:
 - \`await cua.getState({ emit? })\`: list apps and configured browsers with tabs; inventory failures are reported in errors.
 - \`cua.computer.target\`: local executor platform (mac, linux or windows). Linux/Windows expose \`await cua.computer.launch_app({app})\` for one literal executable name/path; Linux also accepts installed desktop IDs (.desktop) and exact display names, with ambiguous names rejected. No caller command-line arguments or shell expansion. A successful start persists after reset/turn end; use getApp and observe readiness before acting. macOS launches through getApp.
 - \`await cua.listApps({ emit? })\`: list current apps.
-- CDP browser: configure OPEN_COMPUTER_USE_CDP_URL, then use cua.listBrowsers(), cua.listTabs(), cua.getBrowser({id:"cdp"}), cua.getTab(id or {url}), and cua.createBrowserTab("cdp", url). Binding a tab emits provider documentation and initial AX state.
+- CDP browser: configure OPEN_COMPUTER_USE_CDP_URL or an absolute OPEN_COMPUTER_USE_BROWSER_EXECUTABLE for host-owned headless Chromium (macOS/Linux; visible:true unavailable), then use cua.listBrowsers(), cua.listTabs(), cua.getBrowser({id:"cdp"}), cua.getTab(id or {url}), and cua.createBrowserTab("cdp", url). Binding a tab emits provider documentation and initial AX state.
 - \`await cua.listWindows({ emit? })\`: Linux native window metadata with opaque numeric IDs. \`await cua.getApp({windowId}, {initialState?})\` binds exact AT-SPI window identity for AX and semantic actions; close/replacement invalidates it. Window images use verified XComposite backing pixmaps on local composited X11, including mapped background/occluded frames, alpha and native bounding-shape transparency; without a compositor, they require an active fully exposed frame. Coordinate/index fallback clicks, within-window drag, held clicks/keys and wheel input require a verified focused, fully exposed X11 frame and native recipient, with or without a compositor. Pointer targets must be inside native Bounding/Input regions; drag preflights every sent path point. Wayland and wider physical routing remain open. Keyboard fallback requires verified focus.
 - \`await cua.getApp(nameOrBundleID, { initialState? })\`: bind an app; initialState defaults to true. Use false for a lightweight binding before query.
 - \`await app.query({ text?, role?, exact?, limit?, maxNodes?, windowId? })\`: macOS-only AX lookup; returns matches and truncation metadata, with indexes usable in this native session.
@@ -673,6 +677,7 @@ export function createCuaApi(native, activeOutput, onDispose, {tabRequest,platfo
     });
   }
   const browserApi = createBrowserApi(activeOutput, process.env, {
+    runtimeRequest: native.browserHost ? ()=>native.request("browser/runtime",{},0) : undefined,
     focusLease: native.browserHost ? args => native.request("browser/focus", args) : undefined,
     downloadRequest: native.browserHost ? args => native.request("browser/download",args) : undefined,
     logRequest: native.browserHost ? args => native.request("browser/logs",args) : undefined,
@@ -969,7 +974,7 @@ export class PersistentJavaScriptSession {
 // are brokered back to the parent and still execute serially in the native MCP.
 export class WorkerJavaScriptSession {
   constructor({ native }) {
-    this.native = native;
+    this.native = native;this.browserRuntime=browserRuntime;
     this.nextId = 1;
     this.nextOwnerId=0;this.resourceOwners=new WeakMap();this.turnGeneration=0;
     this.browserTabs=HOST_BROWSER_TABS;
@@ -1210,7 +1215,7 @@ export async function runServer({ command, args }) {
   function send(message) { process.stdout.write(`${JSON.stringify(message)}\n`); }
   let shuttingDown;
   const shutdown = () => {
-    if (!shuttingDown) shuttingDown = session.close().finally(() => native.close());
+    if (!shuttingDown) shuttingDown = session.close().finally(() => browserRuntime.close()).finally(() => native.close());
     return shuttingDown;
   };
   const failedShutdown=error=>{console.error(`Session cleanup failed: ${asError(error).message}`);process.exit(1);};

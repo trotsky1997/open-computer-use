@@ -1925,3 +1925,35 @@ with OCU_TEST_CHROME_EXECUTABLE set to an owned test Chromium executable and add
 The broad parity goal remains active. Host-process crash recovery, destroyed
 completion contexts in a surviving browser, remote/unidentified identity,
 headful/Windows and remaining transport/claim/atomic-dispatch coverage stay open.
+
+
+## Host-owned headless browser startup
+
+The bundled REPL can lazily start an isolated Chromium when
+OPEN_COMPUTER_USE_BROWSER_EXECUTABLE names an absolute executable and no CDP
+origin is configured. External CDP takes precedence. The existing cdp provider
+and UI APIs stay the entry point. One private browser belongs to the host and
+survives JS reset/turn boundaries. Its temporary profile/default downloads are
+reclaimed on host shutdown; a detached IPC guardian also handles host-process
+death. Startup validates the private browser PID, debugger route and local
+process identity before exposing the endpoint. Guardian-loss recovery uses the
+verified private CDP peer, with unconfirmed startup ownership retained on failure.
+Installer/npm/readiness payloads carry both runtime and guardian modules.
+
+Validation: Node tests pass 184/184 on macOS and 183/184 on arm64 Linux
+(one macOS-only skip). Both systems pass Worker/source live input, clipboard,
+cookies, capture, private default downloads and reset/turn survival; guardian
+SIGKILL recovery and natural/SIGKILL host exit reclaim the root/profile.
+Source-removed plugin installations pass external CDP and managed direct-session
+plus MCP browser flows. Source-removed local/global npm packages pass external
+CDP flows and managed CLI startup. Production startup keeps the Chromium sandbox;
+the Linux VM controller supplies its own explicit no-sandbox exec shim.
+See [managed browser](../../managed-browser.md) for configuration and limits.
+Headful/Windows, simultaneous host/guardian loss during startup, durable recovery
+and broader external-browser host-crash behavior remain open. The overall parity
+goal stays active.
+
+The macOS npm external-browser fixture initially hung in Page.navigate. Matching
+the existing owned-browser fixture with --use-mock-keychain restored both local
+and global external-CDP flows; the production managed launcher already included
+that flag. Linux uses the unchanged platform branch.

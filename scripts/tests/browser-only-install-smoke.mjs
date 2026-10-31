@@ -91,6 +91,25 @@ if(process.argv[2]==='codex-plugin-config') { (await import('node:fs')).chmodSyn
   }
   const peer=new JsonLinePeer({command:path.resolve(installed,mcp.command),cwd:installed,env});
   try{await peer.initialize();const result=await peer.request('tools/call',{name:'js',arguments:{code}});assert.equal(result.isError,false,JSON.stringify(result.content));assert.ok(result.content.some(item=>item.text==='Installed browser verified'));console.log('PASS installed plugin launcher MCP real browser flow after source checkout removal');}finally{await peer.close();}
+  // The installed host owns the lazy browser even after its source checkout disappears.
+  delete env.OPEN_COMPUTER_USE_CDP_URL;delete process.env.OPEN_COMPUTER_USE_CDP_URL;
+  let executable=path.resolve(chrome);
+  if(process.platform==='linux'){
+   executable=path.join(root,'managed-chrome');
+   write(executable,'#!/bin/sh\nexec '+"'"+path.resolve(chrome).replaceAll("'","'\\''")+"'"+' --no-sandbox "$@"\n',{mode:0o700});
+  }
+  env.OPEN_COMPUTER_USE_BROWSER_EXECUTABLE=executable;process.env.OPEN_COMPUTER_USE_BROWSER_EXECUTABLE=executable;
+  for(const Session of [module.PersistentJavaScriptSession,module.WorkerJavaScriptSession]){
+   const native=new module.LazyNativePeer({command:nativeStub,args:['mcp'],env}),session=new Session({native});let owned;
+   try{
+    const result=await session.run(code,30000);assert.equal(result.isError,false,JSON.stringify(result.content));
+    owned=session.browserRuntime.current;assert.ok(owned?.proof);assert.ok(existsSync(owned.profile));
+   }finally{await session.close();await session.browserRuntime.close();await native.close();}
+   assert.equal(existsSync(owned.profile),false);
+   console.log(`${Session.name} PASS installed lazy browser launch, input/clipboard/capture and private profile cleanup`);
+  }
+  const managedPeer=new JsonLinePeer({command:path.resolve(installed,mcp.command),cwd:installed,env});
+  try{await managedPeer.initialize();const result=await managedPeer.request('tools/call',{name:'js',arguments:{code}});assert.equal(result.isError,false,JSON.stringify(result.content));console.log('PASS installed plugin MCP lazy browser flow after source checkout removal');}finally{await managedPeer.close();}
  }else console.log('SKIP live browser flow: pass an owned Chromium/Chrome executable path to include it');
 }finally{
  if(server){server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}

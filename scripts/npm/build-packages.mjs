@@ -460,7 +460,7 @@ function copyInstallerScripts(packageRoot) {
     "browser-cdp.mjs",
     "browser-downloads.mjs",
     "browser-clipboard.mjs",
-    "browser-viewport.mjs", "browser-input.mjs", "browser-tabs.mjs", "browser-process.mjs", "browser-debugger.mjs","browser-assets.mjs","browser-webmcp.mjs","browser-content.mjs","browser-chrome.mjs","browser-evaluate.mjs","browser-evaluate-dom.mjs","browser-evaluate-worker.mjs","runtime-dependencies.mjs","browser-drop.mjs",
+    "browser-viewport.mjs", "browser-input.mjs", "browser-tabs.mjs", "browser-process.mjs","browser-runtime.mjs","browser-runtime-child.mjs", "browser-debugger.mjs","browser-assets.mjs","browser-webmcp.mjs","browser-content.mjs","browser-chrome.mjs","browser-evaluate.mjs","browser-evaluate-dom.mjs","browser-evaluate-worker.mjs","runtime-dependencies.mjs","browser-drop.mjs",
     "browser-playwright.mjs",
     "open-computer-use-repl.mjs",
     "open-computer-use-kernel.mjs",
@@ -473,7 +473,7 @@ function copyInstallerScripts(packageRoot) {
   cpSync(path.join(repoRoot,"scripts","node-repl","chrome-browser-extension"),path.join(packageRoot,"scripts","node-repl","chrome-browser-extension"),{recursive:true});
   cpSync(path.join(repoRoot,"scripts","node-repl","chrome-browser-extension"),path.join(packageRoot,"plugins","open-computer-use","scripts","chrome-browser-extension"),{recursive:true});
   cpSync(path.join(repoRoot,"scripts","node-repl","browser-chrome.mjs"),path.join(packageRoot,"plugins","open-computer-use","scripts","browser-chrome.mjs"));
-  for(const module of ["browser-process.mjs","browser-webmcp.mjs","browser-content.mjs","browser-evaluate.mjs","browser-evaluate-dom.mjs","browser-evaluate-worker.mjs","runtime-dependencies.mjs"]) cpSync(
+  for(const module of ["browser-process.mjs","browser-runtime.mjs","browser-runtime-child.mjs","browser-webmcp.mjs","browser-content.mjs","browser-evaluate.mjs","browser-evaluate-dom.mjs","browser-evaluate-worker.mjs","runtime-dependencies.mjs"]) cpSync(
     path.join(repoRoot,"scripts","node-repl",module),path.join(packageRoot,"plugins","open-computer-use","scripts",module)
   );
   cpSync(

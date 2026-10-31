@@ -18,8 +18,9 @@ These commands build/install locally; registry publication is separate.
 
 The tarball declares its runtime dependencies; npm installs Playwright Core and
 QuickJS/WASM. It contains neither a browser nor native desktop runtimes.
-Configure OPEN_COMPUTER_USE_CDP_URL with your browser's CDP endpoint for browser
-operations. No desktop permission is required for JavaScript startup.
+Configure OPEN_COMPUTER_USE_CDP_URL with your browser's CDP endpoint, or set
+OPEN_COMPUTER_USE_BROWSER_EXECUTABLE to an absolute trusted Chromium executable
+for [managed headless startup](managed-browser.md). No desktop permission is required for JavaScript startup.
 
 ```sh
 ocu capabilities --json

@@ -14,9 +14,10 @@ and declared runtime dependencies, including QuickJS/WASM, into the versioned
 plugin cache. It does not fetch npm dependencies itself. Run npm ci first when
 node_modules is absent. The installer does not download a browser or its system libraries.
 No desktop permission or native build is needed to
-start the installed JS MCP server. Browser automation still needs a browser
-endpoint configured through OPEN_COMPUTER_USE_CDP_URL; the installed launcher
-inherits that environment variable from its host.
+start the installed JS MCP server. Browser automation accepts an external endpoint through OPEN_COMPUTER_USE_CDP_URL
+or [host-owned headless startup](managed-browser.md) through the absolute
+OPEN_COMPUTER_USE_BROWSER_EXECUTABLE path. The installed launcher inherits these
+variables from its host. External CDP takes precedence.
 
 Use an explicit target for another Codex home or a disposable installation:
 

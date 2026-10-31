@@ -55,10 +55,20 @@ try{
  console.log('PASS native-free build/pack/tarball install, no native artifacts/toolchains, metadata, version/capabilities, CLI/REPL/reset, default/explicit JS MCP, npm plugin installation and full-package JS MCP');
  if(chrome){
   const profile=path.join(root,'chrome profile');mkdirSync(profile);let errors='',launchError;
-  browser=spawn(chrome,['--headless=new','--no-sandbox','--no-first-run','--no-default-browser-check','--disable-background-networking','--disable-component-update','--disable-sync','--remote-debugging-address=127.0.0.1','--remote-debugging-port=0',`--user-data-dir=${profile}`,'about:blank'],{stdio:['ignore','ignore','pipe']});
+  browser=spawn(chrome,['--headless=new',...(process.platform==='darwin'?['--use-mock-keychain']:[]),'--no-sandbox','--no-first-run','--no-default-browser-check','--disable-background-networking','--disable-component-update','--disable-sync','--remote-debugging-address=127.0.0.1','--remote-debugging-port=0',`--user-data-dir=${profile}`,'about:blank'],{stdio:['ignore','ignore','pipe']});
   browser.stderr.on('data',chunk=>{errors=(errors+chunk).slice(-4000);});browser.once('error',error=>{launchError=error;});
   const port=await until(()=>{if(launchError)throw launchError;if(browser.exitCode!==null||browser.signalCode!==null)throw Error(`Chrome exited: ${errors}`);try{return readFileSync(path.join(profile,'DevToolsActivePort'),'utf8').split('\n')[0];}catch{return null;}});
   for(const packageRoot of [installed,globalPackage]){const result=await promisify(execFile)(process.execPath,[path.join(source,'scripts/run-browser-only-smoke.mjs'),packageRoot],{env:{...env,OPEN_COMPUTER_USE_CDP_URL:`http://127.0.0.1:${port}`},maxBuffer:8*1024*1024,timeout:60000});assert.equal(result.stderr,'');process.stdout.write(result.stdout);}
+  let executable=path.resolve(chrome);
+  if(process.platform==='linux'){
+   executable=path.join(root,'managed-chrome');write(executable,'#!/bin/sh\nexec '+"'"+path.resolve(chrome).replaceAll("'","'\\''")+"'"+' --no-sandbox "$@"\n',{mode:0o700});
+  }
+  for(const packageRoot of [installed,globalPackage]){
+   const managedEnv={...env,OPEN_COMPUTER_USE_BROWSER_EXECUTABLE:executable};delete managedEnv.OPEN_COMPUTER_USE_CDP_URL;
+   const result=await promisify(execFile)(process.execPath,[path.join(packageRoot,'bin/open-computer-use'),'js','nodeRepl.write(JSON.stringify(await cua.listBrowsers({emit:false})));'],{env:managedEnv,maxBuffer:1024*1024,timeout:60000});
+   assert.match(result.stdout,/"managed":true/);
+  }
+  console.log('PASS local/global npm CLI lazy managed browser startup from source-removed package');
  }else console.log('SKIP live browser: pass a Chromium executable to include it');
  if(artifactOutput){mkdirSync(path.dirname(path.resolve(artifactOutput)),{recursive:true});copyFileSync(tarball,artifactOutput);console.log(`Verified tarball copied to ${path.resolve(artifactOutput)}`);}
 }finally{

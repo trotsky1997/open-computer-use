@@ -630,7 +630,7 @@ Browser history: browser.history({from?,to?,queries?,limit?}) returns the latest
 Browser capabilities: get("management").documentation() describes native window/tab/group/bookmark organization and before-state audit (bundled extension required). await browser.capabilities.list(), then get("viewport") and documentation(). viewport.set({width,height}) applies explicit CSS dimensions for responsive tasks; viewport.reset() returns to normal sizing. The host cleans temporary overrides on reset/timeout/close. Competing sessions fail explicitly. Use existing sizing during normal tasks.
 Screenshots: tab.screenshot({fullPage?,clip?}) returns JPEG bytes with no implicit output; use nodeRepl.emitImage(bytes). getScreenshot returns/emits PNG. clip uses CSS pixels relative to the viewport or full-page area. Pixel input maps cropped viewport images back to CSS; full-page images require a new viewport capture before input. Geometry and viewport-revision changes invalidate capture coordinates.`;
 
-export function createBrowserApi(activeOutput, environment = process.env, {focusLease, downloadRequest, logRequest, dialogRequest, clipboardRequest, viewportRequest, dropRequest, inputRequest, tabRequest, cdpRequest, assetsRequest, evaluateRequest, chromeRequest, contentRequest, webMcpRequest, onDispose = () => {}} = {}) {
+export function createBrowserApi(activeOutput, environment = process.env, {runtimeRequest, focusLease, downloadRequest, logRequest, dialogRequest, clipboardRequest, viewportRequest, dropRequest, inputRequest, tabRequest, cdpRequest, assetsRequest, evaluateRequest, chromeRequest, contentRequest, webMcpRequest, onDispose = () => {}} = {}) {
   const cleanups=[];
   const webMcp=webMcpRequest?undefined:new BrowserWebMcp(()=>endpoint()?.href,openConnection),webMcpOwner={};
   if(webMcp)cleanups.push(()=>webMcp.cleanup(webMcpOwner));
@@ -713,6 +713,13 @@ export function createBrowserApi(activeOutput, environment = process.env, {focus
     if(args.action === "path") return downloads.path(downloadOwner,args.id,args.options);
     throw new Error("Unknown download action");
   });
+  let managed=false;
+  async function bootstrap(){
+    if(!runtimeRequest)return;
+    const state=await runtimeRequest();managed=state?.managed===true;
+    if(state?.endpoint)environment.OPEN_COMPUTER_USE_CDP_URL=state.endpoint;
+    else delete environment.OPEN_COMPUTER_USE_CDP_URL;
+  }
   function endpoint() {
     return browserEndpoint(environment);
   }
@@ -724,6 +731,7 @@ export function createBrowserApi(activeOutput, environment = process.env, {focus
     return response.json();
   }
   async function targets() {
+    await bootstrap();
     await requestDialog({action:"observe"});
     const result = await json("/json/list");
     if (!Array.isArray(result)) throw new Error("Invalid browser target list");
@@ -1018,13 +1026,15 @@ export function createBrowserApi(activeOutput, environment = process.env, {focus
   async function nameSession(name){await requestTab({action:"name",name});activeOutput().write(`Browser session: ${name}`,"cua.browser.session");}
   const api = {
     async listBrowsers(options = {}) {
+      await bootstrap();
       const session=endpoint()?await requestTab({action:"session"}):{};
-      const browsers = endpoint() ? [{ id: "cdp", name: "Configured CDP browser", type: "cdp",...(session.name?{metadata:{sessionName:session.name}}:{}) }] : [];
+      const browsers = endpoint() ? [{ id: "cdp", name: managed?"Managed headless Chromium":"Configured CDP browser", type: "cdp",...((managed||session.name)?{metadata:{...(managed?{managed:true}:{}),...(session.name?{sessionName:session.name}:{})}}:{}) }] : [];
       if (options.emit !== false) activeOutput().write(browsers, "cua.state");
       return browsers;
     },
     async listTabs(options = {}) {
       checkBrowser(options);
+      await bootstrap();
       const tabs = endpoint() ? (await targets()).map(info) : [];
       if (options.emit !== false) activeOutput().write(tabs, "cua.state");
       return tabs;
@@ -1034,6 +1044,7 @@ export function createBrowserApi(activeOutput, environment = process.env, {focus
       for (const key of Object.keys(options)) {
         if (!["id", "url"].includes(key)) throw new Error(`Unsupported browser selector: ${key}`);
       }
+      await bootstrap();
       if (options.url !== undefined && !(await targets()).some(target => target.url === options.url)) {
         throw new Error("No configured browser contains that URL");
       }
@@ -1080,6 +1091,8 @@ export function createBrowserApi(activeOutput, environment = process.env, {focus
       if (options.visible !== undefined && typeof options.visible !== "boolean") throw new Error("visible must be a boolean");
       const parsed = new URL(url);
       if (!["http:", "https:", "about:"].includes(parsed.protocol)) throw new Error("Unsupported navigation URL protocol");
+      await bootstrap();
+      if(managed&&options.visible===true)throw new Error("Managed headless browsers cannot create visible tabs");
       if(options.sessionName!==undefined)await nameSession(options.sessionName);
       const result=await requestTab({action:"create",visible:options.visible});
       try {

@@ -3,7 +3,10 @@
 The REPL can connect to one explicitly configured Chromium debugging origin.
 Set `OPEN_COMPUTER_USE_CDP_URL=http://127.0.0.1:9222` in the agent process that
 starts the REPL. Node.js 22 or newer is required for the built-in WebSocket client.
-The harness never enables debugging or scans browser profiles by itself.
+For [opt-in managed headless startup](managed-browser.md), set the absolute
+OPEN_COMPUTER_USE_BROWSER_EXECUTABLE path. That mode creates its own temporary
+profile and enables a private loopback debugging endpoint. Existing profiles are
+never scanned.
 See [viewport and screenshots](browser-viewport.md) for browser capability discovery,
 explicit responsive sizing, JPEG/full-page/cropped captures and coordinate rules.
 Use a dedicated browser profile: the debugging endpoint controls that profile's
