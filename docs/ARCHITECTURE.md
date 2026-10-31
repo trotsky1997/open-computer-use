@@ -226,7 +226,8 @@ the browser; IPC disconnect handles host death. See [managed startup](managed-br
 for identity checks, cleanup and remaining limits. Discovery, tab binding and lifecycle, AX
 observation and PNG screenshots use Node's built-in fetch/WebSocket support.
 `getState` reports app and browser inventory failures independently. Element-targeted browser input validates the observed document and node identity;
-clicks check visibility and occlusion. Browser AX rendering retains native IDs,
+clicks check visibility and occlusion. Browser AX rendering uses binding-local
+indices carrying exact native frame/document/node identity,
 accessible hierarchy, descriptions and semantic state. Ignored ancestors are
 flattened and attachment-local InlineTextBox duplicates are omitted. The shared
 accessibility-state module supplies the existing compact line-diff algorithm to
@@ -234,8 +235,18 @@ native and browser observations; returned text stays full. Browser baselines
 advance only for emitted observations and reset for screenshots, document/URL
 changes and failed page reads/Playwright operations. Initial binding reads stay silent until their
 original call can emit the completed tree; a dialog-yielded read never writes
-output into a later JS call. Top-level native AX remains
-the current scope; child frames use Playwright frame locators and snapshots.
+output into a later JS call. browser-frames discovers owned native descendants
+with parent/owner proof, including OOP targets missing from root frame trees.
+Frame AX trees join under native iframe owners; monotonic indices are stable for
+live frame/loader/AX identities and never alias a different node in that binding.
+Captured ancestry is revalidated before native input and after isolated-world
+node resolution. Editing, focus, selection and scrolling use the owning agent;
+indexed pointer points cross affine OOP boundaries and verify native/frame-local
+hits. Root and remote widget rendering barriers precede presses. The same frame
+flattening/hit-test code serves drops, preserving integer drop routing while
+indexed pointer checks retain subpixel precision. Unsupported transforms fail
+explicitly. Broader dynamic/frame/provider races and atomic final dispatch remain
+open; Playwright frame locators and snapshots remain available.
 Browser locators and screenshot coordinate input have dedicated paths; full
 extension/in-app transports remain open. See [CDP browser](browser-cdp.md)
 for the supported contract, packaging and repeatable real-browser validation.

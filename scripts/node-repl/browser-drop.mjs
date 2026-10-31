@@ -1,3 +1,4 @@
+import {flattenFrameTree,hitBrowserFrame} from './browser-frames.mjs';
 import {isAbsolute} from "node:path";
 import {stat} from "node:fs/promises";
 
@@ -20,11 +21,6 @@ export function validateDrop(payload, options = {}) {
   if (options.timeoutMs !== undefined && (!Number.isFinite(options.timeoutMs) || options.timeoutMs < 0)) throw new Error("drop timeoutMs must be non-negative");
   if (options.position !== undefined && (!options.position || typeof options.position !== "object" || Object.keys(options.position).some(key=>!["x","y"].includes(key)) || ![options.position.x,options.position.y].every(value=>Number.isFinite(value) && value >= 0))) throw new Error("Invalid drop position");
   return {items:entries.map(([mimeType,data])=>({mimeType,data})),files:[...files],dragOperationsMask:1};
-}
-
-export function dropFrames(tree, parentId) {
-  const frame = tree.frame;
-  return [{id:frame.id,parentId:frame.parentId ?? parentId,loaderId:frame.loaderId,url:frame.url+(frame.urlFragment ?? "")},...(tree.childFrames ?? []).flatMap(child=>dropFrames(child,frame.id))];
 }
 
 export class BrowserDrops {
@@ -80,7 +76,7 @@ export class BrowserDrops {
       if (lease.canceled) throw new Error("Native drop canceled");
       if (["dragEnter","dragOver","drop"][lease.stage] !== args.type) throw new Error("Invalid native drop stage order");
       const send = lease.connection.send;
-      const frames = dropFrames((await send("Page.getFrameTree")).frameTree);
+      const frames = flattenFrameTree((await send("Page.getFrameTree")).frameTree);
       const agents=new Map([[frames[0].id,undefined]]);
       const documents=new Map(frames.map(frame=>[frame.id,undefined]));
       for(const item of args.frameTargets ?? []) {
@@ -91,7 +87,7 @@ export class BrowserDrops {
           lease.sessions.set(item.targetId,sessionId);
         }
         const sessionId=lease.sessions.get(item.targetId);
-        const tree=dropFrames((await send("Page.getFrameTree",{},10_000,sessionId)).frameTree);
+        const tree=flattenFrameTree((await send("Page.getFrameTree",{},10_000,sessionId)).frameTree);
         if(tree[0].id!==item.frameId) throw new Error("Native drop frame target changed");
         agents.set(item.frameId,sessionId);
         for(const frame of tree) {
@@ -109,9 +105,9 @@ export class BrowserDrops {
       const path = [];
       for (let item=frame;item;item=frames.find(frame=>frame.id===item.parentId)) path.unshift(item.url);
       if (!frame || frame.id!==args.frameId || !snapshot || frame.loaderId !== snapshot.loaderId || JSON.stringify(path) !== JSON.stringify(args.framePath) || lease.document && (lease.document.id !== frame.id || lease.document.loaderId !== frame.loaderId)) throw new Error("Native drop hit a different frame or document");
-      const latestMain=dropFrames((await send("Page.getFrameTree")).frameTree);
+      const latestMain=flattenFrameTree((await send("Page.getFrameTree")).frameTree);
       const frameSession=documents.get(frame.id);
-      const latestFrame=(frameSession ? dropFrames((await send("Page.getFrameTree",{},10_000,frameSession)).frameTree) : latestMain).find(item=>item.id===frame.id);
+      const latestFrame=(frameSession ? flattenFrameTree((await send("Page.getFrameTree",{},10_000,frameSession)).frameTree) : latestMain).find(item=>item.id===frame.id);
       const latestViewport=(await send("Page.getLayoutMetrics")).cssVisualViewport;
       if(latestMain[0].loaderId!==lease.mainLoader || latestFrame?.loaderId!==frame.loaderId || JSON.stringify(latestViewport)!==JSON.stringify(viewport) || await this.revision()!==args.geometry.revision) throw new Error("Native drop document or viewport changed during hit testing");
       if (lease.canceled) throw new Error("Native drop canceled");
@@ -125,29 +121,8 @@ export class BrowserDrops {
     try {return await pending;}
     finally {if (lease.pending === pending) lease.pending=undefined;}
   }
-  async hitFrame(send,agents,point) {
-    let sessionId;
-    const visited=new Set();
-    for(let depth=0;depth<32;depth++) {
-      const scroll=(await send("Page.getLayoutMetrics",{},10_000,sessionId)).cssLayoutViewport;
-      const hit=await send("DOM.getNodeForLocation",{x:Math.floor(point.x+scroll.pageX),y:Math.floor(point.y+scroll.pageY),includeUserAgentShadowDOM:true},10_000,sessionId);
-      const {node}=await send("DOM.describeNode",{backendNodeId:hit.backendNodeId},10_000,sessionId);
-      if(!["IFRAME","FRAME"].includes(node.nodeName) || !node.frameId || node.frameId===hit.frameId) return hit.frameId;
-      const child=agents.get(node.frameId);
-      if(!child || visited.has(child)) throw new Error("Native drop hit an unbound child frame");
-      visited.add(child);
-      const {model}=await send("DOM.getBoxModel",{backendNodeId:hit.backendNodeId},10_000,sessionId);
-      const viewport=(await send("Page.getLayoutMetrics",{},10_000,child)).cssLayoutViewport;
-      const q=model.content, ax=q[2]-q[0],ay=q[3]-q[1],bx=q[6]-q[0],by=q[7]-q[1];
-      const determinant=ax*by-ay*bx;
-      if(!determinant || Math.abs(q[4]-(q[2]+q[6]-q[0]))>.25 || Math.abs(q[5]-(q[3]+q[7]-q[1]))>.25) throw new Error("Native drop frame transform unsupported");
-      const px=point.x-q[0],py=point.y-q[1],u=(px*by-py*bx)/determinant,v=(ax*py-ay*px)/determinant;
-      if(u<0 || u>=1 || v<0 || v>=1) throw new Error("Native drop point outside frame content");
-      point={x:Math.floor(u*viewport.clientWidth),y:Math.floor(v*viewport.clientHeight)};
-      sessionId=child;
-    }
-    throw new Error("Native drop frame nesting exceeds 32");
-  }
+  async hitFrame(send,agents,point) {return (await hitBrowserFrame(send,agents,point,10000,true)).frameId;}
+
   finish(lease) {
     lease.canceled = true;
     if (lease.finishing) return lease.finishing;

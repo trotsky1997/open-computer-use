@@ -135,6 +135,12 @@ if(process.argv[2]==='codex-plugin-config') { (await import('node:fs')).chmodSyn
   await new Promise((resolve,reject)=>{ax.once('error',reject);ax.once('exit',code=>code===0?resolve():reject(Error(axOutput)));});
   for(const line of axOutput.split('\n').filter(line=>line.includes('PASS')))console.log(line);
   console.log('PASS installed browser AX semantics and diffs after source checkout removal');
+  const frames=spawn(process.execPath,[path.join(source,'scripts/run-frame-ax-smoke.mjs'),installed],{env:{...env,OCU_TEST_CHROME_EXECUTABLE:path.resolve(chrome)},stdio:['ignore','pipe','pipe']});let frameOutput='';
+  frames.stdout.on('data',chunk=>{frameOutput+=chunk;});frames.stderr.on('data',chunk=>{frameOutput+=chunk;});
+  await new Promise((resolve,reject)=>{frames.once('error',reject);frames.once('exit',code=>code===0?resolve():reject(Error(frameOutput)));});
+  for(const line of frameOutput.split('\n').filter(line=>line.includes('PASS')))console.log(line);
+  console.log('PASS installed frame-bound AX and native input after source checkout removal');
+
 
 
 

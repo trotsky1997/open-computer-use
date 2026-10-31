@@ -3107,3 +3107,46 @@ hosts, native tab coordination, deadline suites and isolated headful visibility,
 clipboard/GTK interop, private-profile recovery and shutdown. This broad run
 preceded the final initial-output correction; exact final modules are verified
 separately through fresh source-relocated installs and early-dialog regressions.
+
+
+## Native iframe AX and indexed input
+
+Native observation now joins accessible same/cross-origin iframe trees under
+native owners. Root frame trees omit OOP targets, so discovery combines them
+with child targets after native parent/owner proof. Frame inventories recheck
+around capture and retry only transient changes. Binding-local monotonic indices
+retain frame, loader/URL ancestry and exact AX/backend node identity; renderer-
+local collisions and reused AX IDs cannot alias another actionable node. Hidden
+frame owners exclude their descendants. Document roots include frame URLs.
+
+Indexed click, text/key/paste, editing/selection and region/document scroll use
+exact native frame agents. Isolated worlds bind nodes to their observed document
+and validate ancestry again after resolution. Child focus uses the bound object.
+Pointer checks map affine OOP content quads with subpixel precision, verify native
+and exact frame-local hits, and refuse covered or changed targets before each
+press. Root/remote widget rendering barriers handle compositor routing after
+scroll/transform changes. Native drop uses the shared frame flattening/hit-test
+module while preserving its integer child-coordinate policy. Input cancellation
+and release retain the existing host lease and root connection lifetime.
+
+Both JS hosts pass owned Chrome 158 source/current-runtime installed controllers
+after source relocation on macOS/Linux: same/cross-origin/nested/return-process
+frames, native trusted receivers, field/sibling isolation, editing/selection,
+region/document scroll, modal resume, affine transforms, root occlusion, hover
+identity changes, actual child-key receipt followed by reset/release, same-name
+reload/detach refusal, process-swap rebinding and duplicate/hidden-frame isolation.
+The native Linux probe required render readiness beyond DOM geometry, and the
+subpixel unit case distinguishes native pointer from legacy integer drop routing.
+Node: 216/216 macOS, 215/216 Linux with one platform-only skip. Existing browser,
+AX output/initial-dialog and mixed-MIME/native frame drop regressions pass.
+Installer, CLI fixtures and both npm runtime copies include browser-frames.
+
+Broader dynamic/provider/crash/shadow/IME cases, arbitrary perspective and mixed
+DPI/zoom, atomic dispatch after final validation, browser secondary AX actions,
+physical desktop and Windows remain open. No new dependency, release or CI work.
+
+Final frozen-code Linux browser-only installation passes the complete
+source-relocated pipeline, including both hosts, frame-native controller,
+standalone/managed MCP, isolated headful visibility, text/HTML/PNG clipboard and
+GTK interop, private-profile recovery and shutdown. Seven production modules
+match both built npm runtime copies. No physical desktop or Windows claim.

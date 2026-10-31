@@ -1,5 +1,6 @@
 import {validateEvaluation,validateLocatorPath,validateTimeoutOptions} from "./browser-evaluate-dom.mjs";
-import {validateDrop, dropFrames} from "./browser-drop.mjs";
+import {validateDrop} from "./browser-drop.mjs";
+import {flattenFrameTree} from "./browser-frames.mjs";
 import { isAbsolute } from "node:path";
 
 export const PLAYWRIGHT_VERSION = "1.64.1";
@@ -292,7 +293,7 @@ async function nativeDropPoint(locator,page,session,options,request) {
     await handle.hover({trial:true,timeout:0,signal:options.signal,position:{x:point.x-box.x-border.x,y:point.y-box.y-border.y}});
     const after = await handle.boundingBox();
     if (!after || ["x","y","width","height"].some(key=>Math.abs(after[key]-box[key])>.25)) throw new Error("Drop target moved; resolve again");
-    const frames = dropFrames((await session.send("Page.getFrameTree")).frameTree);
+    const frames = flattenFrameTree((await session.send("Page.getFrameTree")).frameTree);
     const frameTargets=[];
     const nativeIds=new Map([[page.mainFrame(),frames[0].id]]);
     const frameSessions=new Map([[page.mainFrame(),session]]);
@@ -304,7 +305,7 @@ async function nativeDropPoint(locator,page,session,options,request) {
         continue;
       }
       childSessions.push(child);
-      const tree=dropFrames((await child.send("Page.getFrameTree")).frameTree);
+      const tree=flattenFrameTree((await child.send("Page.getFrameTree")).frameTree);
       const {targetInfo}=await child.send("Target.getTargetInfo");
       nativeIds.set(current,tree[0].id);
       frameSessions.set(current,child);

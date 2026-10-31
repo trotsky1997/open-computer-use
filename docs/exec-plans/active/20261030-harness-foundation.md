@@ -2435,3 +2435,38 @@ and source-relocated installed controllers include that deterministic probe.
 The full Linux installed headful/MCP pipeline passed before this final boundary
 correction; current-module equality and native early-dialog checks cover the
 correction without repeating unrelated long deadline suites.
+
+## Native iframe AX and input
+
+Implemented native child-frame capture and input routing. Root frame trees and
+native iframe targets combine only after parent/owner proof. Joined AX trees use
+binding-local monotonic indices keyed by frame/loader/AX/backend identity; frame
+URLs and accessible hierarchy remain visible. Hidden owners exclude descendant
+indices. Complete frame inventories recheck around each capture, with bounded
+retry only for transient observation changes.
+
+Indexed click, text/key/paste, editing/selection and region/document scrolling
+route through exact native agents and isolated frame worlds. Document/URL/ancestor
+changes refuse old indices; fresh bindings recover across process swaps. Pointer
+preparation preserves subpixels, maps affine OOP boundaries and checks native and
+frame-local hits; each remote widget and the root pass rendering barriers before
+presses. Drops reuse the same frame flattening/hit tests with their existing
+integer-routing semantics. Node unit coverage includes foreign-frame admission,
+AX/backend collisions, stable indices and affine/subpixel boundaries.
+
+Owned Chrome 158 source/current-runtime source-relocated installations cover both
+hosts on macOS/Linux: same/cross-origin nested and return-process frames, trusted
+receiver click/text/key/paste events, editing/selection, region/document scrolling,
+modal resume, duplicate/hidden frames, same-name reload/detach refusal, process
+swap, pristine realms, affine transforms, occlusion/hover refusal and admitted
+child-key reset/release. Node: 216/216 macOS; 215/216 Linux with one platform-only
+skip. Existing browser/AX-output/drop regressions and both package runtime copies
+are checked. Browser secondary AX actions, broader dynamic/provider/crash/IME and
+shadow cases, arbitrary perspective/mixed-DPI geometry, final atomic dispatch,
+physical desktop and Windows proof remain open; full harness parity stays active.
+
+Final frozen-code Linux browser-only installation passes the complete
+source-relocated pipeline, including both hosts, frame-native controller,
+standalone/managed MCP, isolated headful visibility, text/HTML/PNG clipboard and
+GTK interop, private-profile recovery and shutdown. Seven production modules
+match both built npm runtime copies. No physical desktop or Windows claim.

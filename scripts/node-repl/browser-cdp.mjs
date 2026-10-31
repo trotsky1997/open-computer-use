@@ -1,3 +1,4 @@
+import {FrameConnections,readFrameAX} from './browser-frames.mjs';
 import {accessibilityStateDiff,browserAccessibilityState} from './accessibility-state.mjs';
 import {AsyncLocalStorage} from 'node:async_hooks';
 import {BrowserWebMcp,WEBMCP_DOCUMENTATION,webMcpInput,webMcpDescription} from './browser-webmcp.mjs';
@@ -722,7 +723,7 @@ Use cua.listTabs(), cua.getTab(id or {url}), and cua.createBrowserTab("cdp", url
 Tab bindings expose getAXState(), getScreenshot(), getAXStateAndScreenshot(), screenshot(),
 title(), url(), goto(url,{timeoutMs?}), back({timeoutMs?}), forward({timeoutMs?}), reload({timeoutMs?}), close(), markDeliverable() and markHandoff(). Raw navigation commands use a host-owned native connection and default 10s active-time budget, paused across known owned dialogs. timeoutMs:0 disables the command deadline while reset/close/turn timeout still cancels. Cancellation waits for stopLoading, the original receipt and a renderer barrier; failed cleanup keeps ownership and stops reuse until reset retries or the original browser exit is confirmed. Native errorText is reported even after a dialog response. A dismissed beforeunload cancels navigation. Command acknowledgement does not wait for page load; inspect state or use navigation waits.
 Created tabs/popups are ephemeral at turn end unless marked. Latest mark wins; both marks clear when the next turn begins, so mark again as needed. User tabs stay open. js_reset retains tab ownership. Session close keeps marked survivors. Observations emit by default;
-pass {emit:false} to suppress output. AX state uses browser accessibility node IDs and exposes semantic properties, descriptions and hierarchy. Emitted observations use compact diffs when smaller, or report unchanged state. Pass {disableDiffing:true} for full output; return values always contain the full current tree. Unseen reads do not advance the diff baseline. Screenshots, navigation and failed browser operations clear it. Native iframe AX/input routing remains open; use documented frame locators.
+pass {emit:false} to suppress output. AX state uses binding-local numeric indices backed by exact native frame/document/node identity and exposes semantic properties, descriptions and hierarchy. Nested same/cross-origin iframe trees are joined under their native owners. Use indices from this binding and re-read state after changes. Emitted observations use compact diffs when smaller, or report unchanged state. Pass {disableDiffing:true} for full output; return values always contain the full current tree. Unseen reads do not advance the diff baseline. Screenshots, navigation and failed browser operations clear it. Indexed input supports nested frames and rejects stale frame documents, covered points and unsupported frame transforms.
 Tab input: click(elementIndex, {mouseButton?, clickCount?, key?, durationMs?}), typeText(elementIndexOrNull, text),
 pressKey(elementIndexOrNull, key, {durationMs?}), paste(elementIndexOrNull, text, {format:"text"|"html"}),
 and scroll(elementIndex, direction, pages). Read fresh AX state after actions.
@@ -882,6 +883,7 @@ export function createBrowserApi(activeOutput, environment = process.env, {runti
   const initialAX=new WeakMap();
   function bind(target) {
     let elements = new Map(), documentId, capture, previousObservation;
+    const axIndices={next:0,ids:new Map()};
     const invalidate = error => { elements.clear(); documentId = undefined; capture = undefined;if(error)previousObservation=undefined; };
     const ready = async () => {
       const current = (await targets()).find(item => item.id === target.id);
@@ -911,8 +913,8 @@ export function createBrowserApi(activeOutput, environment = process.env, {runti
         const observedLoaderId=documentId;
         let elementTarget;
         if(index!==null) {
-          const backendNodeId=await element(send,index),node=elements.get(String(index));
-          elementTarget={backendNodeId,role:node.role?.value,name:node.name?.value};
+          const node=await element(send,index);
+          elementTarget={backendNodeId:node.backendDOMNodeId,role:node.role?.value,name:node.name?.value,...(node.framePath.length>1?{framePath:node.framePath}:{})};
         }
         const current=await geometry(send);
         if(elementTarget && current.loaderId!==observedLoaderId)throw new Error("Page navigated; read AX state again");
@@ -935,15 +937,11 @@ export function createBrowserApi(activeOutput, environment = process.env, {runti
       if(!options || typeof options!=="object" || Array.isArray(options) || Object.keys(options).some(key=>!["emit","disableDiffing"].includes(key)))throw new Error("Invalid AX observation options");
       for(const key of ["emit","disableDiffing"])if(options[key]!==undefined && typeof options[key]!=="boolean")throw new Error(`${key} must be a boolean`);
       const result = await operate(async send => {
-        const before = (await send("Page.getFrameTree")).frameTree.frame;
-        const tree = await send("Accessibility.getFullAXTree");
-        const after = (await send("Page.getFrameTree")).frameTree.frame;
-        if (before.loaderId !== after.loaderId || before.url !== after.url || before.urlFragment !== after.urlFragment) throw new Error("Page changed during AX observation; read state again");
-        documentId = after.loaderId;
-        elements = new Map(tree.nodes.filter(node => !node.ignored && node.backendDOMNodeId).map(node => [String(node.nodeId), node]));
-        return {...tree,documentURL:after.url+(after.urlFragment??"")};
+        const snapshot=await readFrameAX(send,axIndices);
+        documentId=snapshot.frames[0].loaderId;elements=snapshot.elements;
+        return snapshot;
       });
-      const signature=JSON.stringify([documentId,result.documentURL]);
+      const signature=JSON.stringify(result.frames);
       const state=browserAccessibilityState(result.nodes);
       if(initialAX.has(tab))initialAX.set(tab,()=>{activeOutput().write(state,"cua.state");previousObservation={text:state,signature};});
       if(options.emit!==false){
@@ -970,26 +968,23 @@ export function createBrowserApi(activeOutput, environment = process.env, {runti
       if (options.emit ?? emit) await activeOutput().emitImage({ bytes, mimeType: `image/${format}` });
       return bytes;
     }
-    async function element(send, index) {
-      const saved = elements.get(String(index));
-      if (!saved || !documentId) throw new Error("Unknown or stale element index; read AX state again");
-      const frame = (await send("Page.getFrameTree")).frameTree.frame;
-      if (frame.loaderId !== documentId) throw new Error("Page navigated; read AX state again");
-      const current = await send("Accessibility.getPartialAXTree", { backendNodeId: saved.backendDOMNodeId, fetchRelatives: false });
-      const node = current.nodes.find(item => item.backendDOMNodeId === saved.backendDOMNodeId && !item.ignored);
-      if (!node || node.role?.value !== saved.role?.value || node.name?.value !== saved.name?.value) throw new Error("Element changed; read AX state again");
-      return saved.backendDOMNodeId;
+    async function element(send,index) {
+      const saved=elements.get(String(index));
+      if(!saved||!documentId)throw Error("Unknown or stale element index; read AX state again");
+      const frames=new FrameConnections(send);await frames.refresh();const scoped=frames.match(saved.framePath);
+      const current=await scoped("Accessibility.getPartialAXTree",{backendNodeId:saved.backendDOMNodeId,fetchRelatives:false});
+      const node=current.nodes.find(node=>node.backendDOMNodeId===saved.backendDOMNodeId&&!node.ignored);
+      if(!node||node.role?.value!==saved.role?.value||node.name?.value!==saved.name?.value)throw Error("Element changed; read AX state again");
+      await frames.withElement(saved.framePath,saved.backendDOMNodeId,async()=>{});
+      return {...saved,frames};
     }
-    async function focus(send, index) {
-      if (index !== null) await send("DOM.focus", { backendNodeId: await element(send, index) });
-    }
-    async function edit(index, operation, text, options = {}) {
-      await input(async send => {
-        const backendNodeId = await element(send, index);
-        const {object} = await send("DOM.resolveNode", {backendNodeId});
-        const result = await send("Runtime.callFunctionOn", {objectId:object.objectId,
-          functionDeclaration:editText.toString(), arguments:[{value:operation},{value:text},{value:options}]});
-        if (result.exceptionDetails) throw new Error(result.exceptionDetails.exception?.description ?? result.exceptionDetails.text ?? "Text operation failed");
+    async function edit(index,operation,text,options={}) {
+      await input(async send=>{
+        const node=await element(send,index);
+        await node.frames.withElement(node.framePath,node.backendDOMNodeId,async(scoped,objectId)=>{
+          const result=await scoped("Runtime.callFunctionOn",{objectId,functionDeclaration:editText.toString(),arguments:[{value:operation},{value:text},{value:options}]});
+          if(result.exceptionDetails)throw Error(result.exceptionDetails.exception?.description??result.exceptionDetails.text??"Text operation failed");
+        });
       });
     }
     const tab=Object.freeze({
@@ -1055,7 +1050,7 @@ export function createBrowserApi(activeOutput, environment = process.env, {runti
           if(!position) {
             const node=elements.get(String(index));
             if(!node || !documentId)throw new Error("Unknown or stale element index; read AX state again");
-            elementTarget={backendNodeId:node.backendDOMNodeId,role:node.role?.value,name:node.name?.value};
+            elementTarget={backendNodeId:node.backendDOMNodeId,role:node.role?.value,name:node.name?.value,...(node.framePath.length>1?{framePath:node.framePath}:{})};
           }
           const current=await geometry(send);
           if(elementTarget && current.loaderId!==observedLoaderId)throw new Error("Page navigated; read AX state again");
@@ -1105,10 +1100,15 @@ export function createBrowserApi(activeOutput, environment = process.env, {runti
             const position = await coordinate(send, index);
             const hit = await send("DOM.getNodeForLocation", {x:Math.floor(position.x), y:Math.floor(position.y)});
             backendNodeId = hit.backendNodeId;
-          } else backendNodeId = await element(send, index);
-          const {object} = await send("DOM.resolveNode", {backendNodeId});
-          const [x,y] = vectors[direction];
-          const result = await send("Runtime.callFunctionOn", {objectId:object.objectId, arguments:[{value:x},{value:y},{value:pages}],
+          } else {
+            const node=await element(send,index);
+            return node.frames.withElement(node.framePath,node.backendDOMNodeId,(scoped,objectId)=>scrollElement(scoped,objectId));
+          }
+          const {object}=await send("DOM.resolveNode",{backendNodeId});
+          try{return await scrollElement(send,object.objectId);}finally{await send("Runtime.releaseObject",{objectId:object.objectId});}
+          async function scrollElement(send,objectId){
+          const [x,y]=vectors[direction];
+          const result = await send("Runtime.callFunctionOn", {objectId, arguments:[{value:x},{value:y},{value:pages}],
             functionDeclaration:`function(x,y,pages) {
               const document = this.nodeType === 9 ? this : this.ownerDocument;
               let target = this.nodeType === 1 ? this : this.parentElement;
@@ -1123,6 +1123,7 @@ export function createBrowserApi(activeOutput, environment = process.env, {runti
               target.scrollBy({left:x*target.clientWidth*pages,top:y*target.clientHeight*pages,behavior:"instant"});
             }`});
           if (result.exceptionDetails) throw new Error("Scroll target unavailable; read state again");
+          }
         });
       },
       async goto(url,options={}) {

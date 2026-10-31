@@ -1,3 +1,4 @@
+import {FrameConnections} from './browser-frames.mjs';
 import {setTimeout as delay} from "node:timers/promises";
 
 export const browserPointerLeases=new Map();
@@ -93,6 +94,7 @@ export class BrowserInputs {
     await this.idle(record);
     const send=record.connection.send;
     const loaderId=(await send("Page.getFrameTree",{},0)).frameTree.frame.loaderId;
+    if(record.framePath){await record.frames.refresh();record.frames.match(record.framePath);this.check(record);}
     if(record.keyboard) {
       this.check(record);
       if(loaderId!==record.geometry?.loaderId) throw new Error("Browser input document changed");
@@ -110,10 +112,12 @@ export class BrowserInputs {
   }
   async elementNode(record,element) {
     await this.guard(record);
-    const current=await record.connection.send("Accessibility.getPartialAXTree",{backendNodeId:element.backendNodeId,fetchRelatives:false},0);
+    const send=record.framePath?record.frames.match(record.framePath):record.connection.send;
+    const current=await send("Accessibility.getPartialAXTree",{backendNodeId:element.backendNodeId,fetchRelatives:false},0);
     this.check(record);
     const node=current.nodes.find(node=>node.backendDOMNodeId===element.backendNodeId && !node.ignored);
     if(!node || node.role?.value!==element.role || node.name?.value!==element.name)throw new Error("Element changed; read AX state again");
+    if(record.framePath)await record.frames.withElement(record.framePath,element.backendNodeId,async()=>{});
     return node;
   }
   async focusedElement(record,element) {
@@ -122,6 +126,7 @@ export class BrowserInputs {
     // shortcut: focus can change after this check; strict binding needs a browser-side atomic target dispatch.
   }
   async elementPoint(record,element,position) {
+    if(record.framePath)return this.frameElementPoint(record,element,position);
     const send=async(method,params={})=>{this.check(record);const result=await record.connection.send(method,params,0);this.check(record);return result;};
     await this.elementNode(record,element);
     await this.guard(record);
@@ -153,6 +158,37 @@ export class BrowserInputs {
       return {x,y};
     } finally {await send("Runtime.releaseObject",{objectId:object.objectId});}
   }
+  async frameElementPoint(record,element,position) {
+    await this.elementNode(record,element);
+    const send=record.connection.send,scoped=record.frames.match(record.framePath),frameId=record.framePath.at(-1).id;
+    if(!position){
+      await scoped("DOM.scrollIntoViewIfNeeded",{backendNodeId:element.backendNodeId});
+      await record.frames.rendered(frameId);this.check(record);
+      const loaderId=(await send("Page.getFrameTree",{},0)).frameTree.frame.loaderId,metrics=await send("Page.getLayoutMetrics",{},0),viewportRevision=await this.revision();this.check(record);
+      if(loaderId!==record.geometry.loaderId||viewportRevision!==record.geometry.viewportRevision||!['clientWidth','clientHeight','scale','zoom','offsetX','offsetY'].every(key=>metrics.cssVisualViewport[key]===record.geometry.viewport[key]))throw Error("Browser pointer document or viewport changed during preparation");
+      record.geometry={loaderId,viewport:metrics.cssVisualViewport,contentSize:metrics.cssContentSize,viewportRevision};
+      await record.frames.refresh();record.frames.match(record.framePath);
+      const {model}=await scoped("DOM.getBoxModel",{backendNodeId:element.backendNodeId}),points=[];
+      for(let i=0;i<8;i+=2)points.push(await record.frames.pointToRoot(frameId,{x:model.border[i],y:model.border[i+1]}));
+      const left=Math.max(0,Math.min(...points.map(p=>p.x))),right=Math.min(record.geometry.viewport.clientWidth,Math.max(...points.map(p=>p.x))),top=Math.max(0,Math.min(...points.map(p=>p.y))),bottom=Math.min(record.geometry.viewport.clientHeight,Math.max(...points.map(p=>p.y)));
+      if(right<=left||bottom<=top)throw Error("Element is covered or not visible");position={x:(left+right)/2,y:(top+bottom)/2};
+    }else{await record.frames.rendered(frameId);this.check(record);}
+    await this.guard(record);
+    const hit=await record.frames.hit(position);
+    if(hit.frameId!==frameId)throw Error("Element is covered or hit a different frame; read AX state again");
+    await record.frames.withElement(record.framePath,element.backendNodeId,async(send,objectId,executionContextId)=>{
+      const {object}=await send("DOM.resolveNode",{backendNodeId:hit.backendNodeId,executionContextId}),local=await record.frames.pointInFrame(frameId,hit.point,executionContextId);
+      try{
+        const result=await send("Runtime.callFunctionOn",{objectId,arguments:[{objectId:object.objectId},{value:local}],returnByValue:true,functionDeclaration:`function(hit,point){
+          if(!this.isConnected||this.ownerDocument!==document)return false;
+          const contains=node=>{for(;node;node=node.getRootNode().host){if(this===node||this.contains(node))return true;}return false;};
+          return contains(hit)&&contains(this.getRootNode().elementFromPoint(point.x,point.y));
+        }`});
+        if(result.exceptionDetails||result.result.value!==true)throw Error("Element is covered or not visible; read AX state again");
+      }finally{await send("Runtime.releaseObject",{objectId:object.objectId});}
+    });
+    this.check(record);return position;
+  }
   click(owner,args) {return this.perform(owner,args,validateClick(args.options));}
   pressKey(owner,args) {return this.perform(owner,args,validatePressKey(args.key,args.options),true);}
   paste(owner,args,prepare) {
@@ -174,6 +210,7 @@ export class BrowserInputs {
     if(active.has(endpoint)) throw new Error("A native input action already owns this browser");
     const {x,y}=args.position ?? {},viewport=args.geometry?.viewport;
     if(args.element!==undefined && (args.action==='drag' || args.position!==undefined || args.backendNodeId!==undefined || !args.geometry?.loaderId || !Number.isInteger(args.element?.backendNodeId) || args.element.backendNodeId<=0 || !['role','name'].every(key=>args.element[key]===undefined || typeof args.element[key]==='string')))throw new Error("Invalid browser element target");
+    if(args.element?.framePath!==undefined && (!Array.isArray(args.element.framePath)||args.element.framePath.length<2||args.element.framePath.some(frame=>!frame||!['id','loaderId','url'].every(key=>typeof frame[key]==='string'&&frame[key]))))throw Error("Invalid browser frame target");
     if(!keyboard && args.element===undefined && (![x,y].every(Number.isFinite) || x<0 || y<0 || x>=viewport?.clientWidth || y>=viewport?.clientHeight || !viewport)) throw new Error("Invalid browser input position");
     if(args.action==='drag' && (![args.end?.x,args.end?.y].every(Number.isFinite) || args.end.x<0 || args.end.y<0 || args.end.x>=viewport.clientWidth || args.end.y>=viewport.clientHeight)) throw new Error("Invalid browser drag destination");
     if(keyboard && (!args.geometry?.loaderId || args.backendNodeId!==undefined)) throw new Error("Invalid browser key target");
@@ -191,13 +228,18 @@ export class BrowserInputs {
       this.check(record);
       record.connection=await this.open(target.webSocketDebuggerUrl);this.check(record);
       const send=record.connection.send;
+      if(args.element?.framePath){record.framePath=args.element.framePath;record.frames=new FrameConnections(send,0);}
       if(!this.focus) {record.emulated=true;await send("Emulation.setFocusEmulationEnabled",{enabled:true});}
       if(args.element!==undefined) {
         if(keyboard)await this.elementNode(record,args.element);
         else record.position=await this.elementPoint(record,args.element);
       }
       const backendNodeId=args.element?.backendNodeId;
-      if(keyboard && backendNodeId!==undefined) {await this.guard(record);await send("DOM.focus",{backendNodeId},0);}
+      if(keyboard && backendNodeId!==undefined) {
+        await this.guard(record);
+        if(record.framePath)await record.frames.withElement(record.framePath,backendNodeId,(send,objectId)=>send("DOM.focus",{objectId}));
+        else await send("DOM.focus",{backendNodeId},0);
+      }
       if(prepare) {
         if(args.element!==undefined)await this.focusedElement(record,args.element);
         await this.guard(record);

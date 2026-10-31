@@ -24,6 +24,7 @@ export function browserAccessibilityState(nodes) {
       const visible=!node.ignored && node.role?.value!=='InlineTextBox';
       if (visible) {
         const attributes = [];
+        if (node.frameURL) attributes.push(`frame=${JSON.stringify(node.frameURL)}`);
         if (node.value) attributes.push(`value=${JSON.stringify(node.value.value)}`);
         if (node.description?.value) attributes.push(`description=${JSON.stringify(node.description.value)}`);
         for (const {name, value} of node.properties ?? []) {

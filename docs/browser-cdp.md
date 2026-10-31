@@ -32,12 +32,14 @@ AX state. URL matching is exact and ambiguous matches fail explicitly. Tabs expo
 `id`, `providerTabId`, `browserId`, `title` and `url`; metadata describes the binding
 at creation time. Refresh the tab inventory to obtain current titles and URLs.
 Observation methods support `{emit:false}` and return full state / PNG bytes.
-Browser AX node IDs are supplied by Chromium. Output preserves accessible
+Browser AX indices are numeric and local to the tab binding. They retain exact
+native frame, document and backend-node identity. Output preserves accessible
 hierarchy and includes semantic properties such as checked/pressed (including
 mixed), disabled, expanded, selected, required, readonly, invalid, focus and
 range values, plus accessible descriptions. Ignored ancestors are flattened;
 layout-only InlineTextBox duplicates are omitted because their native IDs change
-between CDP attachments. Visible actionable indices remain native node IDs.
+between CDP attachments. Indices are never reassigned to another node within a
+binding; read fresh state and keep indices with their originating binding.
 
 Emitted AX observations use a compact line replacement diff when it is shorter
 than the full tree, or `Accessibility state unchanged.`. Pass
@@ -51,9 +53,28 @@ original call can emit the completed tree; a dialog-yielded read never writes
 output into a later JS call. Option fields are `emit` and
 `disableDiffing`, both booleans.
 
-Native AX observation/input currently covers the top-level document. Use
-`frameLocator()` and `domSnapshot()` for iframe content while native frame-bound
-indices and input routing remain open work. Supported input operations are:
+Native AX includes accessible same/cross-origin iframe trees under their native
+owners, with frame URLs on document roots. Duplicate URLs and renderer-local node
+IDs remain distinct. Hidden/inert/ARIA-hidden frame subtrees expose no actionable
+indices. Frame discovery attaches only native iframe targets whose parent and
+owner belong to this tab. Captures recheck the complete frame inventory and retry
+only transient frame observation changes, at most five attempts.
+
+Indexed click, text/key/paste, editing/selection and scrolling route to the exact
+frame document. Loader/URL/ancestor changes and frame removal refuse stale
+indices; fresh observations recover after process swaps. Editing/selection and
+DOM target checks use isolated native worlds. Pointer preparation waits for
+rendering across the root and remote widgets, maps affine content quads, and
+rechecks native hits and exact frame-local hits before each press. Unsupported
+perspective/degenerate frame transforms and covered targets fail explicitly.
+Held input still uses the host ownership and cancellation/release path. Native
+input can have admitted effects before cancellation; inspect current state.
+
+Broader dynamic/provider/shadow/IME coverage, atomic dispatch after the final
+identity check, mixed zoom/DPI/hardware, physical desktop/Windows and renderer
+crash recovery remain open. Screenshot-coordinate input keeps its existing
+geometry policy; this frame-document fencing applies to indexed input.
+`frameLocator()` and `domSnapshot()` remain available. Supported input operations are:
 
 ```js
 await tab.click(elementIndex, {mouseButton: "left", clickCount: 1});
