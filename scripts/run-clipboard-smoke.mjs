@@ -40,7 +40,7 @@ try {
   const id = await run(`var tab=await cua.createBrowserTab("cdp",${JSON.stringify(url)},{visible:false}); await tab.clipboard.writeText("Clipboard 你好 🙂"); nodeRepl.write(JSON.stringify(tab.id));`);
   assert.equal(await run('nodeRepl.write(JSON.stringify(await tab.clipboard.readText()));'),"Clipboard 你好 🙂");
   assert.deepEqual(await run('nodeRepl.write(JSON.stringify((await cua.listTabs({emit:false})).filter(item=>item.url.includes("__ocu_clipboard_"))));'),[]);
-  await run(`var tab=await cua.getTab(${JSON.stringify(id)}); nodeRepl.write(JSON.stringify(await tab.clipboard.readText()));`,other);
+  await run(`var tab=await cua.createBrowserTab('cdp',${JSON.stringify(url)},{visible:false}); nodeRepl.write(JSON.stringify(await tab.clipboard.readText()));`,other);
   const state = await run('nodeRepl.write(JSON.stringify(await tab.getAXState({emit:false})));');
   const textIndex = state.match(/\[(\d+)\] textbox "Text"/)[1];
   const richIndex = state.match(/\[(\d+)\] textbox "Rich"/)[1];

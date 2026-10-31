@@ -2788,3 +2788,35 @@ clipboard, visibility, guardian/host exit and macOS headless lifecycle checks pa
 Physical desktops/macOS headful, Windows, takeover arbitration, cross-host
 coordination and durable recovery remain open. Upstream behavior and the native
 session rule are linked in the managed-browser documentation.
+
+
+## Host-local user-tab claims
+
+Added browser.user.openTabs()/claimTab() with native provider ID, last-access ISO
+time and tab-group title through extension protocol 4. Reused the stable session
+owner table for exclusive binding and tab-scoped broker requests. Inventory is
+passive; conflicting sessions and old bound handles fail before interaction.
+ID binding checks ownership before browser discovery so another session's active
+dialog/action can finish normally.
+
+Unmarked original user pages release open at turn/reset/close; marks retain claims
+across the idle boundary. Uncertain explicit closure keeps ownership until cleanup
+confirms it. First-seen/seeding tracking protects preexisting and idle-handoff
+children; active popup descendants remain ephemeral, including reverse native
+ancestry order. Browser-wide management, raw clients, other hosts and physical
+user takeover remain outside this host-local coordinator.
+
+Added one owned native claims controller to source-removed installation coverage
+and four focused lifecycle checks. Updated cross-session clipboard/selection/dialog
+fixtures for exclusive tab access. Both macOS/Linux Chrome 158 session types pass
+native metadata/group/order, passive inventory, explicit/implicit and racing claims,
+stale handles/records, original retention, popup cleanup and handoff/reset. Node:
+macOS 193/193; Linux 192/193 with one macOS-only skip. Existing clipboard, selected
+session and full dialog recovery checks pass on both systems. Installed macOS
+headless and Linux headful/native clipboard/visibility/empty-window/MCP lifecycle
+checks pass. The owned X11 observer accepts the spaced Bad Window spelling when a
+window disappears between enumeration and inspection; other failures propagate.
+
+Concurrent session reset now shares the browser dialog observer shutdown; a new
+observer waits for that shutdown before attaching. The native claims controller
+retains simultaneous reset checks after racing claims on both session types.

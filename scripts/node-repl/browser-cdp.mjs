@@ -295,6 +295,7 @@ export class BrowserDialogs {
     const endpoint = this.endpoint();
     if (!endpoint) return;
     let browser = this.browsers.get(endpoint);
+    if(browser?.cleanup){await browser.cleanup;return this.observe(owner);}
     if (!browser) {
       browser = {owners:new Set(),pending:new Set(),sessions:new Map()};
       this.browsers.set(endpoint,browser);
@@ -576,15 +577,18 @@ export class BrowserDialogs {
     for (const [endpoint,browser] of this.browsers) {
       browser.owners.delete(owner);
       if (browser.owners.size) continue;
-      await browser.ready.catch(()=>{});
-      try {
-        await Promise.allSettled([...browser.pending]);
-        if (!browser.error && !browser.exitProof?.browserGone()) await browser.connection?.send("Target.setAutoAttach",{autoAttach:false,waitForDebuggerOnStart:false,flatten:true});
-      } finally {
-        browser.closed = true;
-        browser.connection?.close();
-        if (this.browsers.get(endpoint) === browser) this.browsers.delete(endpoint);
-      }
+      browser.cleanup??=(async()=>{
+        await browser.ready.catch(()=>{});
+        try {
+          await Promise.allSettled([...browser.pending]);
+          if (!browser.error && !browser.exitProof?.browserGone()) await browser.connection?.send("Target.setAutoAttach",{autoAttach:false,waitForDebuggerOnStart:false,flatten:true});
+        } finally {
+          browser.closed = true;
+          browser.connection?.close();
+          if (this.browsers.get(endpoint) === browser) this.browsers.delete(endpoint);
+        }
+      })();
+      await browser.cleanup;
     }
   }
 }
@@ -597,7 +601,7 @@ export async function withConnection(url, operation) {
 }
 
 const DOCUMENTATION = `## CDP browser
-Use cua.listTabs(), cua.getTab(id or {url}), and cua.createBrowserTab("cdp", url, {visible?,sessionName?}). browser.tabs exposes list/get/new/selected; new() creates a background blank tab. browser.nameSession(name) labels this logical host session across turns and JS resets. It appears in browser inventory metadata and context output. Native selected-tab identity and management require the bundled Chrome browser extension, loaded by the user in that CDP browser. A transient hidden bootstrap tab wakes its service worker and closes before requests; turn/reset/close disconnects the worker after accepted writes drain. Selected lookup leaves native tab activation unchanged and remains accurate under focus emulation. This is the CDP provider with an extension browser bridge; full extension transport remains open.
+Use cua.listTabs(), cua.getTab(id or {url}), and cua.createBrowserTab("cdp", url, {visible?,sessionName?}). browser.tabs exposes list/get/new/selected; new() creates a background blank tab. browser.nameSession(name) labels this logical host session across turns and JS resets. It appears in browser inventory metadata and context output. browser.user.openTabs() lists claimable user tabs with native providerTabId, lastOpened and optional tabGroup; it does not claim them. browser.user.claimTab(id or listing record), getTab and tabs.selected acquire an exclusive host-local claim. Original user tabs are released open on turn/reset unless marked; created tabs/popups retain their lifecycle. Stale records and competing sessions fail before tab interaction. Cross-host/raw-CDP and browser-wide management coordination and physical takeover remain open. Native user metadata, selected-tab identity and management require the bundled Chrome browser extension, loaded by the user in that CDP browser. A transient hidden bootstrap tab wakes its service worker and closes before requests; turn/reset/close disconnects the worker after accepted writes drain. Selected lookup leaves native tab activation unchanged and remains accurate under focus emulation. This is the CDP provider with an extension browser bridge; full extension transport remains open.
 Tab bindings expose getAXState(), getScreenshot(), getAXStateAndScreenshot(), screenshot(),
 title(), url(), goto(url), back(), forward(), reload(), close(), markDeliverable() and markHandoff().
 Created tabs/popups are ephemeral at turn end unless marked. Latest mark wins; both marks clear when the next turn begins, so mark again as needed. User tabs stay open. js_reset retains tab ownership. Session close keeps marked survivors. Observations emit by default;
@@ -1003,6 +1007,7 @@ export function createBrowserApi(activeOutput, environment = process.env, {runti
     }
   }
   async function prepare(target) {
+    await requestTab({action:'claim',targetId:target.id});
     await requestViewport({action:"sync",targetId:target.id});
     await requestDialog({action:"start",targetId:target.id});
     if (!await requestDialog({action:"state",targetId:target.id})) {
@@ -1053,7 +1058,19 @@ export function createBrowserApi(activeOutput, environment = process.env, {runti
       await requestDialog({action:"observe"});
       await json("/json/version");
       if(!browserDocsShown){activeOutput().write(DOCUMENTATION, "cua.browser");browserDocsShown=true;}
-      return Object.freeze({ browserId: "cdp",nameSession,history:(options={})=>requestChrome({action:'history',options:normalizeHistoryOptions(options)}),tabs:Object.freeze({
+      return Object.freeze({ browserId: "cdp",nameSession,user:Object.freeze({
+        async openTabs(){const rows=await requestChrome({action:'userTabs'}),unavailable=new Set(await requestTab({action:'userTargets'}));return rows.filter(tab=>!unavailable.has(tab.id));},
+        async claimTab(reference){
+          if(typeof reference!=='string'&&(!reference||typeof reference!=='object'||Array.isArray(reference)))throw Error('claimTab requires a tab ID or user tab record');
+          const id=typeof reference==='string'?reference:reference?.id;
+          if(typeof id!=='string'||!id)throw Error('claimTab requires a tab ID or user tab record');
+          if(typeof reference!=='string'){
+            const rows=await requestChrome({action:'userTabs'}),current=rows.find(tab=>tab.id===id);
+            if(!current||reference.providerTabId!==undefined&&reference.providerTabId!==current.providerTabId||reference.url!==undefined&&reference.url!==current.url)throw Error('User tab reference changed; list openTabs again');
+          }
+          return api.getTab(id,{browser:'cdp'});
+        },
+      }),history:(options={})=>requestChrome({action:'history',options:normalizeHistoryOptions(options)}),tabs:Object.freeze({
         list:()=>api.listTabs({browser:"cdp",emit:false}),
         get:id=>{if(typeof id!=="string"||!id)throw Error('tabs.get requires a tab ID');return api.getTab(id,{browser:"cdp"});},
         new:()=>api.createBrowserTab('cdp','about:blank',{visible:false}),
@@ -1086,6 +1103,7 @@ export function createBrowserApi(activeOutput, environment = process.env, {runti
     async getTab(reference, options = {}) {
       checkBrowser(options);
       if (typeof reference !== "string" && (typeof reference?.url !== "string")) throw new Error("getTab requires a tab ID or {url}");
+      if(typeof reference==="string"&&endpoint())await requestTab({action:'claim',targetId:reference});
       const matches = (await targets()).filter(item => typeof reference === "string" ? item.id === reference : item.url === reference.url);
       if (matches.length !== 1) throw new Error(`Expected one matching tab; found ${matches.length}`);
       return observe(await prepare(matches[0]));

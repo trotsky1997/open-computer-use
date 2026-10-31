@@ -15,21 +15,25 @@ export class BrowserTabs {
       state.ended=false;
     }
   }
-  inherit(entry,info) {
+  inherit(entry,info,seeding=false) {
     if(info.type!=='page') return;
-    const owner=entry.creating.get(info.url) ?? entry.lineage.get(info.openerId);
-    if(owner && !entry.tabs.has(info.targetId)) {
+    entry.seen??=new Set();const creating=entry.creating.get(info.url);
+    if(!creating&&entry.seen.has(info.targetId))return;
+    const owner=creating ?? entry.lineage.get(info.openerId),state=owner?this.state(owner):undefined;
+    if(owner && (!state.ended||state.ending) && !entry.tabs.has(info.targetId)) {
       entry.tabs.set(info.targetId,{owner});entry.lineage.set(info.targetId,owner);entry.creating.delete(info.url);
-    }
+    }else if(owner||!seeding&&!entry.seeding)entry.seen.add(info.targetId);
   }
   async snapshot(entry) {
     const {targetInfos}=await entry.connection.send('Target.getTargets');
     for(let pass=0;pass<targetInfos.length;pass++) {
-      const before=entry.tabs.size;for(const info of targetInfos) this.inherit(entry,info);
+      const before=entry.tabs.size;for(const info of targetInfos) this.inherit(entry,info,true);
       if(entry.tabs.size===before) break;
     }
     const live=new Set(targetInfos.filter(info=>info.type==='page').map(info=>info.targetId));
     for(const id of entry.tabs.keys()) if(!live.has(id)) entry.tabs.delete(id);
+    for(const id of entry.seen??[])if(!live.has(id))entry.seen.delete(id);
+    for(const info of targetInfos)if(info.type==='page'&&!entry.tabs.has(info.targetId))entry.seen.add(info.targetId);
     return live;
   }
   async closeTarget(entry,targetId) {
@@ -51,7 +55,7 @@ export class BrowserTabs {
     if(entry?.exitProof?.browserGone()){entry.connection?.close();this.browsers.delete(endpoint);entry=undefined;}
     if(entry?.ready && !entry.error) {await entry.ready;return entry;}
     if(!entry) {entry={endpoint,tabs:new Map(),lineage:new Map(),creating:new Map()};this.browsers.set(endpoint,entry);}
-    entry.error=undefined;
+    entry.error=undefined;entry.seeding=true;
     entry.ready=(async()=>{
       const response=await fetch(new URL('/json/version',endpoint),{signal:AbortSignal.timeout(10000),redirect:'error'});
       if(!response.ok) throw new Error(`Tab discovery failed: HTTP ${response.status}`);
@@ -60,11 +64,11 @@ export class BrowserTabs {
       entry.browserId=browserId;
       let connection;connection=await this.open(webSocketDebuggerUrl,event=>{
         if(event.method==='Target.targetCreated') this.inherit(entry,event.params.targetInfo);
-        if(event.method==='Target.targetDestroyed') entry.tabs.delete(event.params.targetId);
+        if(event.method==='Target.targetDestroyed'){entry.tabs.delete(event.params.targetId);entry.seen?.delete(event.params.targetId);}
       },error=>{if(connection && entry.connection===connection)entry.error=error ?? new Error('Browser tab observer closed');});
       entry.connection=connection;entry.exitProof=await browserExitProof(endpoint,webSocketDebuggerUrl,connection.send);
       await entry.connection.send('Target.setDiscoverTargets',{discover:true});
-      await this.snapshot(entry);
+      await this.snapshot(entry);entry.seeding=false;
     })().catch(error=>{entry.error=error;entry.connection?.close();throw error;});
     await entry.ready;return entry;
   }
@@ -76,9 +80,9 @@ export class BrowserTabs {
   request(owner,args) {
     const state=this.state(owner);
     if(state.ending || state.ended) throw new Error('Browser tab turn ended');
-    if(!args || !['create','mark','close','name','session'].includes(args.action)) throw new Error('Unknown browser tab action');
+    if(!args || !['create','mark','close','claim','userTargets','name','session'].includes(args.action)) throw new Error('Unknown browser tab action');
     if(args.action==='create' && args.visible!==undefined && typeof args.visible!=='boolean') throw new Error('Tab visible must be a boolean');
-    if(['mark','close'].includes(args.action) && (typeof args.targetId!=='string' || (args.action==='mark' && !['deliverable','handoff'].includes(args.mark)))) throw new Error('Invalid tab retention mark');
+    if(['mark','close','claim'].includes(args.action) && (typeof args.targetId!=='string' || (args.action==='mark' && !['deliverable','handoff'].includes(args.mark)))) throw new Error('Invalid tab retention mark');
     const endpoint=this.endpoint();if(!endpoint) throw new Error('No CDP browser configured');
     if(args.action==='name'){
       if(typeof args.name!=='string'||!args.name.trim()||[...args.name].length>100||/[\u0000-\u001f\u007f-\u009f]/u.test(args.name))throw Error('Session name must be 1...100 characters without control characters');
@@ -99,12 +103,15 @@ export class BrowserTabs {
         return result;
       }
       const live=await this.snapshot(entry);
+      if(args.action==='userTargets')return [...entry.tabs].filter(([,record])=>!record.claimed||record.owner!==owner||record.closing).map(([id])=>id);
       if(!live.has(args.targetId)) throw new Error('Tab closed or no longer available');
-      const record=entry.tabs.get(args.targetId);
-      if(record && record.owner!==owner) throw new Error('Tab retention belongs to another session');
+      let record=entry.tabs.get(args.targetId);
+      if(record && record.owner!==owner) throw new Error('Tab belongs to another session');
+      if(record?.closing&&args.action!=='close')throw Error('Tab close is unresolved; retry cleanup before reuse');
+      if(!record){record={owner,claimed:true};entry.tabs.set(args.targetId,record);entry.lineage.set(args.targetId,owner);}
       if(args.action==='close') {
-        await this.closeTarget(entry,args.targetId);
-      } else if(record) record.mark=args.mark;
+        record.closing=true;await this.closeTarget(entry,args.targetId);
+      } else if(args.action==='mark')record.mark=args.mark;
     })();
     state.pending.add(work);work.finally(()=>{
       state.pending.delete(work);this.active.set(endpoint,this.active.get(endpoint)-1);
@@ -124,7 +131,7 @@ export class BrowserTabs {
         await this.browser(entry.endpoint);
         for(let pass=0;pass<16;pass++) {
           await this.snapshot(entry);
-          const close=[...entry.tabs].filter(([,record])=>record.owner===owner && !record.mark);
+          const close=[...entry.tabs].filter(([,record])=>record.owner===owner && (record.closing||!record.claimed&&!record.mark));
           if(!close.length) break;
           if(pass===15) throw new Error('Owned popups kept opening during tab cleanup');
           for(const [targetId] of close) {
@@ -132,7 +139,7 @@ export class BrowserTabs {
           }
         }
         if([...entry.creating.values()].includes(owner)) throw new Error('The outcome of tab creation is unknown; retry cleanup after browser recovery');
-        for(const [id,record] of entry.tabs) if(record.owner===owner && final) entry.tabs.delete(id);
+        for(const [id,record] of entry.tabs) if(record.owner===owner && (final||record.claimed&&!record.mark)) entry.tabs.delete(id);
         for(const [id,recordOwner] of entry.lineage) if(recordOwner===owner && !entry.tabs.has(id)) entry.lineage.delete(id);
         this.idle(entry);
       }

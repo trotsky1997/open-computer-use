@@ -95,6 +95,12 @@ if(process.argv[2]==='codex-plugin-config') { (await import('node:fs')).chmodSyn
   let discoveryOutput='';discovery.stdout.on('data',chunk=>{discoveryOutput+=chunk;});discovery.stderr.on('data',chunk=>{discoveryOutput+=chunk;});
   await new Promise((resolve,reject)=>{discovery.once('error',reject);discovery.once('exit',code=>code===0?resolve():reject(Error(discoveryOutput)));});
   process.stdout.write(discoveryOutput);console.log('PASS installed browser-wide WebMCP discovery after source checkout removal');
+  const claims=spawn(process.execPath,[path.join(source,'scripts/run-browser-user-claims-smoke.mjs'),installed],{env:{...env,OCU_TEST_CHROME_EXECUTABLE:path.resolve(chrome)},stdio:['ignore','pipe','pipe']});let claimOutput='';
+  claims.stdout.on('data',chunk=>{claimOutput+=chunk;});claims.stderr.on('data',chunk=>{claimOutput+=chunk;});
+  await new Promise((resolve,reject)=>{claims.once('error',reject);claims.once('exit',code=>code===0?resolve():reject(Error(claimOutput)));});
+  for(const line of claimOutput.split('\n').filter(line=>line.includes('PASS')))console.log(line);
+  console.log('PASS installed native user-tab metadata and host-local claims after source checkout removal');
+
   if(process.platform==='linux'&&process.argv.includes('--headful')){
    const visibility=spawn(process.execPath,[path.join(source,'scripts/run-managed-browser-visibility-smoke.mjs'),installed],{env:{...env,OCU_TEST_CHROME_EXECUTABLE:path.resolve(chrome)},stdio:['ignore','pipe','pipe']});let output='';
    visibility.stdout.on('data',chunk=>{output+=chunk;});visibility.stderr.on('data',chunk=>{output+=chunk;});

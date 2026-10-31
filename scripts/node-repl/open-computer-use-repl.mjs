@@ -64,6 +64,7 @@ const HOST_BROWSER_SERVICES={browserRuntime,browserWebMcp:HOST_BROWSER_WEBMCP,br
 
 async function hostRequest(services,owner,tabOwner,method,params,timeoutMs) {
   let result;
+  if(method.startsWith('browser/')&&method!=='browser/tabs'&&typeof params?.targetId==='string'&&!['stop','end','cancel','release'].includes(params.action))await services.browserTabs.request(tabOwner,{action:'claim',targetId:params.targetId});
   if (method === "browser/runtime") {
     result=await services.browserRuntime.request(params);
   } else if (method === "browser/focus") {

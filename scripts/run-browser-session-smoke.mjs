@@ -37,7 +37,7 @@ try {
      try{assert.equal(await run(session,`nodeRepl.write(JSON.stringify((await browser.tabs.selected())?.id));`),first);}finally{await send('Emulation.setFocusEmulationEnabled',{enabled:false});}
     });
     await activate(second);assert.equal(await run(session,`nodeRepl.write(JSON.stringify((await browser.tabs.selected())?.id));`),second);
-    const fresh=await other.run(`var b=await cua.getBrowser({id:'cdp'});nodeRepl.write((await b.tabs.selected())?.id);`);assert.equal(fresh.isError,false,fresh.content.at(-1).text);
+    const fresh=await other.run(`var b=await cua.getBrowser({id:'cdp'});nodeRepl.write((await b.tabs.selected())?.id);`);assert.equal(fresh.isError,true);assert.match(fresh.content.at(-1).text,/another session/);
     assert.equal(session.browserChrome.owners.size,2);await other.close();assert.equal(session.browserChrome.owners.size,1);
     const entry=[...session.browserChrome.owners.values()][0];
     const paused=await openConnection(version.webSocketDebuggerUrl);

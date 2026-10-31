@@ -51,10 +51,9 @@ try {
   assert.match(staleAlert.content.at(-1).text,/stale|consumed/);
 
   await run('await tab.playwright.getByRole("button",{name:"Confirm",exact:true}).click(); var confirmDialog=await tab.getJsDialog(); nodeRepl.write(JSON.stringify(confirmDialog.type));');
-  await run(`var observer=await cua.getTab(${JSON.stringify(targetId)}); nodeRepl.write(JSON.stringify(observer.id));`,other);
-  const denied = await other.run('await observer.getJsDialog();');
+  const denied = await other.run(`var observer=await cua.getTab(${JSON.stringify(targetId)});await observer.getJsDialog();`);
   assert.equal(denied.isError,true);
-  assert.match(denied.content.at(-1).text,/another browser session/);
+  assert.match(denied.content.at(-1).text,/another session/);
   await other.close();
   assert.equal(await run('nodeRepl.write(JSON.stringify((await tab.getJsDialog()).type));'),"confirm");
   assert.equal(await run('await confirmDialog.accept(); nodeRepl.write(JSON.stringify(await tab.playwright.locator("output").innerText()));'),"Confirm true");

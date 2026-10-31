@@ -685,3 +685,14 @@ rejected. Hidden native helper targets keep a dedicated browser connection for
 completion evidence and close after settlement; failed disconnect retains the
 owner. Headful data belongs to the system/display clipboard and may outlive the
 host. See [clipboard and paste](browser-cdp.md#browser-clipboard-and-native-paste).
+
+BrowserTabs also coordinates host-local user claims. Native MV3 protocol 4 joins
+Chrome tab/provider identities, last-access timestamps and group names for
+browser.user.openTabs. Listing is passive; binding and tab-scoped broker requests
+claim in the stable session-owner table. Claimed originals release open at turn
+end/reset, marked originals remain controlled across the idle boundary, and
+created tabs/popups retain their lifecycle. First-seen native targets protect
+preexisting and idle-handoff user pages from retroactive adoption, while snapshot
+seeding resolves native descendant ordering before classifying originals. Failed
+close retains ownership until confirmation. Cross-host/raw-client, browser-wide
+operation arbitration and physical takeover remain open.

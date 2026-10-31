@@ -10,7 +10,7 @@ export class BrowserChrome {
  hidden(){const ids=[],urls=[];for(const entry of this.tabs.browsers.values()){ids.push(...entry.tabs.keys());urls.push(...entry.creating.keys());}return {ids,urls};}
  request(owner,args){
   if(args?.action==='targets')return Promise.resolve(this.hidden());
-  if(!['selected','management','audit','history'].includes(args?.action))throw Error('Unknown Chrome bridge action');
+  if(!['selected','userTabs','management','audit','history'].includes(args?.action))throw Error('Unknown Chrome bridge action');
   if(args.action==='history')args={...args,options:normalizeHistoryOptions(args.options),id:randomUUID()};
   const mutation=args.action==='management'&&validateManagement(args.namespace,args.method,args.args);
   if(Buffer.byteLength(JSON.stringify(args))>65536)throw Error('Chrome bridge request exceeds 64 KiB');
@@ -75,7 +75,7 @@ export class BrowserChrome {
    if(workers.length!==1)throw Error('Chrome extension worker has no unique target');entry.workerId=workers[0].targetId;
    ({sessionId:entry.sessionId}=await entry.connection.send('Target.attachToTarget',{targetId:entry.workerId,flatten:true}));
    const identity=await entry.connection.send('Runtime.evaluate',{expression:'({id:chrome.runtime.id,protocol:globalThis.ocuChromeBridge?.protocol})',returnByValue:true},10000,entry.sessionId);
-   if(identity.result.value?.id!==CHROME_EXTENSION_ID||identity.result.value?.protocol!==3)throw Error('Chrome browser extension identity/protocol mismatch');
+   if(identity.result.value?.id!==CHROME_EXTENSION_ID||identity.result.value?.protocol!==4)throw Error('Chrome browser extension identity/protocol mismatch');
    const object=await entry.connection.send('Runtime.evaluate',{expression:'globalThis.ocuChromeBridge'},10000,entry.sessionId);entry.objectId=object.result.objectId;
    if(entry.browser){await entry.browser.close();entry.browser=undefined;}await this.tabs.end(entry.owner,{final:true});
   }catch(error){

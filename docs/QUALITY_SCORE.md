@@ -27,3 +27,5 @@ WebMCP 发现已覆盖配置浏览器中的未绑定 HTTP(S) 页面及后续创�
 托管 headful 浏览器已支持系统/显示会话剪贴板与原生 text/HTML/PNG 粘贴；只允许匹配宿主当前 endpoint/socket/进程身份的浏览器。Linux 隔离 Gtk/X11 双会话、源码移除后的安装模块及真实 MCP 已验证原生互通、隐藏 helper、外部客户端拒绝和断线/reset 恢复。物理桌面/macOS、Windows、跨宿主协调与用户接管仍待验证；系统剪贴板数据可被其他应用修改，也可能在宿主退出后保留。
 
 托管 headful 的无窗口恢复已覆盖 Linux 源码/双会话、源码移除后的安装模块与真实 MCP：后台/默认隐藏/可见建页、空窗显示、同进程/profile 的会话 cookie 和剪贴板保留均通过。宿主退出仍回收整个临时 profile；物理桌面、macOS headful 与 Windows 尚待验证。
+
+用户标签页已支持原生 openTabs 元数据和本宿主会话独占 claimTab/getTab/selected，原页面释放保留、跨轮标记、旧句柄拒绝、未确认关闭占有和已有/空闲期子页保护均已接入。macOS/Linux Chrome 158 双会话及源码移除后的安装入口通过接管夹具；Node 为 macOS 193/193、Linux 192/193（一个 macOS 专属跳过）。双系统现有剪贴板、会话选择和完整弹窗恢复回归通过；Linux 安装入口的 headful/原生剪贴板/空窗恢复/MCP 回归通过。跨宿主、原始 CDP 客户端、浏览器全局操作仲裁及物理用户接管仍待实现，完整 parity 目标继续推进。

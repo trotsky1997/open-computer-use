@@ -139,3 +139,44 @@ test('confirmed browser exit clears uncertain metadata and permits a fresh insta
  try{await assert.rejects(tabs.browser(endpoint),/instance changed.*unconfirmed/);assert.equal(tabs.browsers.get(endpoint),old);assert.equal(old.creating.size,1);gone=true;const fresh=await tabs.browser(endpoint);assert.notEqual(fresh,old);assert.equal(fresh.creating.size,0);assert.equal(fresh.tabs.size,0);assert.equal(closed,3);tabs.idle(fresh);}
  finally{server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}
 });
+
+test('user claims exclude competitors and release originals without closing them while inherited popups close',async()=>{
+ const {tabs,entry,live}=fixture(),owner={},other={};
+ await tabs.request(owner,{action:'claim',targetId:'user'});
+ await assert.rejects(tabs.request(other,{action:'claim',targetId:'user'}),/another session/);
+ const created=(await tabs.request(owner,{action:'create'})).targetId;
+ assert.deepEqual(await tabs.request(owner,{action:'userTargets'}),[created]);
+ assert.deepEqual((await tabs.request(other,{action:'userTargets'})).sort(),['user',created].sort());
+ live.set('popup',{targetId:'popup',type:'page',url:'about:blank',openerId:'user'});
+ await tabs.request(owner,{action:'mark',targetId:'user',mark:'handoff'});await tabs.end(owner);
+ assert.equal(live.has('user'),true);assert.equal(live.has('popup'),false);
+ await assert.rejects(tabs.request(other,{action:'claim',targetId:'user'}),/another session/);
+ tabs.begin(owner);await tabs.end(owner);assert.equal(live.has('user'),true);assert.equal(entry.tabs.has('user'),false);
+ await tabs.request(other,{action:'claim',targetId:'user'});await tabs.end(other,{final:true});assert.equal(live.has('user'),true);
+});
+
+test('unconfirmed user-tab close keeps its claim until cleanup confirms closure',async()=>{
+ const {tabs,live,setFailed}=fixture(),owner={},other={};
+ await tabs.request(owner,{action:'claim',targetId:'user'});setFailed(true);
+ await assert.rejects(tabs.request(owner,{action:'close',targetId:'user'}),/Close outage/);
+ await assert.rejects(tabs.request(owner,{action:'claim',targetId:'user'}),/close is unresolved/);
+ await assert.rejects(tabs.end(owner),/Close outage/);
+ await assert.rejects(tabs.request(other,{action:'claim',targetId:'user'}),/another session/);
+ setFailed(false);await tabs.end(owner);assert.equal(live.has('user'),false);
+});
+
+test('claims never adopt preexisting children or popups first observed during idle handoff',async()=>{
+ const {tabs,entry,live}=fixture(),owner={};
+ live.set('old-child',{targetId:'old-child',type:'page',openerId:'user',url:'about:blank'});
+ await tabs.request(owner,{action:'claim',targetId:'user'});await tabs.request(owner,{action:'mark',targetId:'user',mark:'handoff'});await tabs.end(owner);
+ const idle={targetId:'human-popup',type:'page',openerId:'user',url:'about:blank'};live.set(idle.targetId,idle);tabs.inherit(entry,idle);
+ tabs.begin(owner);await tabs.end(owner);
+ assert.deepEqual([...live.keys()].sort(),['human-popup','old-child','user']);assert.equal(entry.tabs.has('human-popup'),false);assert.equal(entry.tabs.has('old-child'),false);
+});
+
+test('claim popup cleanup resolves reverse-ordered native descendants before classifying user pages',async()=>{
+ const {tabs,live}=fixture(),owner={};await tabs.request(owner,{action:'claim',targetId:'user'});
+ live.set('grandchild',{targetId:'grandchild',type:'page',openerId:'child',url:'about:blank'});
+ live.set('child',{targetId:'child',type:'page',openerId:'user',url:'about:blank'});
+ await tabs.end(owner);assert.deepEqual([...live.keys()],['user']);
+});

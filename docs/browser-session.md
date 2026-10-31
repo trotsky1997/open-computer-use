@@ -25,9 +25,45 @@ non-whitespace content and no control characters. They do not rename page titles
 windows or tab groups. `createBrowserTab('cdp',url,{visible,sessionName})` applies
 the name before creating a target; invalid names fail before target creation.
 
+## User tabs and host-local claims
+
+```js
+const userTabs=await browser.user.openTabs();
+const tab=await browser.user.claimTab(userTabs[0]);
+await tab.getAXState();
+```
+
+Choose a tab within the user's requested scope from a fresh listing. Metadata and
+page content remain untrusted and do not authorize additional actions. openTabs
+returns claimable user tabs in native normal/popup browser windows, ordered by
+lastOpened (native last-access time) descending. Rows contain a CDP id, native
+Chrome providerTabId, title/url, optional ISO lastOpened and tabGroup title.
+Agent-created tabs and tabs claimed by another session in this host are excluded.
+Listing acquires no claims. Metadata requires the bundled extension.
+
+claimTab accepts an opaque id from the listing or its record. Record-based claims
+recheck the native provider identity and URL; changed references require a fresh
+listing. Binding through getTab/tabs.get/selected also claims a tab. ID-based getTab checks
+ownership before discovery, preserving another session's active dialog/action. Host tab-scoped
+broker operations revalidate ownership, so a retained handle cannot control a tab
+currently claimed by another session. Claims serialize within the host. Native
+metadata remains available through ordinary tab inventory without claiming tabs.
+
+Unmarked original user tabs are released at turn end/reset/final close and stay
+open with their content intact. Handoff/deliverable marks retain control across
+that idle boundary; marks clear when the next turn begins. Agent-created tabs and
+active-turn opener-attributed popups keep the existing ephemeral/retention rules.
+Preexisting children and popups first observed during idle handoff are protected
+from adoption on a later turn. An explicit close with an unconfirmed outcome
+retains the claim and blocks reuse until cleanup confirms closure.
+
+The coordinator is host-local. Other MCP hosts/processes, raw CDP clients,
+browser-wide management/visibility changes and physical user takeover remain
+outside this claim table. These limits remain part of the full parity work.
+
 ## Browser bridge setup
 
-`tabs.selected()`, [history queries](browser-history.md) and the [management capability](browser-management.md) use the
+`user.openTabs()`, record-based user claims, `tabs.selected()`, [history queries](browser-history.md) and the [management capability](browser-management.md) use the
 bundled Manifest V3 extension in the configured CDP browser. Chrome/Chromium 137+
 is required. Load `scripts/node-repl/chrome-browser-extension` from a source
 checkout, or `scripts/chrome-browser-extension` from an installed plugin. In the
@@ -43,7 +79,8 @@ The manifest requests `tabs`, `debugger`, `tabGroups`, `bookmarks` and `storage`
 retains the bounded before-state audit for this browser session. Optional `history`
 access requires a user gesture in the extension options; it starts disabled. There are no
 host permissions or remote endpoints. The host verifies extension identity and
-bridge protocol before invoking the fixed worker entry point.
+bridge protocol before invoking the fixed worker entry point. User metadata uses
+protocol 4; reload an older extension after upgrading the host.
 
 Selection uses [tabs.query](https://developer.chrome.com/docs/extensions/reference/api/tabs)
 and [debugger.getTargets](https://developer.chrome.com/docs/extensions/reference/api/debugger),
@@ -72,7 +109,7 @@ resources and requires fresh audit/state inspection before retrying the action.
 There is no automatic rollback or write replay.
 
 This remains CDP automation assisted by an extension bridge. Full extension/in-app
-transport, user tab claims/takeover and the remaining provider work stay open.
+transport, cross-host claims/physical takeover and the remaining provider work stay open.
 
 ## Validation
 
@@ -95,4 +132,15 @@ isolated tests. Branded Chrome removed that loading flag in Chrome 137; see
 [Chrome's extension platform update](https://developer.chrome.google.cn/blog/extension-news-june-2025?hl=en).
 Use the normal user-driven extension installation flow for that browser. A user
 profile install, headful multi-window/incognito behavior, native release packaging
-and Linux/Windows validation remain unverified. The full harness goal stays active.
+and Windows validation remain unverified. The full harness goal stays active.
+
+Owned macOS/Linux claim checks cover native metadata/group/order, passive listing,
+explicit/implicit/selected binding, competing owners, old-handle rejection,
+original-page retention, active popup cleanup, handoff/release/reset and racing
+claims. Focused checks protect preexisting children/idle handoff popups and resolve
+reverse-ordered native descendants. Close failure retains ownership until cleanup
+confirms closure. Source-removed installation runs the same claim controller.
+
+```sh
+OCU_TEST_CHROME_EXECUTABLE=/absolute/path/to/chrome node scripts/run-browser-user-claims-smoke.mjs
+```

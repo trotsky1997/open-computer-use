@@ -2088,3 +2088,39 @@ checks remain macOS 189/189 and Linux 188/189 (one macOS-only skip); macOS defau
 headless lifecycle checks also pass. Physical desktops/macOS headful, Windows,
 takeover arbitration, cross-host coordination and durable recovery remain open.
 The complete parity goal remains active.
+
+## Host-local user-tab claims
+
+Add native browser.user.openTabs metadata (CDP/provider ID, last access and group)
+and claimTab. Binding a tab and tab-scoped broker operations acquire an exclusive
+claim in the host's existing tab-owner table. Listing leaves tabs unclaimed.
+Release unmarked user claims on turn/reset without closing the original tab;
+retain marked claims for the next turn, and retain unresolved close ownership.
+Agent-created tabs/popups retain their existing lifecycle. Verify native metadata,
+competing sessions, release/reclaim, stale references and original-page retention.
+Cross-host claims, browser-wide management arbitration and physical takeover remain
+separate work in the full parity goal.
+
+Implemented native user-tab metadata and exclusive host-local claims using the
+existing stable session tab-owner table. Original pages survive release/reset;
+marks retain claims across the idle boundary, uncertain close retains ownership,
+and old handles are rejected after a different session claims the page. First-seen
+tracking protects preexisting children and idle-handoff popups; snapshot ancestry
+passes retain active descendants even when native target ordering is reversed.
+String-ID binding checks ownership before discovery, preserving another session's
+active dialog/action. The bundled extension protocol is now 4.
+
+Owned Chrome 158 source and source-removed installed claims pass on macOS/Linux
+for both JS session types. Native metadata/group/order, passive listing, competing
+and simultaneous claims, stale records/handles, original-page retention, active
+popup cleanup and handoff/reset pass. macOS Node checks pass 193/193; Linux passes
+192/193 with one macOS-only skip. Both systems pass existing clipboard, native
+selected-tab/session and full dialog failure/recovery checks. Installed Linux
+headful visibility/clipboard, empty-window retention and MCP lifecycle also pass;
+the X11 checker now accepts the native spaced Bad Window spelling for a destroyed
+window. Cross-host/raw-client/browser-wide arbitration and physical takeover remain
+open. The full parity goal stays active.
+
+Concurrent session reset now shares the browser dialog observer shutdown; a new
+observer waits for that shutdown before attaching. The native claims controller
+retains simultaneous reset checks after racing claims on both session types.

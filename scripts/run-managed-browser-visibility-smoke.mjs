@@ -33,7 +33,7 @@ async function nativeWindows(pid){
   try{
    const owner=await execute('xprop',['-id',id,'_NET_WM_PID']);if(!owner.stdout.trim().endsWith('= '+pid))continue;
    const info=await execute('xwininfo',['-id',id]);result.push({id,visible:/Map State: IsViewable/u.test(info.stdout)});
-  }catch(error){if(!/BadWindow|Bad Drawable|No such window/u.test(error.stderr??''))throw error;}
+  }catch(error){if(!/Bad ?Window|Bad Drawable|No such window/u.test(error.stderr??''))throw error;}
  }return result;
 }
 try{
