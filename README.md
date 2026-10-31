@@ -114,8 +114,9 @@ You can also manually download and install the
 
 See [browser-only source installation](docs/browser-only-installation.md) for a
 native-free plugin, custom target directories and installed-runtime verification.
-[Managed headless startup](docs/managed-browser.md) is available through
-`OPEN_COMPUTER_USE_BROWSER_EXECUTABLE`; external CDP remains supported.
+[Managed browser startup](docs/managed-browser.md) is available through
+`OPEN_COMPUTER_USE_BROWSER_EXECUTABLE`; opt into window presentation with
+`OPEN_COMPUTER_USE_BROWSER_MODE=headful`. External CDP remains supported.
 See [browser-only npm package](docs/browser-only-package.md) to build/install a
 local tarball without native toolchains; its MCP exposes `js/js_reset`.
 

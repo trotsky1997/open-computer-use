@@ -2704,3 +2704,31 @@ observer loss, closed-owner fencing and quiet Chrome 156 fallback.
 
 Full extension/in-app transport, claims/takeover, real consent dialogs, headful,
 Windows, remote/unidentified exit and broader external-site behavior remain open.
+
+## Managed headful presentation and visibility
+
+Added explicit OPEN_COMPUTER_USE_BROWSER_MODE=headful. Headless remains the
+default, and external CDP configuration takes precedence. Startup validates mode,
+launches the private browser through its guardian, minimizes native windows and
+confirms state before exposing the endpoint. The Chrome startup flag alone did
+not reliably minimize in the isolated Linux environment, so explicit confirmed
+window control is used.
+
+Managed headful browsers advertise visibility.get/set. Host-serialized native
+window changes preserve bounds/state and tab selection; explicit visible options
+apply before tab creation. Reset/turns retain presentation and browser state, and
+shutdown waits for accepted visibility work before reclaiming the browser/profile.
+
+macOS passes 187 Node checks; arm64 Linux passes 186 with one macOS-only skip.
+Owned Linux Xvfb/Openbox tests independently verify native window-map state for
+startup, show/hide and multi-window restoration, background/visible creation,
+native text input, invalid requests and reset/turn retention. Source and
+source-removed installed real MCP entries pass presentation, hidden js_reset
+retention and shutdown cleanup; installed Worker/source sessions pass headful
+flows and verified guardian-loss recovery. Headful natural/SIGKILL host exit also
+reclaims browser/profile. macOS default-headless lifecycle and installed browser
+flows pass. Installer headful tests require --headful and the documented X11 tools.
+
+Physical desktop/macOS headful, Windows, takeover arbitration, headful clipboard
+and durable recovery remain unverified/open. Native clipboard/paste continue to
+require the isolated verified-headless backend.

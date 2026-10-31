@@ -21,7 +21,7 @@ if(process.argv.includes('--host-child')){
  if(process.argv.includes('--hold'))await new Promise(()=>{});else await session.close();
 }else{
  const binary=process.env.OCU_TEST_CHROME_EXECUTABLE;if(!binary)throw Error('Set OCU_TEST_CHROME_EXECUTABLE to test Chromium');
- const saved={endpoint:process.env.OPEN_COMPUTER_USE_CDP_URL,executable:process.env.OPEN_COMPUTER_USE_BROWSER_EXECUTABLE};
+ const saved={endpoint:process.env.OPEN_COMPUTER_USE_CDP_URL,executable:process.env.OPEN_COMPUTER_USE_BROWSER_EXECUTABLE,mode:process.env.OPEN_COMPUTER_USE_BROWSER_MODE};
  const scratch=await mkdtemp(path.join(tmpdir(),'ocu-managed-smoke-'));let executable=path.resolve(binary);
  if(process.platform==='linux'){
   const quoted="'"+executable.replaceAll("'","'\\''")+"'";executable=path.join(scratch,'owned-vm-chrome');
@@ -29,7 +29,7 @@ if(process.argv.includes('--host-child')){
  }
  const server=createServer((request,response)=>{if(request.url==='/download'){response.setHeader('Content-Disposition','attachment; filename=managed-private.txt');response.end('private download');return;}response.setHeader('Content-Type','text/html');response.end(`<title>Owned managed browser</title><input aria-label="Typing"><output>${request.headers.cookie??''}</output><script>document.cookie='owned=1';</script>`);});
  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));const url=`http://127.0.0.1:${server.address().port}/`;
- delete process.env.OPEN_COMPUTER_USE_CDP_URL;process.env.OPEN_COMPUTER_USE_BROWSER_EXECUTABLE=executable;
+ delete process.env.OPEN_COMPUTER_USE_CDP_URL;process.env.OPEN_COMPUTER_USE_BROWSER_EXECUTABLE=executable;process.env.OPEN_COMPUTER_USE_BROWSER_MODE='headless';
  try{
   for(const Session of [WorkerJavaScriptSession,PersistentJavaScriptSession]){
    const session=new Session({native});let owned;
@@ -58,6 +58,6 @@ if(process.argv.includes('--host-child')){
   }
  }finally{
   server.closeAllConnections();await new Promise(resolve=>server.close(resolve));await rm(scratch,{recursive:true,force:true});
-  for(const [key,value] of [['OPEN_COMPUTER_USE_CDP_URL',saved.endpoint],['OPEN_COMPUTER_USE_BROWSER_EXECUTABLE',saved.executable]]){if(value===undefined)delete process.env[key];else process.env[key]=value;}
+  for(const [key,value] of [['OPEN_COMPUTER_USE_CDP_URL',saved.endpoint],['OPEN_COMPUTER_USE_BROWSER_EXECUTABLE',saved.executable],['OPEN_COMPUTER_USE_BROWSER_MODE',saved.mode]]){if(value===undefined)delete process.env[key];else process.env[key]=value;}
  }
 }

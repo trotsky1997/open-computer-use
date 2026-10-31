@@ -212,8 +212,11 @@ The load-check grants only its isolated right, with `shared=false` and a fresh A
 
 The JavaScript REPL exposes an opt-in CDP browser provider alongside native apps.
 `OPEN_COMPUTER_USE_CDP_URL` selects one Chromium debugging origin. The opt-in
-`OPEN_COMPUTER_USE_BROWSER_EXECUTABLE` starts a host-owned headless Chromium when
-no external endpoint is configured. BrowserRuntime brokers the canonical endpoint
+`OPEN_COMPUTER_USE_BROWSER_EXECUTABLE` starts a host-owned Chromium when
+no external endpoint is configured. Headless is the default; explicit
+OPEN_COMPUTER_USE_BROWSER_MODE=headful adds host-serialized visibility get/set
+using only the private root browser windows. Startup verifies minimization before
+exposing the endpoint; window bounds/state survive hide/restore and JS resets. BrowserRuntime brokers the canonical endpoint
 to both session implementations; its detached guardian owns the direct browser
 child and private profile across JS resets. Host shutdown closes resources before
 the browser; IPC disconnect handles host death. See [managed startup](managed-browser.md)

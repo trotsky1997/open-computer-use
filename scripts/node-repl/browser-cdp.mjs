@@ -713,10 +713,10 @@ export function createBrowserApi(activeOutput, environment = process.env, {runti
     if(args.action === "path") return downloads.path(downloadOwner,args.id,args.options);
     throw new Error("Unknown download action");
   });
-  let managed=false;
+  let managed=false,headless=true;
   async function bootstrap(){
     if(runtimeRequest){
-      const state=await runtimeRequest();managed=state?.managed===true;
+      const state=await runtimeRequest();managed=state?.managed===true;headless=state?.headless!==false;
       if(state?.endpoint)environment.OPEN_COMPUTER_USE_CDP_URL=state.endpoint;
       else delete environment.OPEN_COMPUTER_USE_CDP_URL;
     }
@@ -1030,7 +1030,7 @@ export function createBrowserApi(activeOutput, environment = process.env, {runti
     async listBrowsers(options = {}) {
       await bootstrap();
       const session=endpoint()?await requestTab({action:"session"}):{};
-      const browsers = endpoint() ? [{ id: "cdp", name: managed?"Managed headless Chromium":"Configured CDP browser", type: "cdp",...((managed||session.name)?{metadata:{...(managed?{managed:true}:{}),...(session.name?{sessionName:session.name}:{})}}:{}) }] : [];
+      const browsers = endpoint() ? [{ id: "cdp", name: managed?(headless?"Managed headless Chromium":"Managed Chromium"):"Configured CDP browser", type: "cdp",...((managed||session.name)?{metadata:{...(managed?{managed:true}:{}),...(session.name?{sessionName:session.name}:{})}}:{}) }] : [];
       if (options.emit !== false) activeOutput().write(browsers, "cua.state");
       return browsers;
     },
@@ -1059,8 +1059,13 @@ export function createBrowserApi(activeOutput, environment = process.env, {runti
         new:()=>api.createBrowserTab('cdp','about:blank',{visible:false}),
         async selected(){const id=await requestChrome({action:'selected'});if(!id)return undefined;const target=(await targets()).find(item=>item.id===id);return target?observe(await prepare(target)):undefined;},
       }),async documentation() { return DOCUMENTATION; },capabilities:Object.freeze({
-        list:async()=>[...await requestViewport({action:"capabilities"}),{id:"management",description:"Native windows, tabs, tab groups, bookmarks and before-state audit; bundled Chrome extension required"}],
+        list:async()=>{await bootstrap();return [...(managed&&!headless?[{id:"visibility",description:"Present or minimize the private managed browser windows"}]:[]),...await requestViewport({action:"capabilities"}),{id:"management",description:"Native windows, tabs, tab groups, bookmarks and before-state audit; bundled Chrome extension required"}];},
         async get(id) {
+          if(id==='visibility'){
+            await bootstrap();
+            if(!managed||headless)throw Error('Visibility requires a managed headful browser');
+            return Object.freeze({documentation:async()=>"visibility.get() reads whether any managed window is presented. visibility.set(true) restores the private browser windows; set(false) minimizes them. Changes persist across turns and JS resets. This affects only this managed browser. Partial native failures require inspection before retrying.",get:()=>runtimeRequest({action:'getVisibility'}),set:visible=>runtimeRequest({action:'setVisibility',visible})});
+          }
           if(id==='management')return Object.freeze({
             documentation:async()=>MANAGEMENT_DOCUMENTATION,
             getAuditTrail:()=>requestChrome({action:'audit'}),
@@ -1094,7 +1099,8 @@ export function createBrowserApi(activeOutput, environment = process.env, {runti
       const parsed = new URL(url);
       if (!["http:", "https:", "about:"].includes(parsed.protocol)) throw new Error("Unsupported navigation URL protocol");
       await bootstrap();
-      if(managed&&options.visible===true)throw new Error("Managed headless browsers cannot create visible tabs");
+      if(managed&&headless&&options.visible===true)throw new Error("Managed headless browsers cannot create visible tabs");
+      if(managed&&!headless&&options.visible!==undefined)await runtimeRequest({action:'setVisibility',visible:options.visible});
       if(options.sessionName!==undefined)await nameSession(options.sessionName);
       const result=await requestTab({action:"create",visible:options.visible});
       try {

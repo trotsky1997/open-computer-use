@@ -1987,3 +1987,37 @@ death cleanup pass on both systems. Focused checks cover the 128-tab budget,
 rapid return during disconnect, observer loss and quiet older-browser fallback.
 Real consent/headful/Windows, unidentified/remote death and wider external-site
 coverage remain open. The full parity goal remains active.
+
+## Managed headful presentation
+
+Add explicit host-configured headful startup and the reference visibility.get/set
+capability for the private managed browser. Preserve headless defaults, external
+CDP precedence, profile/process ownership and host lifetime. Visibility changes
+operate on the managed root's native windows and persist across reset/turns.
+Use an owned Xvfb/Openbox session for Linux window-state evidence; macOS physical
+headful behavior and user takeover remain separate verification work.
+
+Implemented OPEN_COMPUTER_USE_BROWSER_MODE=headful with strict host-side mode
+validation; headless remains the default and external CDP takes precedence.
+The guardian receives only the validated launch mode. Before exposing a headful
+endpoint, startup explicitly minimizes and confirms its private windows; the
+Chrome startup flag alone did not reliably minimize in the owned Linux fixture.
+The visibility capability reads native bounds/state and serializes hide/restore
+at the host, preserving bounds and selected tabs across reset/turns. Explicit
+visible creation options apply before tab creation. Shutdown drains accepted
+window operations before stopping the guardian/browser.
+
+macOS Node 187/187 and arm64 Linux 186/187 (one macOS-only skip) pass. Linux
+Xvfb/Openbox checks independently inspect native X11 map state for initial hidden
+startup, multi-window show/hide, visible/background creation, native text input,
+invalid visibility requests and reset/turn retention. Headful guardian loss plus
+natural/SIGKILL host exit reclaim the browser/profile. Source and source-removed
+installed real MCP entries pass presentation, hidden-state js_reset and shutdown
+cleanup. Installed source/Worker sessions pass the same window flows and private
+guardian-loss recovery. macOS default-headless lifecycle and source-removed
+installed browser flows also pass. Linux installer headful verification is
+explicitly enabled with --headful and requires its graphical fixture tools.
+
+Physical desktops/macOS headful, Windows, takeover arbitration, headful clipboard
+and durable recovery remain open. The existing verified-headless clipboard/paste
+guard is retained. The broader parity goal remains active.

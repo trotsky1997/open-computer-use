@@ -17,3 +17,12 @@ test('host shutdown cancels asynchronous executable preflight before any guardia
  const starting=runtime.ensure();starting.catch(()=>{});await runtime.close();
  await assert.rejects(starting,/startup canceled/);assert.equal(runtime.current,undefined);
 });
+test('runtime requests reject launch arguments and invalid visibility before IO',async()=>{
+ const runtime=new BrowserRuntime({OPEN_COMPUTER_USE_CDP_URL:'http://127.0.0.1:9222'});
+ for(const args of [null,[],{executable:'/unused'},{action:'guess'},{action:'getVisibility',visible:false},{action:'setVisibility'},{action:'setVisibility',visible:'true'}])assert.throws(()=>runtime.request(args),/Invalid browser/);
+ await assert.rejects(runtime.request({action:'getVisibility'}),/managed headful/);assert.equal(runtime.current,undefined);
+});
+test('managed browser mode is validated before process creation',{skip:!['darwin','linux'].includes(process.platform)},async()=>{
+ const runtime=new BrowserRuntime({OPEN_COMPUTER_USE_BROWSER_EXECUTABLE:process.execPath,OPEN_COMPUTER_USE_BROWSER_MODE:'automatic'});
+ await assert.rejects(runtime.ensure(),/headless or headful/);assert.equal(runtime.current,undefined);
+});

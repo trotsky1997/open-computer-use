@@ -8,7 +8,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 let browser,exited,profile,starting,stopping,closing=false;
 const send=message=>{if(process.connected)process.send(message,error=>{if(error)void stop().catch(value=>{console.error(value.message);process.exitCode=1;if(process.connected)process.disconnect();});});};
-async function start(executable){
+async function start(executable,headless){
  profile=await mkdtemp(path.join(tmpdir(),'ocu-managed-browser-'));
  send({type:'profile',profile});
  const downloads=path.join(profile,'downloads');
@@ -16,7 +16,7 @@ async function start(executable){
  await writeFile(path.join(profile,'Default','Preferences'),JSON.stringify({download:{default_directory:downloads,prompt_for_download:false,directory_upgrade:true},savefile:{default_directory:downloads}}));
  if(closing)return;
  const extension=fileURLToPath(new URL('./chrome-browser-extension',import.meta.url));
- browser=spawn(executable,['--headless=new','--enable-automation','--no-first-run','--no-default-browser-check','--disable-background-networking','--disable-component-update','--disable-sync','--enable-features=WebMCP,CDPScreenshotNewSurface','--remote-debugging-address=127.0.0.1','--remote-debugging-port=0',`--user-data-dir=${profile}`,`--load-extension=${extension}`,`--disable-extensions-except=${extension}`,...(process.platform==='darwin'?['--use-mock-keychain']:[]),'about:blank'],{stdio:['ignore','ignore','inherit']});
+ browser=spawn(executable,[...(headless?['--headless=new']:['--start-minimized']),'--enable-automation','--no-first-run','--no-default-browser-check','--disable-background-networking','--disable-component-update','--disable-sync','--enable-features=WebMCP,CDPScreenshotNewSurface','--remote-debugging-address=127.0.0.1','--remote-debugging-port=0',`--user-data-dir=${profile}`,`--load-extension=${extension}`,`--disable-extensions-except=${extension}`,...(process.platform==='darwin'?['--use-mock-keychain']:[]),'about:blank'],{stdio:['ignore','ignore','inherit']});
  exited=once(browser,'exit');exited.catch(()=>{});let error;browser.once('error',value=>{error=value;});
  send({type:'browser',pid:browser.pid});
  const deadline=Date.now()+15000;let port,route;
@@ -50,6 +50,6 @@ function fail(error){send({type:'error',message:String(error?.message??error).sl
 process.on('disconnect',()=>{void stop().catch(fail);});
 process.on('message',message=>{
  if(message?.type==='stop'){void stop().catch(fail);return;}
- if(message?.type!=='start'||starting||closing||typeof message.executable!=='string'||!path.isAbsolute(message.executable)){fail(Error('Invalid managed browser start'));return;}
- starting=start(message.executable);starting.catch(fail);
+ if(message?.type!=='start'||starting||closing||typeof message.executable!=='string'||!path.isAbsolute(message.executable)||typeof message.headless!=='boolean'){fail(Error('Invalid managed browser start'));return;}
+ starting=start(message.executable,message.headless);starting.catch(fail);
 });

@@ -20,6 +20,6 @@
 | 可观测性 | C | 已有 `doctor`、`snapshot`、smoke 输出，以及一组仓库内留档的官方 `computer-use` / 本仓库实现对比样本。 | 补统一日志级别、失败上下文和 release artifact 里的诊断信息，把一次性样本收敛成可重复采集流程。 |
 | 安全 | B | 已明确本地-only、权限边界和 fixture test bridge 的作用域，并将内置 denylist 收缩到密码管理器。 | 增加 session approval 和更清楚的敏感 app policy，避免策略长期硬编码在仓库里。 |
 
-托管 headless Chromium 已接入宿主：按需启动、私有 profile/默认下载、reset/turn 保留、宿主退出及守护进程丢失回收。双系统源码与安装入口验证见 [managed browser](managed-browser.md)。headful/Windows 与启动期宿主、守护进程同时丢失的持久恢复仍待补齐。
+托管 headless Chromium 已接入宿主：按需启动、私有 profile/默认下载、reset/turn 保留、宿主退出及守护进程丢失回收。双系统源码与安装入口验证见 [managed browser](managed-browser.md)。Linux Xvfb/Openbox 上已验证显式 headful 模式与多窗口 visibility get/set、后台建页、reset/turn 状态及退出回收；物理桌面、macOS headful、Windows 与启动期宿主、守护进程同时丢失的持久恢复仍待补齐。
 
 WebMCP 发现已覆盖配置浏览器中的未绑定 HTTP(S) 页面及后续创建、导航、关闭，保持 turn 归属和 128 页预算；源码及源码移除后的安装模块已有双系统双会话实测，发现阶段的调用计数与标签页归属保持不变。真实 consent、headful/Windows 与外部站点覆盖仍待补齐。

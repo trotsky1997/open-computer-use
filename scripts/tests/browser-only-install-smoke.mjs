@@ -95,6 +95,14 @@ if(process.argv[2]==='codex-plugin-config') { (await import('node:fs')).chmodSyn
   let discoveryOutput='';discovery.stdout.on('data',chunk=>{discoveryOutput+=chunk;});discovery.stderr.on('data',chunk=>{discoveryOutput+=chunk;});
   await new Promise((resolve,reject)=>{discovery.once('error',reject);discovery.once('exit',code=>code===0?resolve():reject(Error(discoveryOutput)));});
   process.stdout.write(discoveryOutput);console.log('PASS installed browser-wide WebMCP discovery after source checkout removal');
+  if(process.platform==='linux'&&process.argv.includes('--headful')){
+   const visibility=spawn(process.execPath,[path.join(source,'scripts/run-managed-browser-visibility-smoke.mjs'),installed],{env:{...env,OCU_TEST_CHROME_EXECUTABLE:path.resolve(chrome)},stdio:['ignore','pipe','pipe']});let output='';
+   visibility.stdout.on('data',chunk=>{output+=chunk;});visibility.stderr.on('data',chunk=>{output+=chunk;});
+   await new Promise((resolve,reject)=>{visibility.once('error',reject);visibility.once('exit',code=>code===0?resolve():reject(Error(output)));});
+   for(const line of output.split('\n').filter(line=>line.includes('PASS')))console.log(line);
+   console.log('PASS installed headful native visibility and private profile recovery after source checkout removal');
+  }
+
   // The installed host owns the lazy browser even after its source checkout disappears.
   delete env.OPEN_COMPUTER_USE_CDP_URL;delete process.env.OPEN_COMPUTER_USE_CDP_URL;
   let executable=path.resolve(chrome);
@@ -102,7 +110,7 @@ if(process.argv[2]==='codex-plugin-config') { (await import('node:fs')).chmodSyn
    executable=path.join(root,'managed-chrome');
    write(executable,'#!/bin/sh\nexec '+"'"+path.resolve(chrome).replaceAll("'","'\\''")+"'"+' --no-sandbox "$@"\n',{mode:0o700});
   }
-  env.OPEN_COMPUTER_USE_BROWSER_EXECUTABLE=executable;process.env.OPEN_COMPUTER_USE_BROWSER_EXECUTABLE=executable;
+  env.OPEN_COMPUTER_USE_BROWSER_EXECUTABLE=executable;process.env.OPEN_COMPUTER_USE_BROWSER_EXECUTABLE=executable;env.OPEN_COMPUTER_USE_BROWSER_MODE='headless';process.env.OPEN_COMPUTER_USE_BROWSER_MODE='headless';
   for(const Session of [module.PersistentJavaScriptSession,module.WorkerJavaScriptSession]){
    const native=new module.LazyNativePeer({command:nativeStub,args:['mcp'],env}),session=new Session({native});let owned;
    try{

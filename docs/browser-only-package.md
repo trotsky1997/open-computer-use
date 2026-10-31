@@ -20,7 +20,8 @@ The tarball declares its runtime dependencies; npm installs Playwright Core and
 QuickJS/WASM. It contains neither a browser nor native desktop runtimes.
 Configure OPEN_COMPUTER_USE_CDP_URL with your browser's CDP endpoint, or set
 OPEN_COMPUTER_USE_BROWSER_EXECUTABLE to an absolute trusted Chromium executable
-for [managed headless startup](managed-browser.md). No desktop permission is required for JavaScript startup.
+for [managed startup](managed-browser.md). OPEN_COMPUTER_USE_BROWSER_MODE=headful
+adds native window presentation; headless remains the default. No desktop permission is required for JavaScript startup.
 
 ```sh
 ocu capabilities --json

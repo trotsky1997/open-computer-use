@@ -15,9 +15,10 @@ plugin cache. It does not fetch npm dependencies itself. Run npm ci first when
 node_modules is absent. The installer does not download a browser or its system libraries.
 No desktop permission or native build is needed to
 start the installed JS MCP server. Browser automation accepts an external endpoint through OPEN_COMPUTER_USE_CDP_URL
-or [host-owned headless startup](managed-browser.md) through the absolute
+or [host-owned browser startup](managed-browser.md) through the absolute
 OPEN_COMPUTER_USE_BROWSER_EXECUTABLE path. The installed launcher inherits these
-variables from its host. External CDP takes precedence.
+variables from its host. OPEN_COMPUTER_USE_BROWSER_MODE=headful opts into native
+window presentation; headless remains the default. External CDP takes precedence.
 
 Use an explicit target for another Codex home or a disposable installation:
 
@@ -72,3 +73,11 @@ locally. Registry publication and broader transport/platform coverage remain ope
 Source-removed installed sessions also pass browser-wide WebMCP discovery on
 owned Chrome 158: existing/unbound/dynamic targets, no claims or automatic tool
 calls, and turn/reset resubscription. See [WebMCP](browser-webmcp.md).
+
+Managed headful visibility requires a graphical Linux test fixture. With Xvfb,
+Openbox, xprop and xwininfo installed, include the source-removed headful session
+and MCP checks explicitly:
+
+```sh
+node scripts/tests/browser-only-install-smoke.mjs /path/to/chrome --headful
+```
