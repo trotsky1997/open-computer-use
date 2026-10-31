@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {runInNewContext} from 'node:vm';
-import {BrowserWebMcp,webMcpInput,registeredTools} from './browser-webmcp.mjs';
+import {BrowserWebMcp,webMcpInput,registeredTools,webMcpDescription} from './browser-webmcp.mjs';
 function fixture(send){
  const host=new BrowserWebMcp(()=> 'http://owned.test'),owner={},state=host.state(owner);let closes=0;
  const entry={id:'collection',targetId:'tab',endpoint:'http://owned.test',check(){if(state.closed)throw Error('Turn ended');},tools:new Map(),browser:{async close(){closes++;}},page:{isClosed:()=>false}};
@@ -131,4 +131,22 @@ test('browser crash events match captured native target IDs and preserve root id
  browserSession.emit('Target.targetCrashed',{targetId:'child-target'});assert.equal(entry.watchers.get(child).crashed,true);assert.equal(entry.watchers.get(root).crashed,undefined);assert.equal(entry.rootCrashed,undefined);assert.equal(rootCrashes,0);
  browserSession.emit('Target.targetCrashed',{targetId:'root-target'});assert.equal(entry.rootCrashed,true);assert.equal(rootCrashes,1);
  await f.host.cleanup(f.owner);browserSession.emit('Target.targetCrashed',{targetId:'root-target'});assert.equal(rootCrashes,1);
+});
+
+test('tool descriptions disclose partial frame discovery even with an empty available list',()=>{
+ const unavailableFrames=[{frameId:'child',url:'https://owned.test/frame',status:'unavailable',error:'Owned target closed'}];
+ assert.equal(webMcpDescription({tools:[]}),'No WebMCP tools are available in this document.');
+ for(const tools of [[],[{name:'root__owned',inputSchema:{type:'object'}}]]){
+  const text=webMcpDescription({tools,unavailableFrames});assert.match(text,/discovery is partial/);assert.match(text,/"frameId": "child"/);assert.match(text,/Owned target closed/);assert.doesNotMatch(text,/No WebMCP tools are available/);
+  if(tools.length)assert.match(text,/root__owned/);else assert.match(text,/available frames/);
+ }
+});
+
+test('fetching can reconcile a child crash while root crashes and published handles stay fatal',async()=>{
+ const {EventEmitter}=await import('node:events');
+ for(const root of [true,false])for(const fetching of [true,false]){
+  const f=fixture(()=>{}),entry=f.state.collections.get('collection'),session=new EventEmitter();session.send=async()=>({targetInfo:{targetId:'owned'}});entry.watchers=new Map();entry.fetching=fetching;entry.rootSession=root?session:{};
+  await f.host.watch(f.state,entry,{session,frameId:'owned'});session.emit('Inspector.targetCrashed');
+  assert.equal(entry.crashed,true);assert.equal(!!entry.stale,root||!fetching);assert.equal(!!entry.rootCrashed,root);await f.host.cleanup(f.owner);
+ }
 });

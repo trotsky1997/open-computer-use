@@ -1,4 +1,4 @@
-import {BrowserWebMcp,WEBMCP_DOCUMENTATION,webMcpInput} from './browser-webmcp.mjs';
+import {BrowserWebMcp,WEBMCP_DOCUMENTATION,webMcpInput,webMcpDescription} from './browser-webmcp.mjs';
 import {normalizeHistoryOptions} from './chrome-browser-extension/history.mjs';
 import {BrowserContent} from './browser-content.mjs';
 import {MANAGEMENT_METHODS,MANAGEMENT_DOCUMENTATION,validateManagement} from "./chrome-browser-extension/policy.mjs";
@@ -837,7 +837,7 @@ export function createBrowserApi(activeOutput, environment = process.env, {focus
         async get(id) {
           if(id==='webmcp')return Object.freeze({documentation:async()=>WEBMCP_DOCUMENTATION,async fetchTools(){
             await checkDialog(target.id);const listing=await requestWebMcp({action:'fetch',targetId:target.id});
-            return Object.freeze({description:()=>listing.tools.length?`WebMCP tools available in this document:\n${JSON.stringify(listing.tools,null,2)}\nCall tools.call(name, input) to invoke one.`:'No WebMCP tools are available in this document.',
+            return Object.freeze({description:()=>webMcpDescription(listing),
               async call(name,input={}){if(typeof name!=='string'||!listing.tools.some(tool=>tool.name===name))throw Error('Unknown WebMCP tool; fetchTools again');input=webMcpInput(input);await checkDialog(target.id);invalidate();try{return await requestWebMcp({action:'call',targetId:target.id,collectionId:listing.collectionId,name,input});}finally{invalidate();}},
             });
           }});

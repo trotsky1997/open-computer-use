@@ -503,7 +503,10 @@ Renderer-crash reset/fresh-tab recovery and explicit same-tab reload/load-wait
 have macOS/Linux arm64 evidence. Reload retains the tab binding/ID while old
 collections stay invalid; discovery and fresh native calls resume. Live OOP crash
 checks also preserve a waiting root call and confirm its later cancellation;
-removing the dead child permits fresh root tools on that tab.
+a dead child can remain attached while fetch returns healthy-frame tools and
+explicit unavailable-frame diagnostics. Collection construction reconciles child
+crashes and removes their metadata; published collections still become stale on
+a later crash. Root failure, navigation, cancellation and disconnect remain fatal.
 The public tab capability prints untrusted metadata and preserves native result
 strings; the ordinary host action/confirmation policy still applies. Installer,
 CLI readiness and npm copy lists include the host module. See [WebMCP](browser-webmcp.md).

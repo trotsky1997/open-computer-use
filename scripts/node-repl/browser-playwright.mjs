@@ -421,6 +421,10 @@ export function resolveBrowserLocator(page,steps){
  };
  return resolve(steps);
 }
+// shortcut: pinned Playwright exposes exact native identities via toImpl; review on upgrades.
+export function nativeBrowserFrameId(frame){
+ const id=frame._connection.toImpl(frame)._id;if(typeof id!=='string'||!id)throw Error('Native frame identity unavailable');return id;
+}
 export async function nativeBrowserFrame(page,root,frame,wait){
  let session=root;
  if(frame!==page.mainFrame()){
@@ -431,8 +435,7 @@ export async function nativeBrowserFrame(page,root,frame,wait){
   }
   if(!ancestor)throw Error('Browser frame detached');
  }
- // shortcut: pinned Playwright exposes exact native identities via toImpl; review on upgrades.
- return {session,frameId:frame._connection.toImpl(frame)._id};
+ return {session,frameId:nativeBrowserFrameId(frame)};
 }
 export async function nativeBrowserNode(handle,wait){
  const native=handle._connection.toImpl(handle);

@@ -1227,3 +1227,36 @@ fencing. Test profiles and processes are owned; no normal profile was changed.
 Refresh with a crashed child still attached, whole-browser process death,
 physical/headful, Windows and external-site recovery remain open. No dependency,
 CI or registry release was added. Full harness parity remains active.
+
+## WebMCP refresh with an attached unavailable child
+
+A crashed OOP iframe can remain attached while fetchTools returns a partial
+inventory from healthy frames. The description reports exact native frame IDs,
+URLs and bounded errors as untrusted diagnostics. Failed-frame tools are omitted
+from both metadata and the callable registry. Collection construction reconciles
+child crash events before publication; a later crash still invalidates published
+handles. Root failure, navigation/detachment, turn cancellation and browser
+disconnect remain fatal. Existing per-frame discovery bounds are retained.
+
+The owned Chrome 158 controller passes both JS hosts on macOS and Ubuntu arm64:
+it retains the dead iframe, checks the partial warning and exact target identity,
+executes a freshly fetched root tool, and confirms the existing root wait stays
+live until turn cleanup delivers its abort signal. Existing crash/reload,
+registration, navigation, cancellation and declarative scenarios also pass.
+All 165 Node checks pass on macOS; Linux passes 164 with one macOS-only skip.
+Focused checks cover partial/empty descriptions and fetching/published root/child
+crash policy. No dependency, CI or release was added.
+
+The shared frame helper's evaluation regression passed both hosts on macOS on
+repeat, after an initial navigation timeout. Linux repeatedly timed out at the
+same navigation/load wait after passing DOM/frame reads, mutation/escape rejection
+and CPU deadlines. An unchanged c46f268 baseline reproduces that Linux failure.
+Native inspection shows the main URL committed while an attached child still
+has an empty URL; the cause remains open, and later Linux evaluation cleanup
+checks are unverified in this run. Temporary launcher cleanup now retries bounded
+ENOTEMPTY races; the corrected launcher exits after test failure without masking
+it. These launcher/debug files remain local intermediates.
+
+Next: diagnose the existing navigation/OOP loading failure; broaden crash,
+provider, Windows/headful and external-site recovery coverage. Full parity
+remains active.

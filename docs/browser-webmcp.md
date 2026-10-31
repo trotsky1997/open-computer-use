@@ -153,12 +153,12 @@ opaque names and raw string results. Temporary reference tabs were closed.
 
 A disposable testing profile used Chrome's test keychain flag because the new
 browser's real keychain read blocked; process-stack
-sampling identified that wait. No normal profile/keychain settings were changed. All 163 Node checks pass on macOS; Linux passes 162 with the macOS-only virtual-display check skipped;
+sampling identified that wait. No normal profile/keychain settings were changed. All 165 Node checks pass on macOS; Linux passes 164 with the macOS-only virtual-display check skipped;
 native-free CLI/MCP and both sessions’ read-only evaluation regressions also
 passed on Chrome 158, including renderer-crash cleanup.
 The test runtime came from the official Chrome for Testing channel metadata.
 Browser-wide discovery of unbound tabs, real user-interaction/consent dialogs, headful and
-Windows behavior, whole-browser process death, attached-crashed-frame refresh and broader external-site workflows remain
+Windows behavior, whole-browser process death and broader external-site workflows remain
 unverified. Full transport/claims/native desktop parity remains an active goal.
 
 Turn-owned discovery also passes both sessions on Chrome 158: initial tools
@@ -180,7 +180,18 @@ on Node 24. Crash control sessions detach asynchronously after their target dies
 Live OOP crash isolation passes both hosts on macOS/Linux arm64. The controller
 checks a native `iframe` target distinct from the root, runs waiting tools in
 both processes, and crashes only the child. The child call fails while the root
-call remains live; turn cleanup delivers the root's abort signal. After removing
-the crashed child, fresh root tools execute on the retained tab. Root crash,
-reset and same-tab reload checks also continue to pass. Refresh while a crashed
-child remains attached is outside this evidence.
+call remains live; turn cleanup delivers the root's abort signal. While the crashed child remains attached, fetchTools returns a partial inventory
+with its exact frame ID, URL and bounded error; a freshly fetched root tool
+executes while the original root wait stays pending. Unavailable child tools
+are excluded from the callable list. A later crash invalidates published handles;
+root failures, navigation, detachment, turn cancellation and browser disconnect
+still fail the fetch. Removing the child also permits a full inventory. Root
+crash, reset and same-tab reload checks continue to pass. Each unavailable frame
+can consume the existing 10-second native discovery bound.
+
+The current shared-frame evaluation regression passed both hosts on macOS after
+one navigation timeout. Linux passes DOM/frame reads, isolation and CPU deadlines,
+then repeatedly times out waiting for navigation load. The unchanged c46f268
+baseline reproduces it: native inspection shows the root URL committed with an
+attached child's URL still empty. This existing navigation/loading issue remains
+open; later Linux evaluation cleanup scenarios were not reached in this run.
