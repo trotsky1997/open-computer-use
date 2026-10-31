@@ -548,7 +548,11 @@ Packaging includes the worker helper and options assets. See [browser history](b
 ## Native page-defined tools
 
 BrowserWebMcp owns fetched collections, isolated native registration objects and
-per-call abort controllers across source/Worker sessions. Discovery uses native CDP frame trees, browser target-parent events and explicit
+per-call abort controllers across source/Worker sessions. Browser inventory and
+tab use start a turn-owned HTTP(S) page discovery connection, including unbound
+and newly opened/navigated pages. Discovery creates no callable handles or tab
+claims. Closed/non-web targets release observers; turn/reset disconnects the
+browser and per-tab observers. Discovery uses native CDP frame trees, browser target-parent events and explicit
 iframe attachments. WebMCP never enables target auto-attachment. Collections join native frame/target IDs and parentFrameId ancestry,
 verify OOP root identities, and attach explicitly without startup pauses. These
 connections remain separate from ephemeral Playwright locator/evaluation clients. Chrome 158+ executes registrations

@@ -2681,3 +2681,26 @@ The macOS npm external-browser fixture initially hung in Page.navigate. Matching
 the existing owned-browser fixture with --use-mock-keychain restored both local
 and global external-CDP flows; the production managed launcher already included
 that flag. Linux uses the unchanged platform branch.
+
+## Browser-wide turn-owned native WebMCP discovery
+
+Browser inventory and tab use now observe all HTTP(S) page targets in the
+configured CDP browser for that turn, including previously unbound and later
+opened/navigated pages. Native tools are only discovered; collections and calls
+still require explicit fetch/call. Target closure or non-web navigation releases
+the observer, including rapid return while a previous connection closes. Turn,
+reset and close release all discovery connections; the next browser operation
+resubscribes. The shared 128-tab/error budget and disconnect failures produce
+coalesced partial-discovery diagnostics. Older browsers remain quiet.
+
+macOS passes 185 Node checks; arm64 Linux passes 184 with one macOS-only skip.
+Both platforms pass the new owned browser-wide controller in Worker/source and
+source-removed installed modules. Fixture counters/ownership records verify no
+automatic calls or tab claims. Existing full WebMCP native imperative/declarative,
+OOP frames, cancellation/crash/reset tests pass on both. Installed external and
+managed browser flows plus private-profile host/guardian exit cleanup also pass.
+Focused checks cover observer-budget refusal, rapid navigation during disconnect,
+observer loss, closed-owner fencing and quiet Chrome 156 fallback.
+
+Full extension/in-app transport, claims/takeover, real consent dialogs, headful,
+Windows, remote/unidentified exit and broader external-site behavior remain open.

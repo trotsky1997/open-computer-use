@@ -75,7 +75,7 @@ if(process.argv[2]==='codex-plugin-config') { (await import('node:fs')).chmodSyn
  console.log('PASS installed standalone MCP initializes and evaluates JavaScript without the source checkout or a native binary');
  if(chrome){
   const profile=path.join(root,'chrome profile');mkdirSync(profile);
-  browser=spawn(chrome,['--headless=new','--enable-automation','--enable-features=CDPScreenshotNewSurface','--no-sandbox','--no-first-run','--no-default-browser-check','--disable-background-networking','--disable-component-update','--disable-sync',...(process.platform==='darwin'?['--use-mock-keychain']:[]),'--remote-debugging-address=127.0.0.1','--remote-debugging-port=0',`--user-data-dir=${profile}`,'about:blank'],{stdio:['ignore','ignore','pipe']});
+  browser=spawn(chrome,['--headless=new','--enable-automation','--enable-features=WebMCP,CDPScreenshotNewSurface','--no-sandbox','--no-first-run','--no-default-browser-check','--disable-background-networking','--disable-component-update','--disable-sync',...(process.platform==='darwin'?['--use-mock-keychain']:[]),'--remote-debugging-address=127.0.0.1','--remote-debugging-port=0',`--user-data-dir=${profile}`,'about:blank'],{stdio:['ignore','ignore','pipe']});
   let browserErrors='';browser.stderr.on('data',chunk=>{browserErrors=(browserErrors+chunk).slice(-4000);});
   let launchError;browser.once('error',error=>{launchError=error;});
   const port=await until(()=>{if(launchError)throw launchError;if(browser.exitCode!==null||browser.signalCode!==null)throw Error(`Chrome exited ${browser.exitCode??browser.signalCode}: ${browserErrors}`);try{return readFileSync(path.join(profile,'DevToolsActivePort'),'utf8').split('\n')[0];}catch{return null;}});
@@ -91,6 +91,10 @@ if(process.argv[2]==='codex-plugin-config') { (await import('node:fs')).chmodSyn
   }
   const peer=new JsonLinePeer({command:path.resolve(installed,mcp.command),cwd:installed,env});
   try{await peer.initialize();const result=await peer.request('tools/call',{name:'js',arguments:{code}});assert.equal(result.isError,false,JSON.stringify(result.content));assert.ok(result.content.some(item=>item.text==='Installed browser verified'));console.log('PASS installed plugin launcher MCP real browser flow after source checkout removal');}finally{await peer.close();}
+  const discovery=spawn(process.execPath,[path.join(source,'scripts/run-webmcp-browser-discovery-smoke.mjs'),installed],{env,stdio:['ignore','pipe','pipe']});
+  let discoveryOutput='';discovery.stdout.on('data',chunk=>{discoveryOutput+=chunk;});discovery.stderr.on('data',chunk=>{discoveryOutput+=chunk;});
+  await new Promise((resolve,reject)=>{discovery.once('error',reject);discovery.once('exit',code=>code===0?resolve():reject(Error(discoveryOutput)));});
+  process.stdout.write(discoveryOutput);console.log('PASS installed browser-wide WebMCP discovery after source checkout removal');
   // The installed host owns the lazy browser even after its source checkout disappears.
   delete env.OPEN_COMPUTER_USE_CDP_URL;delete process.env.OPEN_COMPUTER_USE_CDP_URL;
   let executable=path.resolve(chrome);

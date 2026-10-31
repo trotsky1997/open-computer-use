@@ -68,3 +68,7 @@ requests instead of escaping into JavaScript execution. A targeted stream error
 check and immediate-exit native fixture cover this boundary. Native Windows
 and actual Codex app reload remain unverified. A [native-free npm tarball](browser-only-package.md) can also be built and installed
 locally. Registry publication and broader transport/platform coverage remain open.
+
+Source-removed installed sessions also pass browser-wide WebMCP discovery on
+owned Chrome 158: existing/unbound/dynamic targets, no claims or automatic tool
+calls, and turn/reset resubscription. See [WebMCP](browser-webmcp.md).

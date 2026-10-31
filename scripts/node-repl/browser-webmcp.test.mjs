@@ -13,7 +13,7 @@ test('WebMCP validates JSON objects and request scope before IO',()=>{
  const cycle={};cycle.self=cycle;
  for(const input of [null,[],1,new Date(),{toJSON(){return [];}},{value:undefined},{value:Infinity},{value:()=>{}},{value:1n},cycle,{value:'x'.repeat(1024*1024)}])assert.throws(()=>webMcpInput(input));
  const host=new BrowserWebMcp(()=>{throw Error('Unexpected IO');});
- for(const args of [null,{action:'guess',targetId:'tab'},{action:'fetch',targetId:''},{action:'call',targetId:'tab',name:'tool'}])assert.throws(()=>host.request({},args),/WebMCP/);
+ for(const args of [null,{action:'guess',targetId:'tab'},{action:'fetch',targetId:''},{action:'call',targetId:'tab',name:'tool'},{action:'discover',targetId:'tab'},{action:'discover',url:'https://owned.test'}])assert.throws(()=>host.request({},args),/WebMCP/);
 });
 test('WebMCP refuses foreign, changed-endpoint and unknown collection handles',async()=>{
  const f=fixture(()=>{throw Error('Unexpected native call');});
@@ -189,4 +189,42 @@ test('native discovery attaches explicitly and routes inventories and notices to
 test('confirmed captured-process exit releases a disconnected invocation with an explicit failure',async()=>{
  const f=fixture(()=>Promise.reject(Error('Browser connection closed'))),entry=f.state.collections.get('collection');entry.connected=false;entry.exitProof={processesGone:()=>true};
  await assert.rejects(f.host.request(f.owner,f.args),/browser process exited/);assert.equal(entry.processExited,true);assert.equal(f.state.active.size,0);await f.host.cleanup(f.owner);assert.equal(f.closed(),1);
+});
+
+test('browser-wide discovery observes unbound HTTP pages, reuses its connection and releases all observers',async()=>{
+ const {createServer}=await import('node:http');let event,disconnected,opened=0,closed=0,product='Chrome/158.0.0.0';
+ const server=createServer((_request,response)=>{response.setHeader('Content-Type','application/json');response.end(JSON.stringify({webSocketDebuggerUrl:'ws://owned.test/browser'}));});
+ await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+ const host=new BrowserWebMcp(()=>`http://127.0.0.1:${server.address().port}`,async(_url,onEvent,onClose)=>{
+  opened++;event=onEvent;disconnected=onClose;
+  return {close(){closed++;onClose();},async send(method){
+   if(method==='Browser.getVersion')return {product};
+   if(method==='Target.setDiscoverTargets'){onEvent({method:'Target.targetCreated',params:{targetInfo:{type:'page',targetId:'initial',url:'https://owned.test'}}});return {};}
+   if(method==='Target.getTargetInfo')return {targetInfo:{type:'page',targetId:'initial',url:'https://owned.test/returned'}};
+   if(method==='Target.getTargets')return {targetInfos:[{type:'page',targetId:'initial',url:'https://owned.test'},{type:'page',targetId:'hidden',url:'chrome-extension://owned/bridge.html'},{type:'iframe',targetId:'child',url:'https://owned.test'}]};
+   throw Error('Unexpected discovery call '+method);
+  }};
+ });const owner={},seen=[];
+ host.observe=async(state,id)=>{seen.push(id);const observer={targetId:id,endpoint:host.endpoint(),ready:Promise.resolve(),connection:{async close(){closed++;}}};state.observers.set(id,observer);state.notifications.set(id,observer);};
+ try{
+  await host.request(owner,{action:'discover'});await host.request(owner,{action:'discover'});assert.equal(opened,1);assert.deepEqual(seen,['initial']);
+  assert.equal(host.state(owner).collections.size,0);assert.equal(host.notifications(owner).length,1);
+  event({method:'Target.targetInfoChanged',params:{targetInfo:{type:'page',targetId:'late',url:'https://owned.test/late'}}});
+  await new Promise(resolve=>setImmediate(resolve));assert.deepEqual(seen,['initial','late']);assert.equal(host.notifications(owner).length,1);
+  event({method:'Target.targetDestroyed',params:{targetId:'late'}});await Promise.allSettled([...host.state(owner).pending]);assert.equal(host.state(owner).observers.has('late'),false);
+  const current=host.state(owner);let release;
+  current.observers.get('initial').connection.close=async()=>{closed++;await new Promise(resolve=>{release=resolve;});};
+  event({method:'Target.targetInfoChanged',params:{targetInfo:{type:'page',targetId:'initial',url:'about:blank'}}});
+  event({method:'Target.targetInfoChanged',params:{targetInfo:{type:'page',targetId:'initial',url:'https://owned.test/returned'}}});
+  await new Promise(resolve=>setImmediate(resolve));assert.deepEqual(seen,['initial','late']);release();
+  await Promise.allSettled([...current.pending]);assert.deepEqual(seen,['initial','late','initial']);assert.equal(host.notifications(owner).length,1);
+  for(let i=0;i<127;i++)current.observers.set('filler-'+i,{});
+  event({method:'Target.targetCreated',params:{targetInfo:{type:'page',targetId:'over-budget',url:'https://owned.test'}}});
+  assert.deepEqual(seen,['initial','late','initial']);assert.match(host.notifications(owner)[0].text,/128-tab budget/);
+  for(let i=0;i<127;i++)current.observers.delete('filler-'+i);
+  disconnected();assert.match(host.notifications(owner)[0].text,/observer disconnected/);
+  await host.cleanup(owner);assert.equal(closed,4);assert.equal(host.owners.size,0);
+  event({method:'Target.targetCreated',params:{targetInfo:{type:'page',targetId:'after',url:'https://owned.test'}}});disconnected();assert.deepEqual(seen,['initial','late','initial']);assert.deepEqual(host.notifications(owner),[]);
+  product='Chrome/156.0.0.0';const older={};assert.equal(await host.request(older,{action:'discover'}),false);assert.deepEqual(host.notifications(older),[]);await host.cleanup(older);assert.equal(opened,2);assert.equal(closed,5);
+ }finally{await host.cleanup(owner);server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}
 });

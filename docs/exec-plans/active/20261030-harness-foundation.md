@@ -1957,3 +1957,33 @@ The macOS npm external-browser fixture initially hung in Page.navigate. Matching
 the existing owned-browser fixture with --use-mock-keychain restored both local
 and global external-CDP flows; the production managed launcher already included
 that flag. Linux uses the unchanged platform branch.
+
+## Browser-wide turn-owned WebMCP discovery
+
+Extend the existing native WebMCP observer to discover initial HTTP(S) page
+targets and later created/navigated targets without binding them. Reuse native
+frame/tool watchers and turn notices; never fetch callable collections or claim
+tabs during discovery. Keep bounded budgets and explicit diagnostics. Turn/reset
+cleanup must await pending discovery and close its browser/per-tab connections.
+Verify initial/unbound/dynamic pages, cleanup, next-turn resubscription, existing
+bound-tab/native-call behavior and installed source-removed payloads on owned
+macOS/Linux browsers. The broader parity goal remains active.
+
+Implemented one turn-owned native browser target observer and reused the existing
+per-tab/frame observers. Initial inventory and later HTTP(S) page creation or
+navigation queue coalesced tool notices without callable handles or tab claims.
+Closing/leaving web targets retires observers; a target returning to HTTP while
+its previous observer disconnects is rechecked and observed again. The browser
+and per-tab connections drain on turn/reset/close. Native calls remain explicit.
+
+Validation: macOS Node 185/185, arm64 Linux 184/185 (one macOS-only skip). Both
+systems pass the owned browser-wide controller in Worker/source sessions and
+against source-removed installed modules: initial/new/navigated/closed targets,
+no automatic calls/claims, explicit fetch/call, next-turn and reset resubscription.
+The existing complete native WebMCP controller passes on both systems, including
+OOP frames, imperative/declarative calls, cancellation and renderer recovery.
+Installed external/managed MCP and session flows plus managed parent/guardian
+death cleanup pass on both systems. Focused checks cover the 128-tab budget,
+rapid return during disconnect, observer loss and quiet older-browser fallback.
+Real consent/headful/Windows, unidentified/remote death and wider external-site
+coverage remain open. The full parity goal remains active.

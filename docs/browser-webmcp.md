@@ -23,19 +23,25 @@ No call is automatically replayed.
 Always fetch in each turn, and again after navigation, tool changes or a stale
 handle failure. Only call exact names in that returned listing. Current tab
 capabilities advertise `webmcp`; `.documentation()` provides the agent guidance.
-Binding or using a tab starts a turn-owned native observer on Chrome 158+.
+Browser inventory or tab use starts turn-owned browser-wide discovery on Chrome
+158+. Existing and newly created/navigated HTTP(S) pages are observed without
+claiming their tabs or fetching callable collections. Bound tabs also start their
+native frame observer.
 It reports initially available tools before an explicit fetch, later additions/
 removals, and tools in newly attached same-process/OOP frames. Navigations resync
 the observer; using a retained tab binding in a later turn restarts discovery.
 Older Chrome keeps ordinary tab actions working and explicit fetch still reports
-its unsupported-version error. Active dialogs defer discovery until normal tab
-operations resume.
+its unsupported-version error. Paused pages and active dialogs can consume the
+10-second discovery budget; incomplete discovery leaves ordinary browser access
+available and asks for an explicit refresh after the page resumes.
 
 Repeated changes coalesce into one queued notice per tab, prepended to a later
 source/Worker JS result without replacing explicit output. Asynchronous native
 events can arrive after a result is returned. Notices contain a tab ID and refresh
 guidance, without tool definitions or execution. Fetch current names/schema before
-calling tools. Browser-wide inventory and tabs never bound/used are unobserved.
+calling tools. Listing tabs leaves user tabs unclaimed. Closed targets and targets
+leaving HTTP(S) release their observers. Turn/reset closes the browser-wide
+connection and every per-tab observer; the next browser operation resubscribes.
 
 Observers use native CDP target discovery and explicit attachments. Browser
 target parent IDs and native frame ancestry select only descendants of the bound
@@ -49,7 +55,9 @@ old queued notices; collections still become stale and must be fetched anew.
 Connections/observers close with their turn; failed disconnect retains ownership
 for cleanup retry. No page tool runs in response to an event.
 
-Each turn allows 128 observed tabs. Per-tab synchronization limits the current
+Each turn allows 128 observed tabs; failed targets share this browser-wide budget.
+Budget exhaustion and observer loss produce a coalesced incomplete-discovery
+notice. Bind the required tab and fetch explicitly, or reset to restart discovery. Per-tab synchronization limits the current
 frame tree and retained CDP sessions to 128, and checks a 10-second batch budget
 alongside bounded native calls. Failed background synchronization marks discovery
 incomplete and asks for an explicit refresh. Optional discovery failures print a
@@ -142,6 +150,7 @@ runs through the harness's explicit reload and load-wait methods.
 node --test scripts/node-repl/*.test.mjs
 # Owned disposable Chrome 158+ with WebMCP enabled:
 OPEN_COMPUTER_USE_CDP_URL=http://127.0.0.1:9222 node scripts/run-webmcp-smoke.mjs
+OPEN_COMPUTER_USE_CDP_URL=http://127.0.0.1:9222 node scripts/run-webmcp-browser-discovery-smoke.mjs
 # Separate owned earlier browser:
 OPEN_COMPUTER_USE_CDP_URL=http://127.0.0.1:9223 node scripts/run-webmcp-smoke.mjs --missing-native
 ```
@@ -158,18 +167,18 @@ opaque names and raw string results. Temporary reference tabs were closed.
 
 A disposable testing profile used Chrome's test keychain flag because the new
 browser's real keychain read blocked; process-stack
-sampling identified that wait. No normal profile/keychain settings were changed. All 169 Node checks pass on macOS; Linux passes 168 with the macOS-only virtual-display check skipped;
+sampling identified that wait. No normal profile/keychain settings were changed. All 185 Node checks pass on macOS; Linux passes 184 with the macOS-only virtual-display check skipped;
 native-free CLI/MCP and both sessions’ read-only evaluation regressions also
 passed on Chrome 158, including renderer-crash cleanup.
 The test runtime came from the official Chrome for Testing channel metadata.
-Browser-wide discovery of unbound tabs, real user-interaction/consent dialogs, headful and
+Real user-interaction/consent dialogs, headful and
 Windows behavior, unidentified/remote browser process death and broader external-site workflows remain
 unverified. Full transport/claims/native desktop parity remains an active goal.
 
 Turn-owned discovery also passes both sessions on Chrome 158: initial tools
 without fetching handles, an already loaded bound tab, navigation, late same-
 process/OOP frames and retained tab bindings used after turn cleanup. Native
-connection round trips settle fixture events before unrelated-tab isolation
+connection round trips settle fixture events before browser-wide unbound-tab
 assertions. A separate older Chrome passes ordinary binding and explicit
 unsupported-WebMCP behavior. Ordinary browser, navigation/input/filechooser and
 dialog controllers are rerun when this shared binding path changes.
@@ -288,3 +297,11 @@ consistent with that mechanism; no C++ execution trace was captured. Chrome 159
 also reproduced the combined inline fixture failure, so no new version gate or
 automatic retry was added. An external page's inline-registration hang remains
 an engine/provider limitation. Headful/Windows and external sites are unverified.
+
+Browser-wide discovery passes source and Worker sessions on macOS and arm64
+Linux: initial unbound tools, later pages, HTTP/about:blank/HTTP navigation,
+closed-tab observer release, explicit binding/fetch/call, and turn/reset
+resubscription. Counters prove discovery never executes tools; tab ownership
+records stay unchanged. The same controller passes against source-removed
+installed plugin modules. Existing imperative/declarative, OOP frame and native
+cancellation/crash workflows also pass on both systems.
