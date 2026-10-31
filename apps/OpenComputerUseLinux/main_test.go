@@ -500,8 +500,8 @@ func TestLinuxRuntimeDocumentsATSPIAndFallbackBoundary(t *testing.T) {
 	if !strings.Contains(linuxRuntimeScript, "Atspi") {
 		t.Fatal("Linux runtime must use AT-SPI")
 	}
-	if !strings.Contains(linuxRuntimeScript, "generate_mouse_event") {
-		t.Fatal("Linux runtime should keep coordinate input explicit and visible in the bridge")
+	if !strings.Contains(x11CaptureScript, "XTestFakeMotionEvent") {
+		t.Fatal("Linux coordinate input must use the verified X11 bridge")
 	}
 	if !strings.Contains(serverInstructions, "not a universal Wayland background input model") {
 		t.Fatal("MCP instructions must document the Linux background-input boundary")

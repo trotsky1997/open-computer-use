@@ -14,8 +14,8 @@ removes them. Parent-death handling only covers the one-shot runtime process.
 
 Python cancellation bypasses ordinary action-fallback exception handlers. Short
 key-chord and XTest press/release groups finish their release attempt before
-raising cancellation. A multi-click stops before its next pair. Legacy drag
-cleanup releases at its last attempted position. Cancellation can interrupt a
+raising cancellation. A multi-click stops before its next pair. Verified X11 drag
+cleanup releases at the current pointer position without jumping to its endpoint. Cancellation can interrupt a
 long backend call; after 500 ms an unresponsive child is killed. Already accepted
 UI changes remain applied, and forced termination cannot confirm input release.
 Inspect the current UI before retrying an interrupted operation.

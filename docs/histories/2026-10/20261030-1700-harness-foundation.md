@@ -1208,3 +1208,30 @@ for cancellation and all six existing GTK controllers; CLI SIGTERM/SIGKILL
 lifecycle probes. Owned processes and private VM work files were cleaned up.
 No dependency or CI added. macOS/Windows and physical/Wayland cancellation remain
 unverified; the full harness goal stays active.
+
+
+## Verified Linux X11 within-window drag
+
+Replaced the legacy AT-SPI global drag and bound-window rejection with one XTest
+route through shared click preflight. Both endpoints are checked before pointer
+motion; the native frame, expected previous position and held-button/modifier
+state are checked between steps. Each attempted press has a release attempt on
+failure/cancellation, at the current position, with no replay or endpoint jump.
+Go rejects malformed/nonfinite coordinates before starting the bridge. Tool help
+and current lifecycle/click documentation reflect the new path.
+
+The GTK fixture records actual held motion and press/release positions. Both
+REPLs verify bidirectional endpoints, sibling-window isolation, outside/omitted/
+inactive/occluded/input-only/grab rejection and receiver releases during gated
+mid-drag reset/close, plus a fresh post-reset drag. Targeted checks cover mapping,
+failed press/motion, changed frame/pointer and cancellation cleanup. The gated
+runtime wrapper normalizes argv before runpy; no production test gate was added.
+See [X11 drag](../../linux-drag-input.md).
+
+Validation passed: 145 Node checks, 70 Python checks (53 runtime, 14 X11,
+3 clipboard), 46 Linux Go top-level checks plus 10 subchecks, both CLI process
+lifecycle probes, and both REPL modes across all eight isolated GTK controllers
+(drag, click, image, paste, text, window, launch and cancellation). Owned processes
+and private VM files were cleaned up. No dependency or CI added. Physical devices,
+real window managers, compositors/Wayland, cross-window drag/drop, long-press/chords
+and broader platform behavior remain open. The full harness goal remains active.

@@ -16,13 +16,13 @@ GLib.set_application_name(name)
 windows, entries, notes, keys = {}, {}, {}, {}
 clipboard_data = []
 image_windows, popup_menus = [], []
-pointer_events, pointer_areas = {}, {}
+pointer_events, pointer_areas, pointer_motion = {}, {}, {}
 interceptors, pointer_grabbed = [], False
 retired_interceptors = []
 
 def state(*_args):
     with open(root + '/state.tmp', 'w', encoding='utf-8') as output:
-        json.dump({'pid': os.getpid(), 'windows': list(windows), 'keys': keys, 'clipboard': clipboard_data, 'popups': sum(menu.get_visible() for menu in popup_menus), 'pointer': pointer_events, 'pointerGrabbed': pointer_grabbed, 'interceptors': len(interceptors), 'pointerSizes': {key: [area.get_allocated_width(), area.get_allocated_height()] for key, area in pointer_areas.items() if key in windows},
+        json.dump({'pid': os.getpid(), 'windows': list(windows), 'keys': keys, 'clipboard': clipboard_data, 'popups': sum(menu.get_visible() for menu in popup_menus), 'pointer': pointer_events, 'pointerMotion': pointer_motion, 'pointerGrabbed': pointer_grabbed, 'interceptors': len(interceptors), 'pointerSizes': {key: [area.get_allocated_width(), area.get_allocated_height()] for key, area in pointer_areas.items() if key in windows},
                    'pointerPoints': {key: area.translate_coordinates(windows[key], area.get_allocated_width() // 2, area.get_allocated_height() // 2) for key, area in pointer_areas.items() if key in windows},
                    'values': {key: entry.get_text() for key, entry in entries.items()},
                    'selections': {key: entry.get_selection_bounds() for key, entry in entries.items()},
@@ -79,14 +79,21 @@ def create(key, value):
     keys[key] = {'press': [], 'release': []}
     key_area = Gtk.DrawingArea()
     key_area.set_can_focus(True)
-    key_area.add_events(Gdk.EventMask.KEY_PRESS_MASK | Gdk.EventMask.KEY_RELEASE_MASK | Gdk.EventMask.BUTTON_PRESS_MASK | Gdk.EventMask.BUTTON_RELEASE_MASK)
-    pointer_events[key], pointer_areas[key] = [], key_area
+    key_area.add_events(Gdk.EventMask.KEY_PRESS_MASK | Gdk.EventMask.KEY_RELEASE_MASK | Gdk.EventMask.BUTTON_PRESS_MASK | Gdk.EventMask.BUTTON_RELEASE_MASK | Gdk.EventMask.POINTER_MOTION_MASK)
+    pointer_events[key], pointer_areas[key], pointer_motion[key] = [], key_area, []
     def record_pointer(_area, event, phase):
         pointer_events[key].append({"phase": phase, "button": event.button, "type": event.type.value_nick, "x": event.x, "y": event.y})
         state()
         return True
     key_area.connect("button-press-event", record_pointer, "press")
     key_area.connect("button-release-event", record_pointer, "release")
+    def record_motion(_area, event):
+        if event.state & Gdk.ModifierType.BUTTON1_MASK:
+            pointer_motion[key].append({'x': event.x, 'y': event.y, 'state': int(event.state)})
+            state()
+        return True
+    key_area.connect('motion-notify-event', record_motion)
+
     key_area.set_size_request(100, 24)
     color = '#ff0000' if key == 'A' else '#0000ff'
     marker = Gtk.Label()

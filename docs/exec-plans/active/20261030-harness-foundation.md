@@ -536,3 +536,24 @@ for cancellation and all six existing GTK controllers; CLI SIGTERM/SIGKILL
 lifecycle probes. Owned processes and private VM work files were cleaned up.
 No dependency or CI added. macOS/Windows and physical/Wayland cancellation remain
 unverified; the full harness goal stays active.
+
+
+## Verified Linux X11 drag
+
+Replace the legacy AT-SPI global drag and the bound-window rejection with one
+verified XTest path. Reuse click preflight, validate both endpoints, preserve
+press/release cleanup through cooperative cancellation, and recheck native frame
+and pointer state between motion steps. Cover exact GTK receiving coordinates,
+held-button motion, failure/cancellation releases, inactive/occluded/intercepted
+rejection and existing pointer workflows. Keep wider platform/Wayland/physical
+routing gaps in the full active goal.
+
+See [verified X11 drag](../../linux-drag-input.md). The full goal stays active.
+
+Validation passed: 145 Node checks, 70 Python checks (53 runtime, 14 X11,
+3 clipboard), 46 Linux Go top-level checks plus 10 subchecks, both CLI process
+lifecycle probes, and both REPL modes across all eight isolated GTK controllers
+(drag, click, image, paste, text, window, launch and cancellation). Owned processes
+and private VM files were cleaned up. No dependency or CI added. Physical devices,
+real window managers, compositors/Wayland, cross-window drag/drop, long-press/chords
+and broader platform behavior remain open. The full harness goal remains active.

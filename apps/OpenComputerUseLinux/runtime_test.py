@@ -466,7 +466,7 @@ class RuntimeActionReadBackTests(unittest.TestCase):
         self.addCleanup(self.stack.close)
         self.stack.enter_context(mock.patch.object(self.runtime, "resolve_app"))
         self.stack.enter_context(mock.patch.object(self.runtime, "main_window", return_value=(0, object())))
-        for name in ("extents", "find_element", "send_key", "send_drag", "send_verified_click",
+        for name in ("extents", "find_element", "send_key", "send_verified_drag", "send_verified_click",
                      "invoke_secondary_action", "scroll_element", "insert_text", "set_element_value"):
             self.stack.enter_context(mock.patch.object(self.runtime, name))
         self.snapshot = self.stack.enter_context(mock.patch.object(self.runtime, "build_snapshot", return_value={"elements": []}))
@@ -489,7 +489,7 @@ class RuntimeActionReadBackTests(unittest.TestCase):
                 self.snapshot.assert_not_called()
                 self.sleep.assert_not_called()
         self.runtime.send_key.assert_called_once_with("Return")
-        self.runtime.send_drag.assert_called_once_with(1, 2, 3, 4)
+        self.runtime.send_verified_drag.assert_called_once()
         self.runtime.insert_text.assert_called_once()
 
     def test_default_action_still_waits_and_returns_snapshot(self):
@@ -530,8 +530,8 @@ class WindowBindingTests(unittest.TestCase):
     def test_unverified_bound_physical_input_never_reaches_global_synthesis(self):
         runtime = load_runtime()
         runtime.Atspi.StateType = types.SimpleNamespace(ACTIVE=1, FOCUSED=2)
-        with mock.patch.object(runtime, "resolve_target", return_value=(object(), 0, object())), mock.patch.object(runtime, "extents", return_value=None), mock.patch.object(runtime, "find_element", return_value=None), mock.patch.object(runtime, "state_contains", return_value=False), mock.patch.object(runtime, "send_drag") as drag, mock.patch.object(runtime, "send_key") as key:
-            with self.assertRaisesRegex(RuntimeError, "pointer routing is unavailable"):
+        with mock.patch.object(runtime, "resolve_target", return_value=(object(), 0, object())), mock.patch.object(runtime, "extents", return_value=None), mock.patch.object(runtime, "find_element", return_value=None), mock.patch.object(runtime, "state_contains", return_value=False), mock.patch("x11_capture.drag_visible_window") as drag, mock.patch.object(runtime, "send_key") as key:
+            with self.assertRaisesRegex(RuntimeError, "requires local X11 geometry"):
                 runtime.perform_operation({"tool": "drag", "app": runtime.WINDOW_PREFIX + "owned"})
             with self.assertRaisesRegex(RuntimeError, "verified focus"):
                 runtime.perform_operation({"tool": "press_key", "app": runtime.WINDOW_PREFIX + "owned", "key": "x"})
@@ -730,6 +730,17 @@ class IndexedTextTests(unittest.TestCase):
                 runtime.insert_text(node, "wrong", node=node)
         self.assertEqual(node.text, "hello")
 
+class VerifiedDragTests(unittest.TestCase):
+    def test_drag_uses_fresh_identity_and_window_relative_coordinates(self):
+        runtime = load_runtime()
+        app, window = object(), object()
+        bounds = {'x': 100, 'y': 200, 'width': 400, 'height': 300}
+        with mock.patch.object(runtime, 'verified_window_identity', return_value={'pid': 42}) as identity, mock.patch('x11_capture.drag_visible_window') as send:
+            runtime.send_verified_drag(app, window, bounds, 10.2, 20.2, 110.1, 120.1)
+        identity.assert_called_once_with(app, window, bounds)
+        send.assert_called_once_with(42, bounds, (110, 220), (210, 320))
+
+
 class CancellationTests(unittest.TestCase):
     def test_key_chord_releases_before_cancellation_escapes(self):
         import native_cancel as cancel
@@ -747,19 +758,6 @@ class CancellationTests(unittest.TestCase):
                 runtime.send_key("Ctrl+a")
         self.assertEqual(events, ["lock", "sym", "unlock"])
 
-    def test_drag_releases_at_last_position_after_cancellation(self):
-        import native_cancel as cancel
-        runtime = load_runtime()
-        events = []
-        def send(x, y, kind):
-            events.append((x, y, kind))
-            if kind == "abs" and len(events) > 2:
-                cancel.handle_signal(None, None)
-        runtime.Atspi.generate_mouse_event = send
-        with mock.patch.object(cancel, "_requested", False):
-            with self.assertRaises(cancel.OperationCancelled):
-                runtime.send_drag(0, 0, 120, 120)
-        self.assertEqual(events, [(0, 0, "abs"), (0, 0, "b1p"), (10, 10, "abs"), (10, 10, "b1r")])
 
 
 if __name__ == "__main__":

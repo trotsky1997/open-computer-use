@@ -41,9 +41,10 @@ Physical clicks visibly move the system pointer and leave it at the selected
 point. Pointer probes briefly own/release the pointer. Concurrent hardware input,
 window movement or a newly acquired grab can race the sequential checks; user
 interruption/claim handling remains open. A post-send error can follow a partial
-UI effect, so inspect before retrying. Pending native-operation cancellation through process shutdown still needs
-stronger coverage. Hard interruption and XTest withdrawal can prevent release
-confirmation. Existing drag, long-press/chord, background,
+UI effect, so inspect before retrying. Cooperative [native cancellation](linux-native-cancellation.md) has reset/close
+and active-child cleanup coverage. Hard interruption and XTest withdrawal can prevent release
+confirmation. [Verified within-window drag](linux-drag-input.md) shares the pointer preflight.
+Long-press/chord, background,
 Wayland/composited and wider window-manager/provider routes remain open.
 
 Private Ubuntu arm64 Xvfb checks in both REPL modes verify actual receiving-widget

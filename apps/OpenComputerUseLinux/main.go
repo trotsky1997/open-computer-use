@@ -537,6 +537,12 @@ func (s *service) drag(app string, fromX, fromY, toX, toY *float64) toolCallResu
 	if toY == nil {
 		return textResult("Missing required argument: to_y", true)
 	}
+	for _, coordinate := range []*float64{fromX, fromY, toX, toY} {
+		if math.IsNaN(*coordinate) || math.IsInf(*coordinate, 0) {
+			return textResult("drag coordinates must be finite numbers", true)
+		}
+	}
+
 	snapshot := s.currentSnapshot(app)
 	if snapshot == nil {
 		return textResult("No app state is available for "+app+". Run get_app_state before action tools.", true)
@@ -1458,7 +1464,7 @@ func toolDefinitions() []toolDefinition {
 		},
 		{
 			Name:        "drag",
-			Description: "Drag from one point to another using pixel coordinates. This tool is part of plugin `Computer Use`.",
+			Description: "Drag with the left button between screenshot pixel coordinates inside a verified local noncomposited X11 window. Visibly moves the pointer. This tool is part of plugin `Computer Use`.",
 			Annotations: defaultAnnotations(),
 			InputSchema: objectSchema(map[string]any{
 				"app":    stringProperty("App name or bundle identifier"),

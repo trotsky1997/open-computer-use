@@ -177,5 +177,64 @@ class CancellationTests(unittest.TestCase):
         client.lib.XSync.assert_called()
 
 
+class DragTests(unittest.TestCase):
+    client = ImageTests.client
+
+    def prepared(self):
+        client = self.client()
+        xtest = mock.Mock()
+        client.prepare_pointer = mock.Mock(return_value=(xtest, 2))
+        client.verify_frame = mock.Mock(return_value=2)
+        client.require_neutral = mock.Mock()
+        return client, xtest
+
+    def test_drag_moves_under_one_press_then_releases(self):
+        client, xtest = self.prepared()
+        positions = []
+        for step in range(1, 13):
+            positions.extend([(2, step - 1, 0, 0x100), (2, step, 0, 0x100)])
+        client.pointer = mock.Mock(side_effect=positions + [(2, 12, 0, 0)])
+        with mock.patch.object(capture.time, 'sleep'):
+            client.drag(42, (0, 0, 13, 1), (0, 0), (12, 0))
+        self.assertEqual(xtest.XTestFakeButtonEvent.call_args_list, [mock.call(1, 1, 1, 0), mock.call(1, 1, 0, 0)])
+        self.assertEqual(xtest.XTestFakeMotionEvent.call_args_list, [mock.call(1, 0, x, 0, 0) for x in range(1, 13)])
+        self.assertEqual(client.lib.XUngrabServer.call_count, 12)
+
+    def test_drag_cancellation_and_backend_failure_release_without_more_motion(self):
+        import native_cancel as cancel
+        for failure in ('cancel', 'frame', 'press', 'motion', 'pointer', 'moved'):
+            with self.subTest(failure=failure), mock.patch.object(cancel, '_requested', False):
+                client, xtest = self.prepared()
+                client.pointer = mock.Mock(return_value=(2, 0, 0, 0x100))
+                if failure == 'frame':
+                    client.verify_frame.side_effect = RuntimeError('frame changed')
+                elif failure == 'press':
+                    xtest.XTestFakeButtonEvent.side_effect = [0, 1]
+                elif failure == 'motion':
+                    xtest.XTestFakeMotionEvent.return_value = 0
+                elif failure == 'pointer':
+                    client.pointer.return_value = (99, 0, 0, 0x100)
+                elif failure == 'moved':
+                    client.pointer.return_value = (2, 5, 0, 0x100)
+                else:
+                    def signal_on_press(_display, _code, down, _delay):
+                        if down:
+                            cancel.handle_signal(None, None)
+                        return 1
+                    xtest.XTestFakeButtonEvent.side_effect = signal_on_press
+                with self.assertRaises((RuntimeError, cancel.OperationCancelled)):
+                    client.drag(42, (0, 0, 13, 1), (0, 0), (12, 0))
+                self.assertEqual(xtest.XTestFakeButtonEvent.call_args_list, [mock.call(1, 1, 1, 0), mock.call(1, 1, 0, 0)])
+                self.assertLessEqual(xtest.XTestFakeMotionEvent.call_count, 1)
+
+    def test_invalid_endpoints_never_prepare_pointer(self):
+        for point in ((13, 0), (-1, 0), (1.5, 0), (float('nan'), 0), (True, 0)):
+            client, xtest = self.prepared()
+            with self.assertRaises(RuntimeError):
+                client.drag(42, (0, 0, 13, 1), (0, 0), point)
+            client.prepare_pointer.assert_not_called()
+            xtest.XTestFakeButtonEvent.assert_not_called()
+
+
 if __name__ == '__main__':
     unittest.main()

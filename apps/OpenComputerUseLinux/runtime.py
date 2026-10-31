@@ -703,27 +703,15 @@ def screen_point(window_bounds, element=None, x=None, y=None):
     return window_bounds["x"] + float(x), window_bounds["y"] + float(y)
 
 
-def send_drag(from_x, from_y, to_x, to_y):
-    check_cancelled()
-    Atspi.generate_mouse_event(int(round(from_x)), int(round(from_y)), "abs")
-    attempted = False
-    x, y = from_x, from_y
+def send_verified_drag(app, window, bounds, from_x, from_y, to_x, to_y):
+    identity = verified_window_identity(app, window, bounds)
+    start = screen_point(bounds, None, from_x, from_y)
+    end = screen_point(bounds, None, to_x, to_y)
+    from x11_capture import drag_visible_window
     try:
-        with defer_cancellation():
-            check_cancelled()
-            attempted = True
-            Atspi.generate_mouse_event(int(round(from_x)), int(round(from_y)), "b1p")
-        steps = 12
-        for step in range(1, steps + 1):
-            check_cancelled()
-            x = from_x + ((to_x - from_x) * step / steps)
-            y = from_y + ((to_y - from_y) * step / steps)
-            Atspi.generate_mouse_event(int(round(x)), int(round(y)), "abs")
-            time.sleep(0.02)
-    finally:
-        if attempted:
-            with defer_cancellation():
-                Atspi.generate_mouse_event(int(round(x)), int(round(y)), "b1r")
+        drag_visible_window(identity["pid"], bounds, tuple(round(v) for v in start), tuple(round(v) for v in end))
+    except Exception as exc:
+        raise RuntimeError("Verified pointer drag failed; inspect before retrying: " + str(exc)) from exc
 
 
 KEY_ALIASES = {
@@ -1001,12 +989,9 @@ def perform_operation(operation):
     element_record = operation.get("element")
     element = find_element(app, element_record, window=window, strict=bound or (tool in ("type_text", "select_text", "click") and element_record is not None))
 
-    def physical(pointer=False, force=False):
+    def physical(force=False):
         if not bound and not force:
             return
-        if pointer:
-            # shortcut: enable physical pointer input after native hit routing is verified.
-            raise RuntimeError("Window-bound physical pointer routing is unavailable; use a native accessibility action")
         if not state_contains(window, Atspi.StateType.ACTIVE) or not any(state_contains(node, Atspi.StateType.FOCUSED) for node in iter_all(window, max_depth=MAX_DEPTH)):
             raise RuntimeError("Window-bound keyboard input requires verified focus in the bound window")
 
@@ -1049,12 +1034,7 @@ def perform_operation(operation):
         physical()
         scroll_element(operation.get("direction", "down"), operation.get("pages", 1))
     elif tool == "drag":
-        physical(pointer=True)
-        from_x, from_y = screen_point(
-            bounds, None, operation.get("from_x"), operation.get("from_y")
-        )
-        to_x, to_y = screen_point(bounds, None, operation.get("to_x"), operation.get("to_y"))
-        send_drag(from_x, from_y, to_x, to_y)
+        send_verified_drag(app, window, bounds, operation.get("from_x"), operation.get("from_y"), operation.get("to_x"), operation.get("to_y"))
     elif tool == "select_text":
         select_text(element, operation.get("text"), operation.get("prefix", ""), operation.get("suffix", ""), operation.get("selection", "text"))
     elif tool == "type_characters":

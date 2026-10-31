@@ -256,15 +256,16 @@ class X11:
         finally:
             self.lib.XFreeModifiermap(mapping)
 
-    def click(self, expected_pid, rectangle, point, button, count):
-        if button not in ("left", "middle", "right") or type(count) is not int or not 1 <= count <= 3:
-            raise RuntimeError("Click requires left/middle/right and count 1..3")
+    def require_point(self, rectangle, point):
         x, y, width, height = rectangle
-        if any(type(value) not in (int, float) or not float(value).is_integer() for value in point):
-            raise RuntimeError("Native click requires integral pixel coordinates")
-        px, py = map(int, point)
+        if len(point) != 2 or any(type(value) not in (int, float) or not float(value).is_integer() for value in point):
+            raise RuntimeError("Native pointer input requires integral pixel coordinates")
+        px, py = point
         if not x <= px < x + width or not y <= py < y + height:
-            raise RuntimeError("Click point is outside the selected frame")
+            raise RuntimeError("Pointer point is outside the selected frame")
+
+    def prepare_pointer(self, expected_pid, rectangle, point):
+        px, py = map(int, point)
         xtest = C.CDLL(ctypes.util.find_library("Xtst") or "libXtst.so.6")
         for name, args in {
             "XTestQueryExtension": [C.c_void_p] + [C.POINTER(C.c_int)] * 4,
@@ -286,7 +287,8 @@ class X11:
                 raise RuntimeError("Native pointer grab unavailable (status {})".format(status))
             self.lib.XUngrabPointer(self.display, 0)
             if time.monotonic() > deadline:
-                raise RuntimeError("X11 click verification time budget reached")
+                raise RuntimeError("X11 pointer verification time budget reached")
+            check_cancelled()
             if not xtest.XTestFakeMotionEvent(self.display, self.lib.XDefaultScreen(self.display), px, py, 0):
                 raise RuntimeError("Pointer motion failed")
             self.lib.XSync(self.display, 0)
@@ -295,7 +297,7 @@ class X11:
             if self.error or (child, actual_x, actual_y) != (frame, px, py):
                 raise RuntimeError("Native pointer target did not match the selected frame")
             if time.monotonic() > deadline:
-                raise RuntimeError("Pointer moved but click time budget expired; inspect before retrying")
+                raise RuntimeError("Pointer moved but input time budget expired; inspect before retrying")
         finally:
             self.lib.XUngrabServer(self.display)
             self.lib.XSync(self.display, 0)
@@ -303,7 +305,14 @@ class X11:
         child, actual_x, actual_y, state = self.pointer()
         self.require_neutral(state)
         if self.error or (child, actual_x, actual_y) != (frame, px, py):
-            raise RuntimeError("Pointer target changed before click; inspect before retrying")
+            raise RuntimeError("Pointer target changed before input; inspect before retrying")
+        return xtest, frame
+
+    def click(self, expected_pid, rectangle, point, button, count):
+        if button not in ("left", "middle", "right") or type(count) is not int or not 1 <= count <= 3:
+            raise RuntimeError("Click requires left/middle/right and count 1..3")
+        self.require_point(rectangle, point)
+        xtest, _ = self.prepare_pointer(expected_pid, rectangle, point)
         code = {"left": 1, "middle": 2, "right": 3}[button]
         for _ in range(count):
             with defer_cancellation():
@@ -324,6 +333,53 @@ class X11:
         self.lib.XSync(self.display, 0)
         self.lib.XSetErrorHandler(self.previous)
         self.lib.XCloseDisplay(self.display)
+
+    def drag(self, expected_pid, rectangle, start, end):
+        self.require_point(rectangle, start)
+        self.require_point(rectangle, end)
+        xtest, frame = self.prepare_pointer(expected_pid, rectangle, start)
+        px, py = map(int, start)
+        attempted = False
+        try:
+            with defer_cancellation():
+                check_cancelled()
+                attempted = True
+                if not xtest.XTestFakeButtonEvent(self.display, 1, 1, 0):
+                    raise RuntimeError("Drag press failed; inspect before retrying")
+                self.lib.XSync(self.display, 0)
+            for step in range(1, 13):
+                check_cancelled()
+                # Release the server between steps so receivers can process grabs and motion.
+                self.lib.XGrabServer(self.display)
+                try:
+                    if self.verify_frame(expected_pid, rectangle, time.monotonic() + 0.25) != frame:
+                        raise RuntimeError("Drag frame changed; inspect before retrying")
+                    child, actual_x, actual_y, state = self.pointer()
+                    self.require_neutral(state & ~0x100)
+                    if (child, actual_x, actual_y) != (frame, px, py) or not state & 0x100 or self.error:
+                        raise RuntimeError("Drag pointer/button state changed; inspect before retrying")
+                    px = round(start[0] + (end[0] - start[0]) * step / 12)
+                    py = round(start[1] + (end[1] - start[1]) * step / 12)
+                    if not xtest.XTestFakeMotionEvent(self.display, self.lib.XDefaultScreen(self.display), px, py, 0):
+                        raise RuntimeError("Drag motion failed; inspect before retrying")
+                    self.lib.XSync(self.display, 0)
+                    child, actual_x, actual_y, state = self.pointer()
+                    self.require_neutral(state & ~0x100)
+                    if self.error or (child, actual_x, actual_y) != (frame, px, py) or not state & 0x100:
+                        raise RuntimeError("Drag motion was not confirmed; inspect before retrying")
+                finally:
+                    self.lib.XUngrabServer(self.display)
+                    self.lib.XSync(self.display, 0)
+                time.sleep(0.02)
+        finally:
+            if attempted:
+                with defer_cancellation():
+                    if not xtest.XTestFakeButtonEvent(self.display, 1, 0, 0):
+                        raise RuntimeError("Drag release failed; inspect pointer state before retrying")
+                    self.lib.XSync(self.display, 0)
+        self.require_neutral(self.pointer()[3])
+        if self.error:
+            raise RuntimeError("Native drag delivery failed; inspect before retrying")
 
 
 def local_rectangle(bounds):
@@ -349,5 +405,14 @@ def click_visible_window(pid, bounds, x, y, button, count):
     client = X11()
     try:
         return client.click(pid, rectangle, (x, y), button, count)
+    finally:
+        client.close()
+
+
+def drag_visible_window(pid, bounds, start, end):
+    rectangle = local_rectangle(bounds)
+    client = X11()
+    try:
+        return client.drag(pid, rectangle, start, end)
     finally:
         client.close()
