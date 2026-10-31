@@ -1984,3 +1984,46 @@ it. These launcher/debug files remain local intermediates.
 Next: diagnose the existing navigation/OOP loading failure; broaden crash,
 provider, Windows/headful and external-site recovery coverage. Full parity
 remains active.
+
+## Native WebMCP connections and OOP navigation
+
+The existing Linux evaluation navigation timeout reproduced on c46f268. Protocol
+logs showed a persistent Playwright discovery connection receiving a paused new
+OOP target, followed by detachment before Runtime.runIfWaitingForDebugger could
+succeed. Deferring evaluation disconnect did not fix it. Temporarily disabling
+WebMCP discovery made the full evaluation controller pass. A retained fetched
+collection reproduced the same interference after discovery was migrated.
+
+Both discovery and collections now use the existing native CDP transport.
+Discovery follows native target-parent events, attaches descendants explicitly,
+and reconciles loader IDs, target sessions and native frame events. Neither
+connection type enables target auto-attachment. Transient frame inventory errors
+mark discovery incomplete while retaining the observer for subsequent events.
+Collections attach explicitly, join target parentFrameId ancestry to the selected tree, and
+verify each OOP target's root frame identity before reading. Failed child frames
+retain partial-inventory reporting. Non-HTTP(S) documents remain rejected. Native
+target crash identities, stale-handle checks, cancellation settlement and ownership bounds remain. Teardown awaits a
+bounded close callback; failed cleanup retains ownership for retry. Both host
+construction sites inject the existing transport; no dependency or package copy
+list change is required. Playwright still owns selectors and read-only evaluation.
+
+All 166 Node checks pass on macOS; Linux passes 165 with one macOS-only skip.
+The focused native fixture checks the absence of auto-attachment, exact
+root/same-process/OOP routing, foreign-frame exclusion, loader refresh, detachment, closed owners and
+withheld disconnect acknowledgement. The Chrome 158 WebMCP and evaluation
+controllers pass both hosts on macOS and Ubuntu arm64. They cover three successive
+navigation/load cycles, retained tool snapshots, duplicate-URL siblings and an
+OOP child's in-process descendant, alongside existing native calls, policy,
+replacement, declarative, cancellation and root/OOP crash/reload behavior.
+Ordinary browser input/navigation/filechooser and dialog controllers also pass
+on both systems. macOS Chrome 156 passes explicit unsupported-WebMCP checks.
+
+The live controller creates its separate Playwright fixture client after initial
+public navigation/load, disconnects it during later public navigation and
+reconnects after load for assertions. Each host closes its fixture controller
+before the next host starts. Readiness uses fixed native main-world queries;
+background-tab counters use timer polling instead of rAF. That external control
+client can itself pause new OOP targets. Independent external debugger
+interference, Windows/headful, whole-browser death and broader provider
+recovery remain open. Owned profiles/processes are disposable. No CI or release
+was added. Full harness parity remains active.

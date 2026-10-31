@@ -93,8 +93,14 @@ The smoke covers both session classes: live input/style/shadow reads under
 main-world getter poisoning; exact/strict/regex/composed locators; cross-origin, nested in-process
 and empty-list frame scopes; local timers/URL; writes, network and constructor/
 module escape attempts; a CPU deadline after an observed completed DOM read;
-navigation, frame-detach, renderer-crash and turn cancellation after confirmed
+three consecutive navigation/OOP-load cycles, frame-detach, renderer-crash and turn cancellation after confirmed
 interpreter execution; and reset/reuse. Broader DOM schema/provider/ECMAScript compatibility, automatic crash recovery
 and mixed-platform behavior remain open. The overall harness goal remains active.
 
 Engine reference: [QuickJS embedding and lifecycle documentation](https://github.com/justjake/quickjs-emscripten).
+
+WebMCP automatic discovery and fetched tool collections use separate native CDP
+connections without pausing newly created OOP targets. This fixes their observed
+interference with fresh Playwright navigation/load waits. The evaluation
+cancellation implementation is unchanged. Owned macOS/Linux Chrome 158 runs pass
+both JS hosts, including nested child reads after each navigation.

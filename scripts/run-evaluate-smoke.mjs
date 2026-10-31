@@ -55,11 +55,15 @@ try {
    await waitForRead(cpuProbe);cpuProbe.restore();assert.equal(timeout.isError,true);assert.match(timeout.content.at(-1).text,/timed out|interrupted/);
    assert.equal(await run(session,`nodeRepl.write(JSON.stringify(preserved));`),19);
    console.log(`${Session.name} PASS CPU deadline`);
-   const navigationProbe=observeRead(session.browserEvaluator);
-   await run(session,`var navigating=tab.playwright.evaluate(()=>{document.body.textContent;return new Promise(()=>{});},undefined,{timeoutMs:0}).catch(error=>error.message);nodeRepl.write(JSON.stringify(true));`);
-   await waitForRead(navigationProbe);navigationProbe.restore();
-   await run(session,`await tab.goto(${JSON.stringify(url+'?navigated')});await tab.playwright.waitForURL(${JSON.stringify(url+'?navigated')});nodeRepl.write(JSON.stringify(true));`);
-   assert.match(await run(session,`nodeRepl.write(JSON.stringify(await navigating));`),/navigated/u);
+   for(const step of [1,2,3]){
+    const navigationProbe=observeRead(session.browserEvaluator);
+    await run(session,`var navigating=tab.playwright.evaluate(()=>{document.body.textContent;return new Promise(()=>{});},undefined,{timeoutMs:0}).catch(error=>error.message);nodeRepl.write(JSON.stringify(true));`);
+    await waitForRead(navigationProbe);navigationProbe.restore();
+    const destination=url+'?navigated='+step;
+    await run(session,`await tab.goto(${JSON.stringify(destination)});await tab.playwright.waitForURL(${JSON.stringify(destination)});nodeRepl.write(JSON.stringify(true));`);
+    assert.match(await run(session,`nodeRepl.write(JSON.stringify(await navigating));`),/navigated/u);
+    assert.equal(await run(session,`nodeRepl.write(JSON.stringify(await tab.playwright.frameLocator('iframe').frameLocator('iframe').locator('p').evaluate(()=>document.title)));`),'grand scope');
+   }
    const detachProbe=observeRead(session.browserEvaluator);
    await run(session,`var detached=tab.playwright.frameLocator('iframe').locator('p').evaluate(()=>{document.body.textContent;return new Promise(()=>{});},undefined,{timeoutMs:0}).catch(error=>error.message);nodeRepl.write(JSON.stringify(true));`);
    await waitForRead(detachProbe);detachProbe.restore();
@@ -73,7 +77,7 @@ try {
    await waitForRead(crashProbe);crashProbe.restore();
    assert.match(await run(session,`var crashCdp=await crashTab.capabilities.get('cdp');try{await crashCdp.send('Page.crash',{}, {timeoutMs:500});}catch{}nodeRepl.write(JSON.stringify(await crashed));`),/crashed/u);
    await session.reset();assert.equal(session.browserEvaluator.owners.size,0);
-   console.log(`${Session.name} PASS read-only DOM, exact locators, iframe/empty-list scopes, native state/style/shadow reads, local timers/URL, mutation and escape rejection, CPU deadline, renderer crash and turn/reset cleanup`);
+   console.log(`${Session.name} PASS read-only DOM, exact locators, iframe/empty-list scopes, native state/style/shadow reads, local timers/URL, mutation and escape rejection, CPU deadline, repeated navigation/OOP load, renderer crash and turn/reset cleanup`);
   } finally {
    await session.close();
    if(id && (await(await fetch(new URL('/json/list',endpoint))).json()).some(tab=>tab.id===id)) {const version=await(await fetch(new URL('/json/version',endpoint))).json();await withConnection(version.webSocketDebuggerUrl,send=>send('Target.closeTarget',{targetId:id})).catch(async error=>{if(!error.cdpError || (await(await fetch(new URL('/json/list',endpoint))).json()).some(tab=>tab.id===id))throw error;});}

@@ -4,7 +4,7 @@ import {runInNewContext} from 'node:vm';
 import {BrowserWebMcp,webMcpInput,registeredTools,webMcpDescription} from './browser-webmcp.mjs';
 function fixture(send){
  const host=new BrowserWebMcp(()=> 'http://owned.test'),owner={},state=host.state(owner);let closes=0;
- const entry={id:'collection',targetId:'tab',endpoint:'http://owned.test',check(){if(state.closed)throw Error('Turn ended');},tools:new Map(),browser:{async close(){closes++;}},page:{isClosed:()=>false}};
+ const entry={id:'collection',targetId:'tab',endpoint:'http://owned.test',check(){if(state.closed)throw Error('Turn ended');},tools:new Map(),connection:{async close(){closes++;}}};
  entry.tools.set('tool',{session:{send},objectId:'native',contextId:1});state.collections.set(entry.id,entry);
  return {host,owner,state,closed:()=>closes,args:{action:'call',targetId:'tab',collectionId:'collection',name:'tool',input:{}}};
 }
@@ -96,7 +96,7 @@ test('discovery reuses the turn observer and bounds new targets before IO',async
 
 test('initial discovery notices filter exact frames and failed observer close retains ownership',async()=>{
  const {EventEmitter}=await import('node:events'),f=fixture(()=>{}),entry={targetId:'observed',endpoint:'http://owned.test',discover:true,watchers:new Map()};let fail=true;
- entry.browser={async close(){if(fail)throw Error('Observer disconnect failed');}};f.state.observers.set('observed',entry);
+ entry.connection={async close(){if(fail)throw Error('Observer disconnect failed');}};f.state.observers.set('observed',entry);
  const session=new EventEmitter();session.send=async()=>{session.emit('WebMCP.toolsAdded',{tools:[{frameId:'main'}]});return {targetInfo:{targetId:'session'}};};
  await f.host.watch(f.state,entry,{session,frameId:'main'});assert.equal(f.host.notifications(f.owner).length,1);
  session.emit('WebMCP.toolsAdded',{tools:[{frameId:'foreign'}]});assert.deepEqual(f.host.notifications(f.owner),[]);
@@ -124,7 +124,7 @@ test('a child renderer crash cannot confirm release in the surviving root sessio
 
 test('browser crash events match captured native target IDs and preserve root identity',async()=>{
  const {EventEmitter}=await import('node:events'),f=fixture(()=>{}),entry=f.state.collections.get('collection'),browserSession=new EventEmitter();let rootCrashes=0;
- entry.watchers=new Map();entry.signalRootCrash=()=>{rootCrashes++;};entry.browser.newBrowserCDPSession=async()=>browserSession;browserSession.send=async(method,args)=>{assert.equal(method,'Target.setDiscoverTargets');assert.equal(args.discover,true);};
+ entry.watchers=new Map();entry.signalRootCrash=()=>{rootCrashes++;};entry.browserSession=browserSession;browserSession.send=async(method,args)=>{assert.equal(method,'Target.setDiscoverTargets');assert.equal(args.discover,true);};
  const root=new EventEmitter(),child=new EventEmitter();root.send=async()=>({targetInfo:{targetId:'root-target'}});child.send=async()=>({targetInfo:{targetId:'child-target'}});entry.rootSession=root;
  await f.host.watchCrashes(f.state,entry);await f.host.watch(f.state,entry,{session:root,frameId:'root'});await f.host.watch(f.state,entry,{session:child,frameId:'child'});
  browserSession.emit('Target.targetCrashed',{targetId:'unrelated'});assert.equal(entry.crashed,undefined);
@@ -149,4 +149,39 @@ test('fetching can reconcile a child crash while root crashes and published hand
   await f.host.watch(f.state,entry,{session,frameId:'owned'});session.emit('Inspector.targetCrashed');
   assert.equal(entry.crashed,true);assert.equal(!!entry.stale,root||!fetching);assert.equal(!!entry.rootCrashed,root);await f.host.cleanup(f.owner);
  }
+});
+
+test('native discovery attaches explicitly and routes inventories and notices to exact frames',async()=>{
+ const {createServer}=await import('node:http');let event,disconnect,holdClose=false,closed=0,loader='first';const calls=[];
+ const frame=id=>({id,url:'https://owned.test/'+id,loaderId:loader}),tree=()=>({frame:frame('root'),childFrames:[{frame:frame('same')}]});
+ const info={type:'iframe',targetId:'oop',parentId:'root',parentFrameId:'root'};
+ const server=createServer((req,res)=>{res.setHeader('Content-Type','application/json');res.end(JSON.stringify({webSocketDebuggerUrl:'ws://owned.test/browser'}));});
+ await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+ const host=new BrowserWebMcp(()=>`http://127.0.0.1:${server.address().port}`,async(url,onEvent,onClose)=>{
+  assert.equal(url,'ws://owned.test/browser');event=onEvent;
+  return {close(){closed++;if(holdClose)disconnect=onClose;else onClose();},async send(method,params={},timeout,sessionId){
+   calls.push({method,params,sessionId});assert.equal(timeout,10000);assert.notEqual(method,'Target.setAutoAttach');
+   if(method==='Browser.getVersion')return {product:'Chrome/158.0.0.0'};
+   if(method==='Target.attachToTarget')return {sessionId:params.targetId==='root'?'root-session':'child-session'};
+   if(method==='Target.setDiscoverTargets'){event({method:'Target.targetCreated',params:{targetInfo:info}});return {};}
+   if(method==='Target.getTargets')return {targetInfos:[info,{type:'iframe',targetId:'foreign',parentId:'other',parentFrameId:'other'}]};
+   if(method==='Target.getTargetInfo')return {targetInfo:{targetId:sessionId==='child-session'?'oop':'root'}};
+   if(method==='Page.getFrameTree')return {frameTree:sessionId==='child-session'?{frame:frame('oop')}:tree()};
+   if(method==='Page.createIsolatedWorld'){assert.equal(params.frameId==='oop',sessionId==='child-session');return {executionContextId:1};}
+   if(method==='Runtime.callFunctionOn')return {result:{value:true}};
+   return {};
+  }};
+ });
+ const owner={};
+ try{
+  assert.equal(await host.request(owner,{action:'observe',targetId:'root'}),true);
+  const state=host.state(owner),entry=state.observers.get('root');assert.deepEqual([...entry.frames.keys()].sort(),['oop','root','same']);assert.equal(entry.incomplete,false);assert.equal(host.notifications(owner).length,1);
+  assert.equal(calls.filter(call=>call.method==='Target.attachToTarget').length,2);
+  event({sessionId:'child-session',method:'WebMCP.toolsAdded',params:{tools:[{frameId:'foreign'}]}});assert.equal(host.notifications(owner).length,0);
+  event({sessionId:'child-session',method:'WebMCP.toolsAdded',params:{tools:[{frameId:'oop'}]}});assert.equal(host.notifications(owner).length,1);
+  loader='next';event({sessionId:'root-session',method:'Page.frameNavigated',params:{frame:{id:'root'}}});await Promise.all([...state.pending]);assert.equal(entry.frames.get('root').loaderId,'next');assert.equal(entry.frames.get('same').loaderId,'next');
+  event({method:'Target.detachedFromTarget',params:{sessionId:'child-session'}});assert.equal(entry.frames.has('oop'),false);
+  holdClose=true;let cleaned=false;const cleanup=host.cleanup(owner).then(()=>{cleaned=true;});await new Promise(resolve=>setImmediate(resolve));assert.equal(cleaned,false);assert.equal(host.owners.has(owner),true);assert.equal(closed,1);disconnect();await cleanup;event({method:'WebMCP.toolsAdded',params:{tools:[{frameId:'root'}]}});assert.equal(host.notifications(owner).length,0);
+  assert.ok(calls.some(call=>call.method==='Page.createIsolatedWorld'&&call.params.frameId==='same'));
+ }finally{holdClose=false;disconnect?.();try{await host.cleanup(owner);}finally{disconnect?.();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}}
 });

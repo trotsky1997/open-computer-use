@@ -37,6 +37,9 @@ events can arrive after a result is returned. Notices contain a tab ID and refre
 guidance, without tool definitions or execution. Fetch current names/schema before
 calling tools. Browser-wide inventory and tabs never bound/used are unobserved.
 
+Observers use native CDP target discovery and explicit attachments. Browser
+target parent IDs and native frame ancestry select only descendants of the bound
+tab. No WebMCP connection enables auto-attachment or pauses new targets.
 Observers use Chrome's native [WebMCP protocol](https://chromedevtools.github.io/devtools-protocol/tot/WebMCP/)
 `toolsAdded`/`toolsRemoved` events on exact discovered CDP frame sessions. A fixed
 isolated-world `getTools()` query checks initial availability as a boolean; it
@@ -60,9 +63,11 @@ operations keep their existing requirements. The implementation calls native
 using fixed code in a world reused per host/frame. Page-owned replacement JavaScript cannot supply that API.
 Each fetched tool keeps its native registration object and receives a fresh
 opaque name. A later registration with the same page-defined name cannot inherit
-an old fetched name. Native same-process and out-of-process frame identities use
-the existing locator/evaluator frame helper; each frame contributes only its own
-tools. Native permission-policy denial excludes inaccessible child frames. A denied
+an old fetched name. Native same-process frames use Page.getFrameTree IDs. OOP discovery joins
+Target.getTargets parentFrameId values to the selected frame tree, attaches those
+exact targets, and verifies each target's root frame ID before reading tools.
+Collections attach explicitly without auto-attachment or startup pauses; each
+frame contributes only its own tools. Native permission-policy denial excludes inaccessible child frames. A denied
 top-level API fails explicitly. A frame navigation/detachment or page closure
 invalidates its fetched frame-tree collection.
 
@@ -153,7 +158,7 @@ opaque names and raw string results. Temporary reference tabs were closed.
 
 A disposable testing profile used Chrome's test keychain flag because the new
 browser's real keychain read blocked; process-stack
-sampling identified that wait. No normal profile/keychain settings were changed. All 165 Node checks pass on macOS; Linux passes 164 with the macOS-only virtual-display check skipped;
+sampling identified that wait. No normal profile/keychain settings were changed. All 166 Node checks pass on macOS; Linux passes 165 with the macOS-only virtual-display check skipped;
 native-free CLI/MCP and both sessions’ read-only evaluation regressions also
 passed on Chrome 158, including renderer-crash cleanup.
 The test runtime came from the official Chrome for Testing channel metadata.
@@ -189,9 +194,24 @@ still fail the fetch. Removing the child also permits a full inventory. Root
 crash, reset and same-tab reload checks continue to pass. Each unavailable frame
 can consume the existing 10-second native discovery bound.
 
-The current shared-frame evaluation regression passed both hosts on macOS after
-one navigation timeout. Linux passes DOM/frame reads, isolation and CPU deadlines,
-then repeatedly times out waiting for navigation load. The unchanged c46f268
-baseline reproduces it: native inspection shows the root URL committed with an
-attached child's URL still empty. This existing navigation/loading issue remains
-open; later Linux evaluation cleanup scenarios were not reached in this run.
+The Linux navigation/load timeout reproduced on the unchanged c46f268 baseline.
+Protocol evidence showed a long-lived Playwright discovery client receiving a new
+OOP target with waitingForDebugger, then losing that session before its resume
+command was accepted. Retained fetched collections had the same problem. Both
+now use native CDP; evaluation cancellation behavior and public load semantics
+are unchanged. Both hosts pass three consecutive evaluation/navigation/OOP-load
+cycles and three navigation cycles with retained tool snapshots on macOS/Linux.
+The four child-tool identities include duplicate-URL siblings, an OOP child and
+its in-process descendant. Each remains independently callable.
+
+The controller creates its separate Playwright fixture connection after initial
+public navigation/load and releases it during subsequent public navigation
+checks, then reconnects after load for independent assertions. Each JS host closes
+its fixture controller before the next host starts. Registration readiness uses
+fixed native main-world reads, and counters use timer polling in hidden tabs.
+That extra controller can itself pause OOP startup; independent external debugger
+interference remains outside these owned-connection checks. Ordinary browser
+input/navigation/file-chooser and dialog controllers also pass on both platforms.
+Chrome 156 still passes explicit unsupported-WebMCP behavior. Native disconnect
+cleanup waits for its close callback with a bound and retains failed ownership
+for retry; a focused check withholds that callback to verify the fence.

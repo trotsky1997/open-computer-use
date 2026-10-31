@@ -627,7 +627,7 @@ Screenshots: tab.screenshot({fullPage?,clip?}) returns JPEG bytes with no implic
 
 export function createBrowserApi(activeOutput, environment = process.env, {focusLease, downloadRequest, logRequest, dialogRequest, clipboardRequest, viewportRequest, dropRequest, inputRequest, tabRequest, cdpRequest, assetsRequest, evaluateRequest, chromeRequest, contentRequest, webMcpRequest, onDispose = () => {}} = {}) {
   const cleanups=[];
-  const webMcp=webMcpRequest?undefined:new BrowserWebMcp(()=>endpoint()?.href),webMcpOwner={};
+  const webMcp=webMcpRequest?undefined:new BrowserWebMcp(()=>endpoint()?.href,openConnection),webMcpOwner={};
   if(webMcp)cleanups.push(()=>webMcp.cleanup(webMcpOwner));
   const requestWebMcp=webMcpRequest??(args=>webMcp.request(webMcpOwner,args));
   const debuggerApi=cdpRequest ? undefined : new BrowserDebugger(()=>endpoint()?.href,openConnection);

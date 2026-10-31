@@ -482,12 +482,16 @@ Packaging includes the worker helper and options assets. See [browser history](b
 ## Native page-defined tools
 
 BrowserWebMcp owns fetched collections, isolated native registration objects and
-per-call abort controllers across source/Worker sessions. Exact native frame
-identities reuse the locator/evaluator helper. Chrome 158+ executes registrations
+per-call abort controllers across source/Worker sessions. Discovery uses native CDP frame trees, browser target-parent events and explicit
+iframe attachments. WebMCP never enables target auto-attachment. Collections join native frame/target IDs and parentFrameId ancestry,
+verify OOP root identities, and attach explicitly without startup pauses. These
+connections remain separate from ephemeral Playwright locator/evaluation clients. Chrome 158+ executes registrations
 by native tool ID, protecting a fetched handle from a same-name replacement.
 Turn cleanup waits for each native executeTool promise to settle after abort,
 using an awaited isolated-world cancellation method, before disconnecting. Its
-bounded cancellation retains failed cleanup for retry. Browser navigation/context destruction invalidates collections.
+bounded cancellation retains failed cleanup for retry. Native connection teardown
+awaits the close callback with a bound; failed cleanup retains ownership. Browser
+navigation/context destruction invalidates collections.
 Binding/using a tab starts a turn-owned native observer, independent of fetched
 collections. Fixed isolated-world availability reads and native toolsAdded/
 toolsRemoved events discover initial tools and dynamic same-process/OOP frames;

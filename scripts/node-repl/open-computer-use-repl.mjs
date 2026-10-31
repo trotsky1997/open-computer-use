@@ -49,7 +49,7 @@ const HOST_BROWSER_TABS = new BrowserTabs(()=>browserEndpoint(process.env)?.href
 const HOST_BROWSER_INPUTS = new BrowserInputs(()=>browserEndpoint(process.env)?.href,openConnection,()=>HOST_BROWSER_VIEWPORT.request(null,{action:"state"}),HOST_BROWSER_FOCUS,(owner,targetId)=>HOST_BROWSER_DIALOGS.request(owner,{action:"state",targetId}));
 
 const HOST_BROWSER_CDP=new BrowserDebugger(()=>browserEndpoint(process.env)?.href,openConnection);
-const HOST_BROWSER_WEBMCP=new BrowserWebMcp(()=>browserEndpoint(process.env)?.href);
+const HOST_BROWSER_WEBMCP=new BrowserWebMcp(()=>browserEndpoint(process.env)?.href,openConnection);
 const HOST_BROWSER_CONTENT=new BrowserContent(()=>browserEndpoint(process.env)?.href);
 const HOST_BROWSER_ASSETS=new BrowserAssets(()=>browserEndpoint(process.env)?.href);
 const HOST_BROWSER_EVALUATOR=new BrowserEvaluator(()=>browserEndpoint(process.env)?.href);
