@@ -7,6 +7,13 @@ import x11_capture as capture
 
 
 class ImageTests(unittest.TestCase):
+    def test_png_unpremultiplies_alpha_in_both_byte_orders(self):
+        for order, raw in [(0, bytes([0, 0, 128, 128, 10, 20, 30, 0])), (1, bytes([128, 128, 0, 0, 0, 30, 20, 10]))]:
+            data = capture.png(raw, 2, 1, 8, order, (0xff0000, 0xff00, 0xff), True)
+            self.assertEqual(data[25], 6)
+            length = struct.unpack_from('!I', data, 33)[0]
+            self.assertEqual(zlib.decompress(data[41:41 + length]), bytes([0, 255, 0, 0, 128, 0, 0, 0, 0]))
+
     def test_png_orders_black_pixels_and_crc(self):
         for order, pixels in [(0, b'\0\0\xff\0\xff\0\0\0'), (1, b'\0\xff\0\0\0\0\0\xff')]:
             data = capture.png(pixels, 2, 1, 8, order, (0xff0000, 0xff00, 0xff))
@@ -87,6 +94,49 @@ class ImageTests(unittest.TestCase):
         self.assertTrue(client.read(42, (0, 0, 2, 1)).startswith(b'\x89PNG'))
         client.lib.XDestroyImage.assert_called_once_with(pointer)
         client.lib.XUngrabServer.assert_called_once()
+
+    def test_composite_frame_rejects_wrong_pid_and_duplicate_geometry(self):
+        client = self.client()
+        self.assertEqual(client.composite_frame(42, (0, 0, 2, 1), float('inf')), 2)
+        with self.assertRaisesRegex(RuntimeError, 'PID/geometry'):
+            client.composite_frame(99, (0, 0, 2, 1), float('inf'))
+        client.tree = lambda window: (0, [2, 3]) if window == 1 else (1, [])
+        client.rectangle = lambda window: (0, 0, 2, 1)
+        with self.assertRaisesRegex(RuntimeError, 'ambiguous'):
+            client.composite_frame(42, (0, 0, 2, 1), float('inf'))
+
+    def test_composite_pixmap_and_image_are_freed_on_success_and_format_failure(self):
+        for valid in (True, False):
+            client = self.client()
+            client.lib.XInternAtom.return_value = 7
+            client.lib.XGetSelectionOwner.return_value = 9
+            client.composite_frame = mock.Mock(return_value=2)
+            client.attributes = lambda _window: types.SimpleNamespace(depth=24, visual=1)
+            composite, render = mock.Mock(), mock.Mock()
+            def version(_display, major, minor):
+                minor._obj.value = 2
+                return 1
+            composite.XCompositeQueryVersion.side_effect = version
+            composite.XCompositeNameWindowPixmap.return_value = 12
+            format_ = capture.PictureFormat(type=1, depth=24, direct=capture.DirectFormat(red=16, redMask=255, green=8, greenMask=255, blueMask=255))
+            render.XRenderFindVisualFormat.return_value = capture.C.pointer(format_)
+            def geometry(_display, _pixmap, _root, _x, _y, width, height, _border, depth):
+                width._obj.value, height._obj.value, depth._obj.value = 2, 1, 24
+                return 1
+            client.lib.XGetGeometry.side_effect = geometry
+            pixels = capture.C.create_string_buffer(bytes(8))
+            image = capture.Image(width=2, height=1, format=2, depth=24, data=capture.C.cast(pixels, capture.C.c_void_p), bytes_per_line=8, bits_per_pixel=32 if valid else 16)
+            pointer = capture.C.pointer(image)
+            client.lib.XGetImage.return_value = pointer
+            with mock.patch.object(capture.C, 'CDLL', side_effect=[composite, render]):
+                if valid:
+                    self.assertTrue(client.read_composite(42, (0, 0, 2, 1)).startswith(b'\x89PNG'))
+                else:
+                    with self.assertRaisesRegex(RuntimeError, 'image format'):
+                        client.read_composite(42, (0, 0, 2, 1))
+            client.lib.XDestroyImage.assert_called_once_with(pointer)
+            client.lib.XFreePixmap.assert_called_once_with(1, 12)
+            client.lib.XUngrabServer.assert_called_once_with(1)
 
 
     def test_pointer_failure_pairs_release_and_never_repeats_press(self):

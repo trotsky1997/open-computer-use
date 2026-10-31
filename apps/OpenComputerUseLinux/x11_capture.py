@@ -1,4 +1,4 @@
-"""Verify exposed focused X11 frames for observation and pointer input."""
+"""Capture verified X11 frames and route input to verified exposed frames."""
 from contextlib import contextmanager
 import ctypes as C
 import ctypes.util
@@ -41,16 +41,37 @@ class Image(C.Structure):
     ]]
 
 
-def png(raw, width, height, stride, order, masks):
+class DirectFormat(C.Structure):
+    _fields_ = [(name, kind) for name, kind in [
+        ("red", C.c_short), ("redMask", C.c_ushort), ("green", C.c_short), ("greenMask", C.c_ushort),
+        ("blue", C.c_short), ("blueMask", C.c_ushort), ("alpha", C.c_short), ("alphaMask", C.c_ushort),
+    ]]
+
+
+class PictureFormat(C.Structure):
+    _fields_ = [("id", C.c_ulong), ("type", C.c_int), ("depth", C.c_int),
+                ("direct", DirectFormat), ("colormap", C.c_ulong)]
+
+
+def png(raw, width, height, stride, order, masks, alpha=False):
     if order not in (0, 1) or stride != width * 4 or masks != (0xff0000, 0xff00, 0xff):
         raise RuntimeError("Unsupported X11 pixel layout")
-    rgb = bytearray(width * height * 3)
+    channels = 4 if alpha else 3
+    rgb = bytearray(width * height * channels)
     red, green, blue = (2, 1, 0) if order == 0 else (1, 2, 3)
-    rgb[0::3], rgb[1::3], rgb[2::3] = raw[red::4], raw[green::4], raw[blue::4]
-    rows = b"".join(b"\0" + rgb[y * width * 3:(y + 1) * width * 3] for y in range(height))
+    if alpha:
+        opacity = 3 if order == 0 else 0
+        for pixel in range(width * height):
+            a = raw[pixel * 4 + opacity]
+            for channel, source in enumerate((red, green, blue)):
+                rgb[pixel * 4 + channel] = min(255, (raw[pixel * 4 + source] * 255 + a // 2) // a) if a else 0
+            rgb[pixel * 4 + 3] = a
+    else:
+        rgb[0::3], rgb[1::3], rgb[2::3] = raw[red::4], raw[green::4], raw[blue::4]
+    rows = b"".join(b"\0" + rgb[y * width * channels:(y + 1) * width * channels] for y in range(height))
     def chunk(kind, data):
         return struct.pack("!I", len(data)) + kind + data + struct.pack("!I", zlib.crc32(kind + data))
-    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack("!2I5B", width, height, 8, 2, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b"")
+    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack("!2I5B", width, height, 8, 6 if alpha else 2, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b"")
 
 
 class X11:
@@ -81,6 +102,8 @@ class X11:
             "XTranslateCoordinates": (C.c_int, [C.c_void_p, C.c_ulong, C.c_ulong, C.c_int, C.c_int, C.POINTER(C.c_int), C.POINTER(C.c_int), C.POINTER(C.c_ulong)]),
             "XInternAtom": (C.c_ulong, [C.c_void_p, C.c_char_p, C.c_int]),
             "XGetWindowProperty": (C.c_int, [C.c_void_p, C.c_ulong, C.c_ulong, C.c_long, C.c_long, C.c_int, C.c_ulong, C.POINTER(C.c_ulong), C.POINTER(C.c_int), C.POINTER(C.c_ulong), C.POINTER(C.c_ulong), C.POINTER(C.c_void_p)]),
+            "XFreePixmap": (C.c_int, [C.c_void_p, C.c_ulong]),
+            "XGetGeometry": (C.c_int, [C.c_void_p, C.c_ulong, C.POINTER(C.c_ulong), C.POINTER(C.c_int), C.POINTER(C.c_int), C.POINTER(C.c_uint), C.POINTER(C.c_uint), C.POINTER(C.c_uint), C.POINTER(C.c_uint)]),
             "XGetImage": (C.POINTER(Image), [C.c_void_p, C.c_ulong, C.c_int, C.c_int, C.c_uint, C.c_uint, C.c_ulong, C.c_int]),
             "XDestroyImage": (C.c_int, [C.POINTER(Image)]),
         }
@@ -228,6 +251,105 @@ class X11:
                 self.lib.XDestroyImage(image)
             self.lib.XUngrabServer(self.display)
             self.lib.XSync(self.display, 0)
+        return png(raw, width, height, *layout)
+
+    def composite_frame(self, expected_pid, rectangle, deadline):
+        # shortcut: root-level frames only; extend reparented capture after real WM validation.
+        matches = []
+        _, windows = self.tree(self.root)
+        for window in windows:
+            if time.monotonic() > deadline:
+                raise RuntimeError("XComposite frame verification budget reached")
+            attrs = self.attributes(window)
+            if attrs.window_class != 1 or attrs.map_state != 2 or self.rectangle(window) != rectangle:
+                continue
+            pending, visited, pids = [(window, 0)], set(), set()
+            while pending:
+                if time.monotonic() > deadline or len(visited) >= 1200:
+                    raise RuntimeError("XComposite child verification budget reached")
+                child, depth = pending.pop()
+                if child in visited or depth > 64:
+                    raise RuntimeError("Invalid XComposite child tree")
+                visited.add(child)
+                child_attrs = self.attributes(child)
+                if child_attrs.map_state != 2:
+                    continue
+                if child_attrs.window_class == 1:
+                    if child_attrs.depth != attrs.depth:
+                        raise RuntimeError("Mixed-depth XComposite frame unsupported")
+                    pid = self.pid(child)
+                    if pid is not None:
+                        pids.add(pid)
+                _, children = self.tree(child)
+                pending.extend((entry, depth + 1) for entry in children)
+            if pids != {expected_pid}:
+                continue
+            shaped, bx, by, bw, bh = C.c_int(), C.c_int(), C.c_int(), C.c_uint(), C.c_uint()
+            clipped, cx, cy, cw, ch = C.c_int(), C.c_int(), C.c_int(), C.c_uint(), C.c_uint()
+            if not self.shape.XShapeQueryExtents(self.display, window, C.byref(shaped), C.byref(bx), C.byref(by), C.byref(bw), C.byref(bh), C.byref(clipped), C.byref(cx), C.byref(cy), C.byref(cw), C.byref(ch)) or shaped.value:
+                raise RuntimeError("Shaped XComposite frame unsupported")
+            matches.append(window)
+        if len(matches) != 1:
+            raise RuntimeError("XComposite frame PID/geometry is absent or ambiguous")
+        return matches[0]
+
+    def read_composite(self, expected_pid, rectangle):
+        _x, _y, width, height = rectangle
+        if min(width, height) <= 0 or width * height > 16_000_000:
+            raise RuntimeError("XComposite screenshot bounds unavailable")
+        composite = C.CDLL(ctypes.util.find_library("Xcomposite") or "libXcomposite.so.1")
+        composite.XCompositeQueryVersion.restype = C.c_int
+        composite.XCompositeQueryVersion.argtypes = [C.c_void_p, C.POINTER(C.c_int), C.POINTER(C.c_int)]
+        composite.XCompositeNameWindowPixmap.restype = C.c_ulong
+        composite.XCompositeNameWindowPixmap.argtypes = [C.c_void_p, C.c_ulong]
+        render = C.CDLL(ctypes.util.find_library("Xrender") or "libXrender.so.1")
+        render.XRenderFindVisualFormat.restype = C.POINTER(PictureFormat)
+        render.XRenderFindVisualFormat.argtypes = [C.c_void_p, C.c_void_p]
+        self.lib.XGrabServer(self.display)
+        image, pixmap = None, 0
+        try:
+            major, minor = C.c_int(), C.c_int()
+            screen = self.lib.XDefaultScreen(self.display)
+            manager = self.lib.XInternAtom(self.display, ("_NET_WM_CM_S" + str(screen)).encode("ascii"), 1)
+            if not manager or not self.lib.XGetSelectionOwner(self.display, manager):
+                raise RuntimeError("XComposite capture requires an existing compositor")
+            if not composite.XCompositeQueryVersion(self.display, C.byref(major), C.byref(minor)) or (major.value, minor.value) < (0, 2):
+                raise RuntimeError("XComposite named window pixmaps unavailable")
+            window = self.composite_frame(expected_pid, rectangle, time.monotonic() + 0.25)
+            attrs = self.attributes(window)
+            format_ = render.XRenderFindVisualFormat(self.display, attrs.visual)
+            if not format_ or format_.contents.type != 1 or format_.contents.depth != attrs.depth or attrs.depth not in (24, 32):
+                raise RuntimeError("Unsupported XComposite visual")
+            direct = format_.contents.direct
+            masks = (direct.redMask << direct.red, direct.greenMask << direct.green, direct.blueMask << direct.blue)
+            alpha_mask = direct.alphaMask << direct.alpha
+            if masks != (0xff0000, 0xff00, 0xff) or alpha_mask not in (0, 0xff000000):
+                raise RuntimeError("Unsupported XComposite color layout")
+            pixmap = composite.XCompositeNameWindowPixmap(self.display, window)
+            self.lib.XSync(self.display, 0)
+            if self.error or not pixmap:
+                raise RuntimeError("Window has no verified redirected backing pixmap")
+            root, px, py, pw, ph, border, depth = C.c_ulong(), C.c_int(), C.c_int(), C.c_uint(), C.c_uint(), C.c_uint(), C.c_uint()
+            if not self.lib.XGetGeometry(self.display, pixmap, C.byref(root), C.byref(px), C.byref(py), C.byref(pw), C.byref(ph), C.byref(border), C.byref(depth)) or (pw.value, ph.value, depth.value) != (width, height, attrs.depth):
+                raise RuntimeError("XComposite backing geometry changed")
+            image = self.lib.XGetImage(self.display, pixmap, 0, 0, width, height, C.c_ulong(-1).value, 2)
+            self.lib.XSync(self.display, 0)
+            if self.error or not image:
+                raise RuntimeError("XComposite image read failed")
+            value = image.contents
+            if not value.data or value.format != 2 or value.xoffset != 0 or value.bits_per_pixel != 32 or value.bytes_per_line != width * 4 or (value.width, value.height, value.depth) != (width, height, attrs.depth):
+                raise RuntimeError("Unsupported XComposite image format")
+            raw = C.string_at(value.data, value.bytes_per_line * height)
+            layout = (value.bytes_per_line, value.byte_order, masks, bool(alpha_mask))
+        finally:
+            if image:
+                self.lib.XDestroyImage(image)
+            if pixmap:
+                self.lib.XFreePixmap(self.display, pixmap)
+            self.lib.XUngrabServer(self.display)
+            self.lib.XSync(self.display, 0)
+        if self.error:
+            raise RuntimeError("XComposite native capture failed")
         return png(raw, width, height, *layout)
 
     def pointer(self):
@@ -543,6 +665,15 @@ def capture_visible_window(pid, bounds):
     client = X11()
     try:
         return client.read(pid, rectangle)
+    finally:
+        client.close()
+
+
+def capture_composite_window(pid, bounds):
+    rectangle = local_rectangle(bounds)
+    client = X11()
+    try:
+        return client.read_composite(pid, rectangle)
     finally:
         client.close()
 

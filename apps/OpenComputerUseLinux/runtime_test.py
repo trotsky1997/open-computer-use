@@ -602,6 +602,18 @@ class VerifiedClickTests(unittest.TestCase):
 
 
 class BoundImageTests(unittest.TestCase):
+    def test_composite_capture_allows_inactive_identity_and_rechecks_after_pixels(self):
+        runtime = load_runtime()
+        node, app, bounds = mock.Mock(), mock.Mock(), {"x": 0, "y": 0, "width": 2, "height": 1}
+        provider = types.SimpleNamespace(capture_composite_window=mock.Mock(return_value=b"png"))
+        identity = {"pid": 42, "path": "owned"}
+        with mock.patch.dict(sys.modules, {"x11_capture": provider}), mock.patch.dict(runtime.os.environ, {"XDG_SESSION_TYPE": "x11"}), mock.patch.object(runtime, "child_count", return_value=1), mock.patch.object(runtime, "window_identity", return_value=identity), mock.patch.object(runtime, "extents", return_value=bounds), mock.patch.object(runtime, "state_contains", return_value=False), mock.patch.object(runtime, "app_windows", return_value=[(0, node)]) as windows:
+            self.assertEqual(runtime.capture_bound_window_png(app, node, bounds), "cG5n")
+            with self.assertRaisesRegex(RuntimeError, 'inactive'):
+                runtime.verified_window_identity(app, node, bounds)
+            windows.side_effect = [[(0, node)], []]
+            self.assertIsNone(runtime.capture_bound_window_png(app, node, bounds))
+
     def test_identity_and_state_are_verified_around_pixels(self):
         runtime = load_runtime()
         node, app, bounds = mock.Mock(), mock.Mock(), {"x": 0, "y": 0, "width": 2, "height": 1}

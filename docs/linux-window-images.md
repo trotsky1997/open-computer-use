@@ -1,61 +1,87 @@
-# Verified visible X11 window images
+# Verified X11 window images
 
-Linux app screenshots now require verified visible-window evidence for both
-window-ID and string bindings. The old unchecked desktop crop and black-pixel
-heuristic were removed. A legitimate all-black window can return a valid PNG.
-AX observations remain available when capture is unavailable.
+Linux app screenshots use verified native window pixels for both window-ID and
+string bindings. AX observations remain available when capture is unavailable.
+A legitimate black window can return a valid PNG; pixel colors never determine
+whether a source is valid.
 
-The selected AT-SPI window must be the sole active window in its app, with a
-unique current rectangle among that app's windows. Its existing bus/object/PID/
-process-start identity is checked before and after capture. Titles never select
-a screenshot source. The native X11 keyboard-focus ancestry must lead to the same
-process and a mapped top-level frame whose full rectangle exactly matches.
+The selected AT-SPI window must have a unique current rectangle among its app's
+windows. Its bus/object/PID/process-start identity is checked before and after
+capture. Titles never select a screenshot source. Both capture routes require a
+local X11 display, a mapped InputOutput top-level frame with matching geometry,
+and native PID/tree evidence for the selected process. Remote/forwarded DISPLAY
+and Wayland sessions are rejected.
 
-A private local Xlib connection verifies stacking and copies pixels while the
-server is grabbed, preventing another client's window movement/restacking during
-that interval. PNG conversion/compression happens after release. Every exit path
-ungrabs the server; native image/property/tree allocations are freed. Checks have
-node/depth/pixel budgets and a 250 ms verification budget between synchronous
-requests. A blocked X server request can still exceed that budget; the outer
-native bridge retains its existing process timeout. Remote/forwarded DISPLAY
-connections are rejected. This route needs libX11 and libXext/Shape support.
+## Existing compositor backing images
 
-Current supported captures use a local noncomposited X11 display, fully on-screen
-rectangular frames, no intersecting mapped windows above the frame, and matching
-32-bit pixels with standard RGB masks. Compositor-manager ownership, shaped
-frames, mixed-depth descendants, ambiguous geometry, missing PID/focus evidence,
-unsupported layouts and provider/native errors all return no image. No focus or
-stacking change is made to obtain a picture. [Basic X11 clicks](linux-click-input.md)
-reuse the frame verifier; wider pointer/drag/held routes remain open.
+When a compositor owns `_NET_WM_CM_Sn` and XComposite 0.2 or later is available,
+the runtime names the selected frame's existing redirected backing pixmap with
+`XCompositeNameWindowPixmap`. It never redirects/unredirects windows, changes
+stacking, raises windows or moves focus. Mapped background, occluded and partially
+offscreen frames can be captured independently of the visible desktop.
 
-The implementation uses XGetImage from the verified exposed frame's root region.
-It supplies visible-frame pixels under these conditions. Background/occluded and
-composited backing-store capture remains required work, along with Wayland and
-other providers. Standard compositing window managers and decorated frames need
-real desktop validation. Current evidence is a private Ubuntu arm64 Xvfb desktop.
-X11 metadata and AT-SPI provider state are trusted OS/provider observations;
-external provider changes can still race the before/after checks.
+The mapped descendant tree must have a single matching PID and consistent depth.
+Same-geometry ambiguity, shaped frames, absent backing storage, native errors and
+changed pixmap dimensions fail capture. XRender must report a supported direct
+24/32-bit visual with RGB888 masks and optional eight-bit alpha. The native image
+must match its geometry, depth, format, byte order and stride. ARGB backing pixels
+are converted from premultiplied color to straight-alpha RGBA PNG; opaque visuals
+use RGB PNG. The source pixmap is named anew for each capture so resize/map cycles
+do not reuse a stale image. This route additionally needs libXcomposite/libXrender.
 
-Both source and Worker REPL checks read actual PNG pixels from same-title windows
-with distinct red/blue markers, reject background/occluded/offscreen windows,
-recover after exposure, accept an all-black window, and reject a closed handle
-without returning a cached image. Python checks cover CRC/channel order, image
-free/ungrab paths, wrong PID, compositor/shape/depth refusal, remote display,
-ambiguous provider geometry and state changes around capture. Existing input,
-paste, multi-window and launch/lifecycle flows also run against the same revision.
+## Exposed frames without a compositor
+
+The fallback requires the selected window to be its app's sole active window.
+Native keyboard-focus ancestry must reach that process/frame. The full rectangle
+must be on screen, with no intersecting mapped window above it. `XGetImage` reads
+that verified root region. A compositor owner, shaped/mixed-depth frames, missing
+focus/PID evidence or unsupported layouts return no image. This route needs
+libX11 and libXext/Shape support.
+
+Input continues to use the existing focused, exposed-frame verifier. A successful
+background/composited screenshot gives no additional input capability; see
+[Linux clicks](linux-click-input.md), [drag](linux-drag-input.md) and
+[scroll](linux-scroll-input.md).
+
+## Lifetime and validation
+
+Both routes use a private local Xlib connection and grab the server during
+verification and pixel copying. Every exit releases the server and frees native
+images, named pixmaps, properties and tree allocations. PNG encoding happens
+after release. Node/depth/pixel budgets and a 250 ms verification deadline bound
+work between synchronous requests; a blocked X request can exceed that deadline.
+The outer bridge retains its process timeout. X11 metadata and AT-SPI state are
+trusted OS/provider observations, and external provider changes can still race
+the before/after identity checks.
+
+Private Ubuntu arm64 Xvfb/D-Bus checks with a real xcompmgr pass through both source
+and Worker JS hosts: same-title red/blue isolation, background and overlapping
+frames, partially offscreen pixels, half-alpha red, opaque black, unchanged native
+focus, same-geometry/hidden/closed refusal and rejection of composited pointer
+input. The existing noncomposited checks retain their exposure/black-frame and
+refusal behavior. Python self-checks cover PNG byte order/CRC/alpha conversion,
+PID/geometry validation, identity changes and resource cleanup on failure.
 
 ```sh
-# Inside an owned private D-Bus/Xvfb desktop:
-dbus-update-activation-environment DISPLAY XAUTHORITY
+# In an owned private Xvfb/D-Bus desktop, with GTK3, AT-SPI and Cairo installed:
+XDG_SESSION_TYPE=x11 GDK_BACKEND=x11 xcompmgr -n &
+compositor=$!
+trap 'kill "$compositor"; wait "$compositor"' EXIT
 XDG_SESSION_TYPE=x11 GDK_BACKEND=x11 \
-  node scripts/tests/linux-image-js-smoke.mjs /path/to/open-computer-use-linux
-python3 apps/OpenComputerUseLinux/x11_capture_test.py
+  node scripts/tests/linux-composite-image-js-smoke.mjs /path/to/open-computer-use-linux
+# Run linux-image-js-smoke.mjs separately in a desktop without a compositor.
+python3 -m unittest discover -s apps/OpenComputerUseLinux -p '*_test.py'
 ```
 
-GTK's window attributes expose window type and toolkit metadata, while
-[Accessible.get_id](https://gnome.pages.gitlab.gnome.org/at-spi2-core/libatspi/method.Accessible.get_id.html)
-is an application ID rather than a native XID. The owned GTK probe confirmed no
-native window ID attribute. See [GTK's window accessibility source](https://github.com/GNOME/gtk/blob/gtk-3-24/gtk/a11y/gtkwindowaccessible.c).
-The [Xlib specification](https://xorg.freedesktop.org/archive/current/doc/libX11/libX11/libX11.html)
-describes stacking queries, server grabs, image formats and the undefined pixels
-that can occur when reading obscured windows without backing store.
+Real GNOME/KWin desktops, decorated/reparented frames, GPU/full-screen paths,
+minimized/unmapped windows, Wayland/portal capture and other providers remain open.
+Current evidence covers owned undecorated GTK windows in Xvfb with xcompmgr.
+
+The upstream X.Org `Xcomposite(3)` manual specifies named redirected pixmaps,
+map/resize lifetimes, the 0.2 minimum and explicit pixmap release. The installed
+Xrender header defines the visual format/alpha masks used here. The
+[Xlib specification](https://xorg.freedesktop.org/archive/current/doc/libX11/libX11/libX11.html)
+describes stacking, grabs, image formats and obscured-window pixel limitations.
+GTK's [Accessible.get_id](https://gnome.pages.gitlab.gnome.org/at-spi2-core/libatspi/method.Accessible.get_id.html)
+is an application ID; the owned GTK probe exposed no native XID attribute. See
+[GTK's window accessibility source](https://github.com/GNOME/gtk/blob/gtk-3-24/gtk/a11y/gtkwindowaccessible.c).

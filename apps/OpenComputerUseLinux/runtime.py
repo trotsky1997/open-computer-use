@@ -425,7 +425,7 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT, m
     return records, lines
 
 
-def verified_window_identity(app, window, bounds):
+def verified_window_identity(app, window, bounds, require_active=True):
     if bounds is None or os.environ.get("XDG_SESSION_TYPE") == "wayland":
         raise RuntimeError("Verified native window routing requires local X11 geometry")
     identity = window_identity(window)
@@ -439,12 +439,21 @@ def verified_window_identity(app, window, bounds):
             candidates.append(candidate_identity)
         if state_contains(candidate, Atspi.StateType.ACTIVE):
             active.append(candidate_identity)
-    if candidates != [identity] or active != [identity] or window_identity(window) != identity:
+    if candidates != [identity] or (require_active and active != [identity]) or window_identity(window) != identity:
         raise RuntimeError("Selected window is inactive, ambiguous or changed; refresh app state")
     return identity
 
 
 def capture_bound_window_png(app, window, bounds):
+    try:
+        from x11_capture import capture_composite_window
+        identity = verified_window_identity(app, window, bounds, require_active=False)
+        image = capture_composite_window(identity["pid"], bounds)
+        if verified_window_identity(app, window, bounds, require_active=False) != identity:
+            return None
+        return base64.b64encode(image).decode("ascii")
+    except Exception:
+        pass
     try:
         from x11_capture import capture_visible_window
         identity = verified_window_identity(app, window, bounds)

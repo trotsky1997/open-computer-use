@@ -828,3 +828,31 @@ added. Tests used owned profiles, local fixtures and private artifact directorie
 See [browser CDP](../../browser-cdp.md). Headful/native picker presentation,
 broader popup/iframe/provider races, host crash recovery, remote filesystems and
 Windows remain unverified. The full harness parity goal remains active.
+
+## Composited Linux window backing images
+
+Linux screenshots now prefer existing XComposite backing pixmaps when a local
+compositor owns the screen. Native PID/mapped-tree/exact-geometry evidence and
+before/after AT-SPI identity checks select one frame. No redirection, focus or
+stacking mutation is performed. XRender validates RGB/ARGB visual masks and
+premultiplied alpha is restored to straight-alpha PNG. Every capture names a
+fresh pixmap, checks dimensions/depth/layout, and frees images/pixmaps plus the
+server grab on all exits. The noncomposited exposed-frame fallback remains;
+input retains its existing focus/visibility verifier.
+
+Validation passed: 87 Python checks on macOS and Ubuntu arm64; the native Linux
+Go suite; 155 Node checks on macOS. Both JS hosts passed actual xcompmgr/Xvfb
+background, overlapping and partly offscreen red/blue window pixels, same-title
+isolation, half-alpha color, black pixels, focus preservation, same-geometry,
+hidden and stale rejection, and composited coordinate-input refusal. Both hosts
+also passed the existing noncomposited image, click, drag, held-click/key, scroll
+and window-identity controllers. Targeted self-checks cover byte order/alpha,
+wrong PID/duplicate geometry, post-capture identity changes and native resource
+cleanup on success/failure. Test-only GTK/Cairo/xcompmgr packages were installed
+inside the existing Linux VM; no project dependency or CI was added. All GUI
+checks used owned private Xvfb/D-Bus desktops.
+
+See [Linux window images](../../linux-window-images.md). Real GNOME/KWin,
+decorated/reparented and GPU/full-screen windows, minimized/unmapped windows,
+Wayland/portal capture and wider providers remain unverified. The full harness
+parity goal stays active.
