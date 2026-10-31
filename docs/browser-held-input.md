@@ -16,7 +16,7 @@ the primary key can complete before release; document changes before another
 key down abort the remaining sequence. Platform auto-repeat and broad keyboard
 layout behavior require further verification.
 
-The raw CDP tab click wrapper accepts key/durationMs alongside mouseButton and
+All raw CDP tab clicks use host ownership, including calls without options, button aliases and multi-clicks. The wrapper accepts key/durationMs alongside mouseButton and
 clickCount. Key stays down across the entire sequence; each press lasts at least
 durationMs. Duration is finite and non-negative, with no added dwell when omitted.
 Click counts are integers 1...3, and l/r/m button aliases normalize to full names.
@@ -28,7 +28,8 @@ remains open. Ordinary keys are delivered to the current focus before clicking.
 The host verifies input/cancellation/dialog/focus protocol support before dispatch.
 It owns the input connection, pressed keys/buttons, duration wait and
 virtual focus lease. It validates document/viewport/content geometry before new
-presses and before normal release. Explicit viewport revisions and screenshot
+presses. Once down, content-size and scroll effects are admitted while the loader
+and coordinate viewport remain stable for release. Explicit viewport revisions and screenshot
 crop/DPR mapping remain enforced. Input uses trusted CDP events, with reverse key
 release and no text/editor commands on key-up.
 
@@ -86,7 +87,7 @@ the input lease and block competing input until cleanup succeeds; no new press
 or motion is replayed. Successful drags restore focus before returning.
 
 ```sh
-node scripts/run-drag-smoke.mjs
+node scripts/run-pointer-input-smoke.mjs
 ```
 
 The controller checks trusted down/move/up events and visibility at the receiver,
@@ -95,3 +96,13 @@ and Worker-exit cleanup, competing input and failed-release retry in both JS hos
 macOS and Linux Chrome 158 pass all thirteen cases per platform. Windows/headful,
 external clients and broader HTML native-drag/drop behavior remain unverified.
 Linux's headless screenshot configuration is described in [browser CDP](browser-cdp.md#headless-screenshot-rendering).
+
+
+The pointer controller also checks ordinary AX-index and coordinate clicks,
+right-button aliases and three-click counts. A default click that opens a prompt
+on down remains host-owned across turn/reset/timeout/close and Worker exit.
+Release failure retains ownership and blocks competing input until reset succeeds.
+The already admitted down is never replayed. A press-triggered navigation or
+viewport change aborts remaining stages and releases outside; inspect the new
+page/state before retrying. Thirty click/drag cases pass per macOS/Linux platform
+across both JS hosts, including press-triggered content growth and document scroll.

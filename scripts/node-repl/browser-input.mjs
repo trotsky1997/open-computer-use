@@ -88,9 +88,9 @@ export class BrowserInputs {
     const metrics=await send("Page.getLayoutMetrics",{},0);
     const actual={loaderId,viewport:metrics.cssVisualViewport,contentSize:metrics.cssContentSize,viewportRevision:await this.revision()};
     this.check(record);
-    if(record.dragging) {
-      // Drag handlers may scroll or resize content; the coordinate viewport must stay stable.
-      if(loaderId!==record.geometry.loaderId || actual.viewportRevision!==record.geometry.viewportRevision || !['clientWidth','clientHeight','scale','zoom','offsetX','offsetY'].every(key=>actual.viewport[key]===record.geometry.viewport[key])) throw new Error("Browser drag document or viewport changed");
+    if(record.mouse) {
+      // Press handlers may scroll or resize content; the coordinate viewport must stay stable.
+      if(loaderId!==record.geometry.loaderId || actual.viewportRevision!==record.geometry.viewportRevision || !['clientWidth','clientHeight','scale','zoom','offsetX','offsetY'].every(key=>actual.viewport[key]===record.geometry.viewport[key])) throw new Error("Browser pointer document or viewport changed");
       return;
     }
     if(JSON.stringify(actual)!==JSON.stringify(record.geometry)) throw new Error("Browser input document or geometry changed");

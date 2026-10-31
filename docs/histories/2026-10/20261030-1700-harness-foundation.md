@@ -2175,3 +2175,41 @@ input, drag, post-drag capture and read-only QuickJS evaluation on macOS/Linux
 after source removal. The installer controller now tolerates bounded ENOTEMPTY
 cleanup races from its own Chrome helpers; unrelated configuration and sources
 remain protected by the existing preparation checks.
+
+## Ordinary browser clicks under host input ownership
+
+The raw tab click implementation previously bypassed BrowserInputs when options
+contained neither key nor durationMs. That included ordinary clicks, button
+aliases and multi-click sequences. An owned pre-change control delivered default
+clicks with hidden visibility, missing the managed virtual-focus path.
+
+Removed that branch and its Worker-local press/up loop. Every raw tab click now
+uses the existing host manager, origin input lease, virtual focus, cancellation
+and retained-failure cleanup. The same geometry guard allows press-triggered
+content growth and document scroll after the down, while guarding loader,
+coordinate viewport and viewport revisions before release. Full geometry still
+validates before every new down; navigation/viewport change stops the sequence,
+and cleanup releases outside without replaying a press.
+
+Renamed the drag controller to run-pointer-input-smoke and extended it in place
+instead of duplicating its fixture/cleanup. Thirty cases per platform cover both
+JS hosts, ordinary index/coordinate clicks, right aliases, three-click counts,
+press effects, screenshots, turn/reset/timeout/close, Worker exit, competing input
+and failed-release recovery. Existing drag checks remain. Installed-runtime
+coverage also performs a default coordinate click and verifies its receiver result
+before capturing a fresh screenshot for drag. No dependency, CI, version gate,
+registry release or automatic retry was added. Full harness parity remains active.
+
+Validation: all 170 Node checks pass on macOS; Linux passes 169 with its existing
+macOS-only skip. The expanded thirty-case pointer controller passes both hosts
+on each platform, verifying button identities, triple-click detail counts and
+press-triggered scroll as well as balanced trusted release and restored
+visibility. Generic browser and held-input regressions also pass on both systems.
+Installed standalone MCP, both installed JS hosts and installed plugin-launcher
+browser checks pass default coordinate click, drag/capture and QuickJS DOM reads
+after source removal. The documented Linux screenshot feature remains enabled
+for owned headless fixtures; Windows/headful and broader provider races stay open.
+
+AX point preparation still resolves and may scroll in the client before host
+admission. Broader preparation/lease coordination remains open; this change owns
+the press/release sequence and preserves the existing initial point resolution.

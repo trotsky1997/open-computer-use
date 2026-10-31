@@ -602,7 +602,7 @@ pass {emit:false} to suppress output. AX state uses browser accessibility node I
 Tab input: click(elementIndex, {mouseButton?, clickCount?, key?, durationMs?}), typeText(elementIndexOrNull, text),
 pressKey(elementIndexOrNull, key, {durationMs?}), paste(elementIndexOrNull, text, {format:"text"|"html"}),
 and scroll(elementIndex, direction, pages). Read fresh AX state after actions.
-pressKey owns actual modifier/primary down and reverse up events, supports modifier-only keys and holds the chord for durationMs without synthesizing repeat. An element index focuses its validated target under the input lease; null uses the current focus. Key-induced navigation/scroll can complete before release. Held click keys/chords stay down across the click sequence; durationMs holds each press (finite, non-negative). Uses host-owned trusted CDP events and virtual focus. Ordinary keys type at the current focus before the click. Managed pointer actions block other raw input/locator actions until release; reset/timeout/close releases held state, and cleanup failure retains ownership for retry. Dialogs can be answered in later calls. Releases may finish already admitted effects.
+Every click uses host input ownership and virtual focus, including calls without options, button aliases and multi-clicks. pressKey owns actual modifier/primary down and reverse up events, supports modifier-only keys and holds the chord for durationMs without synthesizing repeat. An element index focuses its validated target under the input lease; null uses the current focus. Key-induced navigation/scroll can complete before release. Held click keys/chords stay down across the click sequence; durationMs holds each press (finite, non-negative). Uses host-owned trusted CDP events and virtual focus. Ordinary keys type at the current focus before the click. Managed pointer actions block other raw input/locator actions until release; reset/timeout/close releases held state, and cleanup failure retains ownership for retry. Dialogs can be answered in later calls. Releases may finish already admitted effects.
 Screenshot-only reads invalidate element indices. Navigation invalidates all indices.
 setValue(elementIndex, value) replaces editable text; selectText(elementIndex, text, {prefix?,suffix?,selectionType?}) selects exact text or positions the cursor.
 click and scroll also accept screenshot pixel pairs. drag(fromPixelPair, toPixelPair) performs a host-owned pointer drag with managed cancellation and focus restoration. Scroll/content effects during motion are allowed; navigation or a changed coordinate viewport stops remaining movement. Capture a new screenshot after input; changed document or viewport geometry invalidates coordinates. Pinch zoom is unsupported.
@@ -881,14 +881,10 @@ export function createBrowserApi(activeOutput, environment = process.env, {focus
         return { state: await ax(options), screenshot: image };
       },
       async click(index, options = {}) {
-        const {button,count:clickCount}=validateClick(options);
+        validateClick(options);
         await input(async send => {
           const position = await point(send, index);
-          if(options.key!==undefined || options.durationMs!==undefined) return requestInput({targetId:target.id,position,geometry:await geometry(send),options});
-          for (let count = 1; count <= clickCount; count++) {
-            await send("Input.dispatchMouseEvent", {type:"mousePressed", ...position, button, clickCount:count});
-            await send("Input.dispatchMouseEvent", {type:"mouseReleased", ...position, button, clickCount:count});
-          }
+          return requestInput({targetId:target.id,position,geometry:await geometry(send),options});
         });
       },
       async drag(from, to) {
