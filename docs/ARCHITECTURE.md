@@ -364,6 +364,13 @@ same lifecycle. Dialog/cancellation and failed focus-release retries preserve
 ownership and never replay accepted text. Text input requires native insertion
 and AX identity capabilities only when requested.
 
+Raw tab paste keeps preparation and the editor action inside BrowserClipboard's
+queue. The verified clipboard service delegates its preparation callback and edit to
+BrowserInputs, which owns AX validation, target focus, clipboard writing under
+the input lease, paste down/up and failed cleanup. The queue awaits the whole managed attempt. An unresolved paste lease
+blocks later clipboard jobs before data access/mutation. The clipboard service
+owns only its control-page resources; target focus/release has one owner.
+
 Raw tab pressKey shares BrowserInputs ownership even without an explicit duration.
 The client transfers the observed AX role/name/backend node and loader. Under
 the origin lease, the host validates and focuses that target, then checks its

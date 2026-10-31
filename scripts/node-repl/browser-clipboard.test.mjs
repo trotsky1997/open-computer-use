@@ -44,3 +44,39 @@ test("canceling a queued clipboard call does not wait for another session's oper
   release();
   await blocking;
 });
+
+
+test('unresolved native paste blocks clipboard mutation before browser discovery',async()=>{
+ const clipboard=new BrowserClipboard(()=>"http://clipboard-lease/",()=>{throw Error('Unexpected connection');},async()=>{throw Error('Native paste still owns this browser input');});
+ let discovered=false;clipboard.json=async()=>{discovered=true;throw Error('Unexpected discovery');};
+ const owner={};
+ await assert.rejects(clipboard.request(owner,{method:'writeText',targetId:'tab',value:'wrong'}),/paste.*owns/);
+ assert.equal(discovered,false);assert.equal(clipboard.server,undefined);assert.equal(clipboard.owners.get(owner).bridges.size,0);
+ await clipboard.cleanup(owner);
+ const unmanaged=new BrowserClipboard(()=>"http://unmanaged/",()=>{throw Error('Unexpected connection');});
+ await assert.rejects(unmanaged.request({},{method:'paste',targetId:'tab',value:[]}),/managed browser input/);
+});
+
+
+test('cancel after control focus stops clipboard script and still restores focus',async()=>{
+ const owner={},endpoint='http://clipboard-focus-cancel/';let scripted=false,released=false;
+ const clipboard=new BrowserClipboard(()=>endpoint,async(url,operation)=>operation(async(method,args)=>{
+  if(method==='Browser.getBrowserCommandLine')return {arguments:['--headless=new','--enable-automation']};
+  if(method==='Target.getTargetInfo')return {targetInfo:{type:'page'}};
+  if(method==='Target.getBrowserContexts')return {browserContextIds:[]};
+  if(method==='Target.createTarget')return {targetId:'control'};
+  if(method==='Runtime.evaluate'){
+   if(args.expression==='location.href')return {result:{value:clipboard.owners.get(owner).bridges.get('default').url}};
+   scripted=true;return {result:{}};
+  }
+  if(method==='Emulation.setFocusEmulationEnabled'){if(args.enabled)clipboard.cancel(owner);else released=true;}
+  if(method==='Target.getTargets')return {targetInfos:[{targetId:'control'}]};
+  if(method==='Target.closeTarget')return {success:true};
+  return {};
+ }));
+ clipboard.ensureServer=async()=>"http://owned-control/";
+ clipboard.json=async(endpoint,route)=>route==='/json/version'?{webSocketDebuggerUrl:'browser'}:[{id:'control',webSocketDebuggerUrl:'control'}];
+ await assert.rejects(clipboard.request(owner,{method:'writeText',targetId:'tab',value:'late'}),/session closed/);
+ assert.equal(scripted,false);assert.equal(released,true);
+ await clipboard.cleanup(owner);assert.deepEqual(clipboard.internalTargets(),[]);
+});

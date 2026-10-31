@@ -496,8 +496,10 @@ focus. Public inventories hide control tabs. The browser must be able to reach
 the host's loopback server; remote transport is unverified. The control server
 serves no clipboard data and exposes no HTTP clipboard commands.
 
-paste writes the clipboard and sends native editor paste within one host queue,
-checking the selected document loader before dispatch. Browser paste events are
+paste writes the clipboard and awaits the managed native editor action within
+one host queue. BrowserInputs acquires the origin input/focus lease, validates the observed AX
+identity/loader and focuses the target before the clipboard write. It rechecks
+native focused=true after preparation before the paste down. Null uses current focus. Browser paste events are
 trusted and support page cancellation, native undo, maxlength/readonly handling,
 rich content and PNG clipboard files. Native copy/cut shortcuts feed the same
 browser clipboard, including the browser's password-field protections. This uses
@@ -574,3 +576,34 @@ disabled. This remains an explicit backend setup requirement for the verified
 Linux configuration. No front-tab activation, screenshot retry, alternate image
 source or increased timeout was added. The installer smoke uses this flag and
 checks installed-runtime drag followed by capture after removing the source.
+
+
+## Managed paste ownership
+
+The clipboard service verifies headless mode and prepares the browser's virtual
+clipboard through a private preparation callback inside BrowserInputs. The queue awaits that
+manager's complete dispatch/release/focus-cleanup attempt, preserving payload
+serialization. A target recheck can fail or cancellation can stop input after an accepted
+clipboard preparation; accepted virtual clipboard changes are retained.
+
+Native paste uses one fixed editor-paste down and a separate up with no paste
+command. Reset/timeout/close, turn end and Worker exit stop later stages and use
+the existing fresh-controller release path. A failed key/focus release retains
+the input lease. Subsequent clipboard API jobs check that retained paste lease
+before discovery or mutation, and fail until cleanup succeeds. Reset retries
+release without another paste down. The input RPC does not expose the managed
+paste action; only the verified clipboard service delegates it internally.
+
+The shared source/Worker controller adds 27 paste cases, including focus redirect,
+Unicode/selection insertion, prompt response, cancellation, Worker exit and
+failed key/focus-release retry. A competing write is refused while cleanup is
+unresolved; the native buffer is read after reset to verify it was not clobbered.
+Preparation-stage cases hold a completed native write before dispatch, reject
+competing input, and reset without any paste down while retaining accepted buffer
+data. A unit check also cancels between control-focus acknowledgement and the
+clipboard script to prevent a new write. The installed-runtime fixture also pastes through the copied services after
+source removal. Existing text/HTML/PNG, undo, editability, password and clipboard
+resource/permission checks remain in the clipboard controller.
+
+This path still requires verified headless Chromium. Atomic focus/edit dispatch,
+external raw clients and broader platform/editor behavior remain open.

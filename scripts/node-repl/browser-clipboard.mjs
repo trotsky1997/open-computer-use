@@ -68,9 +68,10 @@ async function clipboardOperation(method, value, limit) {
 }
 
 export class BrowserClipboard {
-  constructor(endpoint, connect) {
+  constructor(endpoint, connect, input) {
     this.endpoint = endpoint;
     this.connect = connect;
+    this.input = input;
     this.owners = new Map();
     this.closedOwners = new WeakSet();
     this.tokens = new Set();
@@ -109,18 +110,20 @@ export class BrowserClipboard {
   async request(owner, args) {
     if (args?.method === "targets") return this.internalTargets();
     if (!args || !["read","readText","write","writeText","paste"].includes(args.method)) throw new Error("Unknown clipboard operation");
+    if(args.method==="paste" && !this.input)throw new Error("Paste requires managed browser input");
     if (["write","writeText","paste"].includes(args.method)) validateClipboardWrite(args.method,args.value);
     if (this.closedOwners.has(owner)) throw new Error("Browser clipboard session closed");
     const endpoint = this.endpoint();
     if (!endpoint) throw new Error("No CDP browser configured");
     let state = this.owners.get(owner);
-    if (!state) this.owners.set(owner,state={bridges:new Map(),pending:new Set(),focusedTargets:new Set(),tickets:new Set()});
+    if (!state) this.owners.set(owner,state={bridges:new Map(),pending:new Set(),tickets:new Set()});
     const ticket = {started:false};
     const canceled = new Promise((resolve,reject)=>{ticket.cancel=()=>reject(new Error("Browser clipboard session closed"));});
     state.tickets.add(ticket);
     const work = this.enqueue(endpoint,async () => {
       ticket.started = true;
       if (this.closedOwners.has(owner)) throw new Error("Browser clipboard session closed");
+      await this.input?.(owner,{action:"checkClipboard"});
       const version = await this.json(endpoint,"/json/version");
       return this.connect(version.webSocketDebuggerUrl,async send => {
         let commandLine;
@@ -149,7 +152,7 @@ export class BrowserClipboard {
         await send("Browser.setPermission",{permission:{name:"clipboard-read",allowWithoutSanitization:true},setting:"granted",origin:bridge.origin,...context});
         const target = (await this.json(endpoint,"/json/list")).find(target=>target.id===bridge.targetId);
         if (!target) throw new Error("Clipboard control tab closed; reset the session");
-        const result = await this.connect(target.webSocketDebuggerUrl,async page => {
+        const operation = () => this.connect(target.webSocketDebuggerUrl,async page => {
           let ready = false;
           for (let attempt=0;attempt<100;attempt++) {
             const result = await page("Runtime.evaluate",{expression:"location.href",returnByValue:true});
@@ -162,6 +165,7 @@ export class BrowserClipboard {
           try {await page("Emulation.setFocusEmulationEnabled",{enabled:true});}
           catch (error) {error.browserCleanupFailed=true;throw error;}
           try {
+            if(this.closedOwners.has(owner))throw new Error("Browser clipboard session closed");
             const result = await page("Runtime.evaluate",{expression:`(${clipboardOperation.toString()})(${JSON.stringify(args.method)},${JSON.stringify(args.value) ?? "undefined"},${LIMIT})`,awaitPromise:true,returnByValue:true,userGesture:true});
             if (result.exceptionDetails) throw new Error(result.exceptionDetails.exception?.description ?? result.exceptionDetails.text ?? "Clipboard operation failed");
             return result.result.value;
@@ -172,25 +176,9 @@ export class BrowserClipboard {
         });
         if (args.method === "paste") {
           if (this.closedOwners.has(owner)) throw new Error("Browser clipboard session closed");
-          const selected = (await this.json(endpoint,"/json/list")).find(target=>target.id===args.targetId);
-          if (!selected) throw new Error("Paste target closed");
-          await this.connect(selected.webSocketDebuggerUrl,async page => {
-            const frame = (await page("Page.getFrameTree")).frameTree.frame;
-            if (!args.loaderId || frame.loaderId !== args.loaderId) throw new Error("Paste target navigated; read state again");
-            state.focusedTargets.add(args.targetId);
-            try {await page("Emulation.setFocusEmulationEnabled",{enabled:true});}
-            catch (error) {error.browserCleanupFailed=true;throw error;}
-            try {
-              if (this.closedOwners.has(owner)) throw new Error("Browser clipboard session closed");
-              try {await page("Input.dispatchKeyEvent",{type:"rawKeyDown",key:"v",code:"KeyV",windowsVirtualKeyCode:86,modifiers:process.platform === "darwin" ? 4 : 2,commands:["paste"]});}
-              finally {await page("Input.dispatchKeyEvent",{type:"keyUp",key:"v",code:"KeyV",windowsVirtualKeyCode:86,modifiers:0});}
-            } finally {
-              try {await page("Emulation.setFocusEmulationEnabled",{enabled:false});state.focusedTargets.delete(args.targetId);}
-              catch (error) {error.browserCleanupFailed=true;throw error;}
-            }
-          });
+          return this.input(owner,{action:"paste",targetId:args.targetId,element:args.element,geometry:args.geometry},operation);
         }
-        return result;
+        return operation();
       });
     });
     const task = Promise.race([work,canceled]);
@@ -208,11 +196,6 @@ export class BrowserClipboard {
     if (!state) return;
     await Promise.allSettled([...state.pending]);
     const endpoint = this.endpoint();
-    for (const targetId of state.focusedTargets) {
-      const target = (await this.json(endpoint,"/json/list")).find(target=>target.id===targetId);
-      if (target) await this.connect(target.webSocketDebuggerUrl,page=>page("Emulation.setFocusEmulationEnabled",{enabled:false}));
-      state.focusedTargets.delete(targetId);
-    }
     for (const [key,bridge] of state.bridges) {
       if (bridge.targetId) {
         const version = await this.json(endpoint,"/json/version");

@@ -229,3 +229,17 @@ match the acknowledged release order.
 A pre-change control on each platform typed into the second input after the
 requested field's focus handler redirected focus. Atomic focus/key dispatch and
 broader widget/headful/platform focus behavior remain open.
+
+
+## Managed clipboard paste
+
+BrowserClipboard supplies the native preparation callback and holds the queue;
+BrowserInputs owns the input/focus lease across target validation, preparation
+and the native paste key lifecycle. Its fixed paste down carries the
+native editor command and platform modifier flag; the up carries neither another
+paste command nor a held modifier. AX identity/loader and focused state are
+checked by the same helpers as indexed keys and text. Failed release preserves
+input ownership and fences later clipboard API operations until reset cleanup
+succeeds. Clipboard data already prepared in the virtual buffer remains there.
+See [clipboard ownership](browser-cdp.md#managed-paste-ownership) for the queue,
+headless boundary, 27-case controller and remaining limitations.

@@ -60,8 +60,8 @@ try{
    console.log(`${Session.name} PASS ${mode} indexed key target, native focus, no unintended primary down and balanced release`);
   }finally{if(originalOpen)current.browserInputs.open=originalOpen;await current.close();}
  }
- for(const Session of [WorkerJavaScriptSession,PersistentJavaScriptSession])for(const mode of ['redirect','normal','current','selection','reply','turn','reset','timeout','close',...(Session===WorkerJavaScriptSession?['exit']:[]),'focus-failure']){
-  const current=new Session({native});let competitor,originalRelease;
+ for(const Session of [WorkerJavaScriptSession,PersistentJavaScriptSession])for(const action of ['paste','text'])for(const mode of ['redirect','normal','current','selection','reply','turn','reset','timeout','close',...(Session===WorkerJavaScriptSession?['exit']:[]),'focus-failure',...(action==='paste'?['release-failure','prepare-normal','prepare-reset']:[])]){
+  const current=new Session({native});let competitor,originalRelease,originalOpen,originalPaste,releasePrepare,prepared=false;
   try{
    const modal=['reply','turn','reset','timeout','close','exit'].includes(mode),id=await setup(modal?'?text-dialog':mode==='redirect'?'?text-redirect':mode==='selection'?'?text-selection':'','texttab',current);
    const baseline=await textState(id);
@@ -69,11 +69,19 @@ try{
    if(mode==='current')await run(`await texttab.playwright.getByLabel('Typing').fill('pre');nodeRepl.write(JSON.stringify(true));`,current);
    const beforeCount=(await textState(id)).events.length;
    let competitorId;
-   if(modal||mode==='focus-failure'){competitor=new Session({native});competitorId=await setup('','textcompetitor',competitor);}
+   if(modal||['focus-failure','release-failure'].includes(mode)||mode.startsWith('prepare-')){competitor=new Session({native});competitorId=await setup('','textcompetitor',competitor);}
    if(mode==='focus-failure'){
     const focus=current.browserInputs.focus;originalRelease=focus.release;focus.release=function(owner,lease){if(this.entries.get(lease)?.targetId===id)return Promise.reject(Error('Injected text focus-release outage'));return originalRelease.call(this,owner,lease);};
    }
-   const running=current.run(`await texttab.typeText(${mode==='current'?'null':'field'},'中😀');${modal&&!['turn','reply'].includes(mode)?'await new Promise(()=>{});':''}`, mode==='timeout'?1200:30000);
+   if(mode==='release-failure'){originalOpen=current.browserInputs.open;current.browserInputs.open=async(...args)=>{const connection=await originalOpen(...args),send=connection.send;connection.send=(method,params,...rest)=>method==='Input.dispatchKeyEvent'&&params?.type==='keyUp'?Promise.reject(Error('Injected paste release outage')):send(method,params,...rest);return connection;};}
+   if(mode.startsWith('prepare-')){const gate=new Promise(resolve=>{releasePrepare=resolve;});originalPaste=current.browserInputs.paste;current.browserInputs.paste=function(owner,args,prepare){return originalPaste.call(this,owner,args,async()=>{await prepare();prepared=true;await gate;});};}
+   const running=current.run(`await texttab.${action==='paste'?'paste':'typeText'}(${mode==='current'?'null':'field'},'中😀');${modal&&!['turn','reply'].includes(mode)?'await new Promise(()=>{});':''}`, mode==='timeout'?1200:30000);
+   if(mode.startsWith('prepare-')){
+    await waitFor(()=>prepared);const record=[...current.browserInputs.leases.values()].find(record=>record.targetId===id);assert.ok(record);assert.equal(record.keys.length,0);
+    const untouched=await textState(id);assert.equal(untouched.value,'');assert.equal(untouched.events.filter(e=>e.type==='keydown'||e.type==='input').length,0);
+    const denied=await competitor.run(`await textcompetitor.typeText(null,'wrong');`);assert.equal(denied.isError,true);assert.match(denied.content.at(-1).text,/already owns/);
+    if(mode==='prepare-reset'){const resetting=current.reset();await waitFor(()=>record.canceled);releasePrepare();await resetting;}else releasePrepare();
+   }
    if(modal){
     await waitFor(()=>[...current.browserDialogs.targets.values()].some(entry=>entry.targetId===id&&entry.dialog?.type==='prompt'));
     assert.ok([...current.browserInputs.leases.values()].some(record=>record.targetId===id));
@@ -82,22 +90,27 @@ try{
     if(mode==='turn')await current.endTurn();if(mode==='reset')await current.reset();if(mode==='close')await current.close();if(mode==='exit')await current.worker.terminate();
    }
    const result=await running;
-   if(mode==='focus-failure'){
+   if(['focus-failure','release-failure'].includes(mode)){
     assert.equal(result.isError,true);assert.equal(current.browserInputs.leases.size,1);
     const denied=await competitor.run(`await textcompetitor.typeText(null,'wrong');`);assert.equal(denied.isError,true);assert.match(denied.content.at(-1).text,/already owns/);
+    if(action==='paste'){const blocked=await competitor.run(`await textcompetitor.clipboard.writeText('wrong');`);assert.equal(blocked.isError,true);assert.match(blocked.content.at(-1).text,/paste.*owns|owns.*paste/i);}
     assert.equal((await current.run('nodeRepl.write(1)')).isError,true);
-    current.browserInputs.focus.release=originalRelease;originalRelease=undefined;await current.reset();
+    if(originalRelease){current.browserInputs.focus.release=originalRelease;originalRelease=undefined;}
+    if(originalOpen){current.browserInputs.open=originalOpen;originalOpen=undefined;}
+    await current.reset();
+    if(action==='paste')assert.equal(await run(`nodeRepl.write(JSON.stringify(await textcompetitor.clipboard.readText()));`,competitor),'中😀');
    }
    const final=await textState(id),insertions=final.events.slice(beforeCount).filter(e=>e.type==='input');
-   assert.equal(result.isError,modal&&!['turn','reply'].includes(mode)||mode==='redirect'||mode==='focus-failure',JSON.stringify({content:result.content,final}));
+   assert.equal(result.isError,modal&&!['turn','reply'].includes(mode)||mode==='redirect'||['focus-failure','release-failure','prepare-reset'].includes(mode),JSON.stringify({content:result.content,final}));
    if(mode==='redirect'){assert.match(result.content.at(-1).text,/focus/i);assert.equal(final.value,'');assert.equal(final.other,'');assert.equal(insertions.length,0);}
+   else if(mode==='prepare-reset'){assert.equal(final.value,'');assert.equal(insertions.length,0);assert.equal(final.events.filter(e=>e.type==='keydown').length,0);assert.equal(await run(`nodeRepl.write(JSON.stringify(await textcompetitor.clipboard.readText()));`,competitor),'中😀');}
    else if(modal&&mode!=='reply'){assert.ok(['','中😀'].includes(final.value));assert.ok(insertions.length<=1);}
    else{assert.equal(final.value,mode==='current'?'pre中😀':mode==='selection'?'a中😀d':'中😀');assert.equal(insertions.length,1);assert.ok(final.events.slice(beforeCount).filter(e=>['beforeinput','input'].includes(e.type)).every(e=>e.trusted&&e.visibility==='visible'));}
    assert.equal(final.other,'');assert.equal(final.visibility,baseline.visibility);
    assert.equal(current.browserInputs.leases.size,0);assert.equal(current.browserFocusLeases.entries.size,0);
    if(competitorId){const untouched=await textState(competitorId);assert.equal(untouched.value,'');assert.equal(untouched.other,'');}
-   console.log(`${Session.name} PASS ${mode} text input, trusted receiver, native target focus, no replay and cleanup`);
-  }finally{if(originalRelease)current.browserInputs.focus.release=originalRelease;await competitor?.close();await current.close();}
+   console.log(`${Session.name} PASS ${mode} ${action} input, trusted receiver, native target focus, no replay and cleanup`);
+  }finally{releasePrepare?.();if(originalPaste)current.browserInputs.paste=originalPaste;if(originalRelease)current.browserInputs.focus.release=originalRelease;if(originalOpen)current.browserInputs.open=originalOpen;await competitor?.close();await current.close();}
  }
  const id=await setup();let target=await index();
  await run(`await tab.click(${JSON.stringify(target)},{key:'shift+ctrl',durationMs:80,clickCount:2});nodeRepl.write(JSON.stringify(true));`);

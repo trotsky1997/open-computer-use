@@ -59,6 +59,10 @@ export class BrowserInputs {
       if(typeof args.text!=="string")throw new Error("typeText requires text");
       return this.perform(owner,args,{keys:[],count:0,durationMs:0},true);
     }
+    if(args?.action==="checkClipboard") {
+      if(active.get(this.endpoint())?.paste)throw new Error("Native paste still owns this browser input");
+      return;
+    }
     if(args?.action==="key") return this.pressKey(owner,args);
     if(args?.action==="drag") return this.perform(owner,args,validateClick({}));
     if(args?.action!==undefined && args.action!=="click") throw new Error("Unknown browser input action");
@@ -150,11 +154,18 @@ export class BrowserInputs {
   }
   click(owner,args) {return this.perform(owner,args,validateClick(args.options));}
   pressKey(owner,args) {return this.perform(owner,args,validatePressKey(args.key,args.options),true);}
+  paste(owner,args,prepare) {
+    if(typeof prepare!=="function")throw new Error("Paste requires clipboard preparation");
+    if(args.backendNodeId!==undefined)throw new Error("Input target requires AX identity");
+    const down={type:"rawKeyDown",key:"v",code:"KeyV",windowsVirtualKeyCode:86,modifiers:process.platform==="darwin"?4:2,commands:["paste"]};
+    const up={type:"keyUp",key:"v",code:"KeyV",windowsVirtualKeyCode:86,modifiers:0};
+    return this.perform(owner,{...args,action:"paste"},{keys:[{down,up}],count:0,durationMs:0},true,prepare);
+  }
   async dwell(record,durationMs) {
     let remaining=durationMs;
     while(remaining>0) {const start=performance.now();await delay(Math.min(remaining,1000),undefined,{signal:record.abort.signal});remaining-=performance.now()-start;this.check(record);}
   }
-  async perform(owner,args,options,keyboard=false) {
+  async perform(owner,args,options,keyboard=false,prepare) {
     const endpoint=this.endpoint();
     if(!endpoint || typeof args.targetId!=="string" || !args.targetId) throw new Error("Browser input target unavailable");
     if(this.closedOwners.has(owner)) throw new Error("Browser input session closed");
@@ -164,7 +175,7 @@ export class BrowserInputs {
     if(!keyboard && args.element===undefined && (![x,y].every(Number.isFinite) || x<0 || y<0 || x>=viewport?.clientWidth || y>=viewport?.clientHeight || !viewport)) throw new Error("Invalid browser input position");
     if(args.action==='drag' && (![args.end?.x,args.end?.y].every(Number.isFinite) || args.end.x<0 || args.end.y<0 || args.end.x>=viewport.clientWidth || args.end.y>=viewport.clientHeight)) throw new Error("Invalid browser drag destination");
     if(keyboard && (!args.geometry?.loaderId || args.backendNodeId!==undefined)) throw new Error("Invalid browser key target");
-    const record={keyboard,owner,endpoint,targetId:args.targetId,position:{x,y},geometry:args.geometry,keys:[],modifiers:0,abort:new AbortController()};
+    const record={keyboard,paste:args.action==='paste',owner,endpoint,targetId:args.targetId,position:{x,y},geometry:args.geometry,keys:[],modifiers:0,abort:new AbortController()};
     active.set(endpoint,record);this.leases.set(endpoint,record);
     record.work=(async()=>{
       await this.supported(endpoint,{keyboard,element:args.element!==undefined,text:args.action==='text'});this.check(record);
@@ -184,6 +195,11 @@ export class BrowserInputs {
       }
       const backendNodeId=args.element?.backendNodeId;
       if(keyboard && backendNodeId!==undefined) {await this.guard(record);await send("DOM.focus",{backendNodeId},0);}
+      if(prepare) {
+        if(args.element!==undefined)await this.focusedElement(record,args.element);
+        await this.guard(record);
+        await prepare();this.check(record);
+      }
       if(args.action==='text') {
         if(args.element!==undefined)await this.focusedElement(record,args.element);
         await this.guard(record);

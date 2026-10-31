@@ -143,7 +143,7 @@ test('AX click preparation owns scrolling and cancellation before any press',asy
    assert.throws(()=>input.request({},{action:'check'}),/already owns/);
    if(mode==='cancel')input.cancel(owner);
    release();
-   if(mode==='normal')await work;else await assert.rejects(work,mode==='cancel'?/canceled/:mode==='world-missing'?/isolated world/:mode==='hover-name'?/changed/:mode==='hover-covered'?/covered/:/document|viewport/);
+   if(mode==='normal')await work;else await assert.rejects(work,mode.includes('cancel')?/canceled/:mode==='world-missing'?/isolated world/:mode==='hover-name'?/changed/:mode==='hover-covered'?/covered/:/document|viewport/);
   }
   assert.equal(calls.filter(call=>call.args?.type==='mousePressed').length,mode==='normal'?1:0);
   assert.equal(calls.filter(call=>call.method==='DOM.scrollIntoViewIfNeeded').length,mode==='changed'?0:1);
@@ -154,8 +154,8 @@ test('AX click preparation owns scrolling and cancellation before any press',asy
 
 
 test('keyboard input binds native AX focus and retains failed cleanup without replay',async()=>{
- for(const action of ['text','key'])for(const mode of ['normal','redirect','navigation','cancel','focus-failure',...(action==='key'?['mid-redirect']:[])]) {
-  const endpoint='http://'+action+'-'+mode+'/',owner={},calls=[];let focused=false,redirected=false,failed=mode==='focus-failure';
+ for(const action of ['text','key','paste'])for(const mode of ['normal','redirect','navigation','cancel','focus-failure',...(action==='key'?['mid-redirect']:action==='paste'?['prepare-cancel']:[])]) {
+  const endpoint='http://'+action+'-'+mode+'/',owner={},calls=[];let focused=false,redirected=false,failed=mode==='focus-failure',prepared=0;
   const input=new BrowserInputs(()=>endpoint,async()=>({close(){},async send(method,args){
    calls.push({method,args});
    if(method==='Page.getFrameTree')return {frameTree:{frame:{loaderId:mode==='navigation'&&focused?'new':'old'}}};
@@ -166,17 +166,21 @@ test('keyboard input binds native AX focus and retains failed cleanup without re
   }}),()=>0,{async acquire(){return 5;},async release(){if(failed)throw Error('Focus release outage');}});
   input.supported=async()=>{};input.target=async()=>({webSocketDebuggerUrl:'page'});
   for(const text of [null,1,{}])assert.throws(()=>input.request(owner,{action:'text',text}),/requires text/);
-  assert.throws(()=>input.request(owner,{action,text:'x',key:'a',backendNodeId:7}),/AX identity/);
+  if(action==='paste'){assert.throws(()=>input.paste(owner,{backendNodeId:7},async()=>{}),/AX identity/);assert.throws(()=>input.request(owner,{action:'paste'}),/Unknown/);}
+  else assert.throws(()=>input.request(owner,{action,text:'x',key:'a',backendNodeId:7}),/AX identity/);
   const args={action,targetId:'tab',text:'中😀',key:'shift+a',element:{backendNodeId:7,role:'textbox',name:'Typing'},geometry:{loaderId:'old'}};
-  const work=input.request(owner,args);
-  if(mode==='normal')await work;else await assert.rejects(work,mode.includes('redirect')?/lost focus/:mode==='navigation'?/document changed/:mode==='cancel'?/canceled/:/Focus release outage/);
+  const work=action==='paste'?input.paste(owner,args,async()=>{assert.equal(calls.some(call=>call.method==='Input.dispatchKeyEvent'),false);assert.throws(()=>input.request({},{action:'check'}),/already owns/);assert.throws(()=>input.request({},{action:'checkClipboard'}),/paste.*owns/);prepared++;if(mode==='prepare-cancel')input.cancel(owner);}):input.request(owner,args);
+  if(mode==='normal')await work;else await assert.rejects(work,mode.includes('redirect')?/lost focus/:mode==='navigation'?/document changed/:mode.includes('cancel')?/canceled/:/Focus release outage/);
   if(mode==='focus-failure'){
    assert.equal(input.leases.size,1);assert.throws(()=>input.request({},{action:'check'}),/already owns/);
+   if(action==='paste')assert.throws(()=>input.request({},{action:'checkClipboard'}),/paste.*owns/);
    failed=false;await input.cleanup(owner);
   }
   const complete=mode==='normal'||mode==='focus-failure',down=calls.filter(call=>call.method==='Input.dispatchKeyEvent'&&['rawKeyDown','keyDown'].includes(call.args.type)).map(call=>call.args.key),up=calls.filter(call=>call.method==='Input.dispatchKeyEvent'&&call.args.type==='keyUp').map(call=>call.args.key);
+  assert.equal(prepared,action==='paste'&&(complete||mode==='prepare-cancel')?1:0);
   assert.deepEqual(calls.filter(call=>call.method==='Input.insertText').map(call=>call.args.text),action==='text'&&complete?['中😀']:[]);
-  assert.deepEqual(down,action==='key'?(complete?['Shift','A']:mode==='mid-redirect'?['Shift']:[]):[]);assert.deepEqual(up,[...down].reverse());
+  assert.deepEqual(down,action==='key'?(complete?['Shift','A']:mode==='mid-redirect'?['Shift']:[]):action==='paste'&&complete?['v']:[]);assert.deepEqual(up,[...down].reverse());
+  if(action==='paste')for(const call of calls.filter(call=>call.method==='Input.dispatchKeyEvent')){assert.deepEqual(call.args.commands,call.args.type==='keyUp'?undefined:['paste']);if(call.args.type==='keyUp')assert.equal(call.args.modifiers,0);}
   assert.equal(calls.filter(call=>call.method==='DOM.focus').length,1);assert.equal(calls.some(call=>call.method==='Input.dispatchMouseEvent'),false);
   assert.equal(input.leases.size,0);assert.equal(browserPointerLeases.has(endpoint),false);
  }

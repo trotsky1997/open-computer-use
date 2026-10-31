@@ -615,6 +615,7 @@ Playwright resolves fresh elements and waits for actionability; ambiguous matche
 Navigation waits: tab.playwright.expectNavigation(async action, {url?,waitUntil?,timeoutMs?}), waitForURL(url, {waitUntil?,timeoutMs?}), waitForLoadState({state?,timeoutMs?}). expectNavigation installs a main-frame watcher before running the action and returns its result after navigation.
 Playwright actions invalidate prior AX and screenshot indices. Read current state afterwards. File chooser events: start tab.playwright.waitForEvent("filechooser", {timeoutMs?}) before clicking, then await the handle and use isMultiple() / setFiles(absolutePaths, {timeoutMs?}). The file handle is one-shot. Downloads: start waitForEvent("download") before clicking, then await download.path({timeoutMs?}) for the completed local artifact. It includes new descendant popups opened during that wait. Bind an existing popup separately to collect its downloads.
 Developer logs: await tab.dev.logs({filter?,levels?,limit?}) returns chronological console entries with level/message/timestamp/url. Capture begins at tab binding, continues across calls/navigation, and ends on close/reset/timeout. Levels: debug/info/log/warn/error (warning aliases warn). Default limit 100; retained cap 1000 entries, each at most 16,384 UTF-16 code units. Objects use shallow CDP descriptions; no page getters are executed. Prior console history and out-of-process frame/worker logs are excluded.
+paste keeps clipboard writing and native editor input in the clipboard queue under a host input/focus lease. AX targets are validated before preparation and before paste down. Failed release blocks later clipboard API jobs until reset cleanup succeeds. Accepted virtual clipboard writes remain after cancellation; paste down is never replayed.
 JavaScript dialogs: await tab.getJsDialog() returns undefined or a handle with type. alert/beforeunload support dismiss(); confirm supports accept()/dismiss(); prompt supports accept(text)/dismiss(). Actions return when they open a dialog; answer it before further page reads/input. accept()/dismiss() reports failures from the resumed action. Handles are scoped to the observed dialog and owning session. Reset/timeout/close dismiss owned active dialogs. Beforeunload dismiss cancels navigation. Browser/tab discovery starts early dialog observation. New page targets resume after their capture session is ready; popup dialogs inherit an active opener action. Created tabs attach observers before loading their URL. A dialog already open before observation starts may prevent CDP initialization; resolve it through existing browser/native controls first.
 Clipboard: tab.clipboard.read()/readText()/write(items)/writeText(text) uses the browser native process clipboard. Items contain entries [{mimeType,text? ,base64?}] and optional presentationStyle. Exactly one payload per entry; native Chrome validates supported formats. Requires verified --headless / --headless=new plus --enable-automation and a browser that can reach the host loopback bridge. Browser clipboard state is shared across tabs/JS sessions and survives js_reset. Internal control tabs are hidden and cleaned up on reset/timeout/close. paste(index,text,{format:"text"|"html"}) writes the isolated clipboard and dispatches trusted native paste atomically; typeText remains clipboard-independent. Headful clipboard APIs fail explicitly.
 Read-only scripting: playwright.evaluate(fnOrExpression,arg?,{timeoutMs?}), locator.evaluate(...) and locator.evaluateAll(...) run in a host-owned QuickJS Worker. Native DOM read facades support text/attributes/traversal/styles/geometry and frame scopes. Live setters, mutation methods, page functions, network/storage and Node APIs are unavailable. Functions cannot capture REPL variables. Local data, URL helpers and timers are supported. Navigation, deadline and turn/reset/close cancel execution; inner deadlines preserve JS bindings. Default 10 seconds, timeoutMs:0 disables the operation deadline. Unsupported DOM members are unavailable; this is an explicit read schema.
@@ -651,7 +652,11 @@ export function createBrowserApi(activeOutput, environment = process.env, {focus
   const tabs=tabRequest ? undefined : new BrowserTabs(()=>endpoint()?.href,openConnection);
   const tabOwner={};
   const requestTab=tabRequest ?? (args=>tabs.request(tabOwner,args));
-  const clipboard = clipboardRequest ? undefined : new BrowserClipboard(() => endpoint()?.href,withConnection);
+  const clipboard = clipboardRequest ? undefined : new BrowserClipboard(() => endpoint()?.href,withConnection,(_owner,args,prepare)=>{
+    if(args.action!=='paste')return requestInput(args);
+    if(!inputs)throw new Error("Paste requires shared clipboard/input hosts");
+    return inputs.paste(inputOwner,args,prepare);
+  });
   const clipboardOwner = {};
   if (clipboard) cleanups.push(() => clipboard.cleanup(clipboardOwner));
   const requestClipboard = clipboardRequest ?? (args => clipboard.request(clipboardOwner,args));
@@ -744,7 +749,7 @@ export function createBrowserApi(activeOutput, environment = process.env, {focus
       try { return await operation(send); }
       finally { capture = undefined; }
     }));
-    function keyboardInput(index,args) {
+    function keyboardInput(index,args,request=requestInput) {
       return input(async send => {
         const observedLoaderId=documentId;
         let elementTarget;
@@ -754,7 +759,7 @@ export function createBrowserApi(activeOutput, environment = process.env, {focus
         }
         const current=await geometry(send);
         if(elementTarget && current.loaderId!==observedLoaderId)throw new Error("Page navigated; read AX state again");
-        return requestInput({...args,targetId:target.id,element:elementTarget,geometry:current});
+        return request({...args,targetId:target.id,element:elementTarget,geometry:current});
       });
     }
     async function geometry(send) {
@@ -921,11 +926,7 @@ export function createBrowserApi(activeOutput, environment = process.env, {focus
       async paste(index, text, options = {}) {
         if (!options || typeof options !== "object" || Array.isArray(options) || Object.keys(options).some(key => key !== "format") || !["text","html"].includes(options.format ?? "text")) throw new Error("paste format must be text or html");
         if (typeof text !== "string") throw new Error("paste requires text");
-        await input(async send => {
-          await focus(send,index);
-          const frame = (await send("Page.getFrameTree")).frameTree.frame;
-          await requestClipboard({method:"paste",targetId:target.id,loaderId:frame.loaderId,value:[{entries:[{mimeType:options.format === "html" ? "text/html" : "text/plain",text}]}]});
-        });
+        await keyboardInput(index,{method:"paste",value:[{entries:[{mimeType:options.format === "html" ? "text/html" : "text/plain",text}]}]},requestClipboard);
       },
       async pressKey(index,key,options={}) {
         validatePressKey(key,options);

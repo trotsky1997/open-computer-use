@@ -2402,3 +2402,58 @@ passes the 10 indexed-key cases, 21 text cases, existing held-input suite,
 installed Persistent/Worker and installed MCP launcher browser flows pass.
 Linux retains CDPScreenshotNewSurface. Headful/Windows, broader widget focus,
 atomic dispatch and DOM key-up delivery during navigation remain unverified.
+
+
+## Managed paste target and clipboard ownership
+
+Disposable macOS/Linux controls reproduced native paste into the second field
+after the requested field's focus handler redirected focus. The old clipboard
+service owned a separate user-target focus/key path. It now verifies headless mode and
+allocates private control resources, then keeps the native preparation callback
+and managed editor action in its existing queue under BrowserInputs ownership. Target focus/down/up and cancellation
+use the same AX/loader checks, release controller and retained failed ownership
+as other native input. The unused clipboard target-focus state/cleanup is removed.
+
+A retained paste lease blocks subsequent clipboard API jobs before discovery or
+mutation, including after a failed key/focus release has rejected the queue job.
+Reset cleans the existing input record without another editor-paste down. The
+prepared action is an internal service callback, excluded from the input RPC.
+Default source bindings, the Worker host and installed services use this same
+path. No dependency, public API option, legacy input fallback or CI was added.
+
+The shared controller adds 27 native paste cases across both JS hosts: focus
+redirect refusal, Unicode/current-focus/selection behavior, explicit prompt
+response, turn/reset/timeout/close/Worker-exit cleanup and key/focus-release
+failure/retry. Competing clipboard writes fail while cleanup is retained; a
+post-reset native read verifies that the original paste data remains. The small
+keyboard unit matrix also checks fixed paste commands and up events without
+another edit; a clipboard test checks the fence before browser discovery.
+The installed-runtime fixture verifies paste after source removal.
+
+Virtual clipboard contents persist across sessions. Preparation may finish
+before the target is refused or cancellation prevents input; there is no content
+rollback. Queue cancellation, permission/control-page cleanup and verified
+headless-only behavior remain in place. Atomic focus/edit dispatch, external
+raw-client coordination and broader headful/platform/editor work remain open.
+
+
+The input lease also spans the native clipboard write, with target identity and
+focus checked before preparation and again before the editor down. Headless verification and
+control-target allocation precede the managed callback; no user-target input is admitted
+there. Preparation barriers verify competing-input refusal and reset after an
+accepted buffer write with zero native paste downs. A closed-owner check between
+control-focus acknowledgement and Runtime clipboard access prevents a newly
+started write after cancellation. These stages use an internal function callback
+inside the existing clipboard queue, without exposing an input RPC bypass.
+
+
+Validation: macOS Node 26 passes 174/174 tests; arm64 Linux Node 24 passes
+173 with one macOS-only virtual-display skip. Chrome 158 on each platform passes
+all 27 paste cases, 21 text cases, 10 indexed-key cases, existing held-input suite,
+53 pointer cases and generic browser controller. Both JS hosts pass the complete
+native clipboard text/HTML/PNG, editability, undo, password and cleanup suite;
+the macOS desktop text-clipboard hash stays unchanged. Source-removed installed
+Persistent/Worker and MCP launcher flows pass managed paste too. Linux retains
+CDPScreenshotNewSurface. Headful/Windows, atomic focus/edit dispatch and native
+preparation settlement after transport loss remain open; that last failure mode
+was not exercised in these runs.
