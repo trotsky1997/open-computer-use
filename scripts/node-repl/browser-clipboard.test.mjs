@@ -22,7 +22,7 @@ test("unverified browser clipboards fail before control tabs or permissions are 
     }));
     clipboard.json = async()=>({webSocketDebuggerUrl:"ws://127.0.0.1/browser"});
     const owner = {};
-    await assert.rejects(clipboard.request(owner,{method:"writeText",targetId:"tab",value:"private"}),/requires.*headless/);
+    await assert.rejects(clipboard.request(owner,{method:"writeText",targetId:"tab",value:"private"}),/requires.*(headless|automation)/);
     assert.deepEqual(methods,["Browser.getBrowserCommandLine"]);
     assert.equal(clipboard.server,undefined);
     await clipboard.cleanup(owner);
@@ -155,4 +155,26 @@ test('clipboard cleanup restores permission on its original live browser indepen
  clipboard.owners.set(other,state({...bridge,endpoint:'http://replacement/',browser:'new-browser',targetId:'new-control'}));
  await clipboard.cleanup(owner);
  assert.deepEqual(settings,['prompt']);assert.equal(clipboard.owners.has(other),true);
+});
+
+test('headful clipboard rejects foreign or ended host identities before helper or permission IO',async()=>{
+ for(const identity of [undefined,{systemClipboard:false,browserGone:()=>false},{systemClipboard:true,browserGone:()=>true},{systemClipboard:'true',browserGone:()=>false}]){
+  const methods=[],clipboard=new BrowserClipboard(()=> 'http://127.0.0.1:9222/',async(_url,operation)=>operation(async method=>{methods.push(method);if(method==='Browser.getBrowserCommandLine')return {arguments:['--enable-automation']};throw Error('Unexpected clipboard IO');}),undefined,async(endpoint,socket)=>{assert.equal(endpoint,'http://127.0.0.1:9222/');assert.equal(socket,'ws://owned.test/browser');return identity;});
+  clipboard.json=async()=>({webSocketDebuggerUrl:'ws://owned.test/browser'});const owner={};
+  await assert.rejects(clipboard.request(owner,{method:'writeText',targetId:'tab',value:'owned fixture'}),/headless|host-owned/);
+  assert.deepEqual(methods,['Browser.getBrowserCommandLine']);assert.equal(clipboard.server,undefined);await clipboard.cleanup(owner);
+ }
+});
+
+test('hidden headful helper cleanup waits for disconnect and retains ownership after a failed close',async()=>{
+ for(const failFirst of [false,true]){
+  const endpoint='http://owned-hidden/',owner={};let acknowledge,closes=0;
+  const clipboard=new BrowserClipboard(()=>endpoint,async(_socket,operation)=>operation(async method=>method==='Target.getBrowserContexts'?{browserContextIds:[]}:method==='Target.getTargets'?{targetInfos:[]}:{}));
+  clipboard.json=async()=>({webSocketDebuggerUrl:'ws://owned-hidden/browser'});
+  const bridge={endpoint,browser:'ws://owned-hidden/browser',context:{},origin:'http://owned-control/',targetId:'hidden',disconnected:true,jobs:new Set(),connection:{close(){closes++;if(failFirst&&closes===1)throw Error('Owned disconnect failure');}},closed:new Promise(resolve=>{acknowledge=resolve;})};
+  clipboard.owners.set(owner,{bridges:new Map([['default',bridge]]),pending:new Set()});
+  if(failFirst){await assert.rejects(clipboard.cleanup(owner),/Owned disconnect failure/);assert.equal(clipboard.owners.has(owner),true);}
+  let finished=false;const cleanup=clipboard.cleanup(owner).then(()=>{finished=true;});
+  await new Promise(resolve=>setImmediate(resolve));assert.equal(finished,false);assert.equal(clipboard.owners.has(owner),true);acknowledge();await cleanup;assert.equal(clipboard.owners.has(owner),false);
+ }
 });

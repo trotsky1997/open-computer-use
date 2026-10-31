@@ -2021,3 +2021,38 @@ explicitly enabled with --headful and requires its graphical fixture tools.
 Physical desktops/macOS headful, Windows, takeover arbitration, headful clipboard
 and durable recovery remain open. The existing verified-headless clipboard/paste
 guard is retained. The broader parity goal remains active.
+
+## Managed headful native clipboard and paste
+
+Reuse the native clipboard job/settlement and input-lease paths for the verified
+private managed headful browser. The host's captured endpoint/socket/process
+identity must authorize the system clipboard backend before helper pages or
+permissions are created. Keep external/unverified headful rejection and headless
+virtual clipboard behavior. Use only owned Xvfb synthetic clipboard data to
+verify text/HTML/PNG, native paste, reset, cleanup and installed/MCP entries.
+
+Implemented system/display clipboard access only when the host's live managed
+headful endpoint/socket/process proof matches the requested browser. Existing
+headless virtual clipboard behavior and unowned headful rejection stay intact.
+Text/HTML/PNG and trusted native paste reuse the existing job completion evidence,
+queue and input/focus leases. Headful helpers use hidden native targets with a
+dedicated persistent browser connection; they do not appear in Chrome tabs.
+Cleanup waits for connection acknowledgement and retains failed-close ownership.
+Reads reject disconnected helpers; cleanup accepts already disconnected helpers
+so known completed work can reset and create a fresh control target. Visibility
+ignores native page targets that have no browser window.
+
+Evidence: macOS Node 189/189, arm64 Linux 188/189 (one macOS-only skip). Both
+platforms pass complete Worker/source headless text/HTML/PNG, copy/cut/paste, undo,
+editability/password and cleanup regressions; macOS system clipboard hash stays
+unchanged. Owned Linux Xvfb/Openbox/Gtk 3 verifies GTK-to-Chrome reads, Chrome-to-GTK
+Unicode text and PNG, trusted text/HTML/image paste and sanitization, native helper
+invisibility, unowned-client rejection without clipboard changes, disconnect/reset
+recovery and hidden-window reads. Source/Worker, real MCP and source-removed
+installed modules/MCP pass these flows, plus existing visibility/lifecycle checks.
+A focused check covers delayed disconnect acknowledgement and failed-close retry.
+
+System clipboard changes may persist after host exit and can be overwritten by
+other applications/users. Physical desktop/macOS system clipboard, Windows,
+external headful support, cross-host coordination, takeover arbitration and
+durable recovery remain open. The full parity goal remains active.

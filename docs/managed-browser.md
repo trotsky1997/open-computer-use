@@ -74,8 +74,21 @@ windows before retrying. External CDP browser windows are untouched.
 
 This exposes windows for viewing/manual interaction, while the host still owns
 the browser and profile lifetime. User-takeover arbitration and durable delivery
-beyond host exit remain open. Native clipboard/paste retain their existing
-verified-headless guard; headful clipboard/paste are currently unavailable.
+beyond host exit remain open. Native clipboard/paste use the process virtual clipboard in headless mode and
+the actual system/display clipboard in managed headful mode. Text, HTML and PNG
+are supported through the existing clipboard API. Headful access requires the
+host's exact current endpoint/socket/process proof before any helper/permission
+is created. Externally configured headful browsers remain unavailable.
+
+Headful clipboard data is shared with other applications on that display. Writes
+are retained, can outlive the browser when a clipboard manager stores them, and
+are not restored on reset/cancellation. Other applications/users can overwrite
+them; coordination across hosts and takeover remains open. Internal control pages
+use hidden native targets and stay outside the Chrome tab strip. Their dedicated
+connections remain open for completion recovery and close after pending jobs
+settle. A lost helper connection fails explicitly; confirmed completed jobs allow
+reset and fresh helpers, while uncertain native completion keeps its input fence.
+See [clipboard and paste](browser-cdp.md#browser-clipboard-and-native-paste) for native job rules.
 
 ## Repeatable checks
 
@@ -84,7 +97,7 @@ OCU_TEST_CHROME_EXECUTABLE=/absolute/path/to/chrome node scripts/run-managed-bro
 node scripts/tests/browser-only-install-smoke.mjs /absolute/path/to/chrome
 # Include installed headful checks on Linux with the graphical fixture dependencies:
 node scripts/tests/browser-only-install-smoke.mjs /absolute/path/to/chrome --headful
-# Linux with Xvfb, Openbox, xprop and xwininfo:
+# Linux with Xvfb, Openbox, xprop, xwininfo and system Python Gtk 3:
 OCU_TEST_CHROME_EXECUTABLE=/absolute/path/to/chrome node scripts/run-managed-browser-visibility-smoke.mjs
 ```
 
@@ -102,3 +115,11 @@ X11 window-map state is checked independently of CDP. Installed source-removed
 modules pass the same headful session/presentation and guardian-loss flows.
 The real source and installed MCP entries pass native presentation, hidden-state
 retention across js_reset and private browser/profile cleanup on shutdown.
+
+Managed headful clipboard checks on Linux additionally prove native GTK-to-Chrome
+text reads, Chrome-to-GTK Unicode text/PNG writes, trusted text/HTML/image paste,
+HTML sanitization, hidden control targets, unowned external-client rejection
+without clipboard changes, helper disconnect/reset recovery and hidden-window
+reads. These flows pass source/Worker and real MCP entry points, including the
+source-removed installed payload. Physical desktop/macOS system clipboard and
+Windows remain unverified.

@@ -23,3 +23,5 @@
 托管 headless Chromium 已接入宿主：按需启动、私有 profile/默认下载、reset/turn 保留、宿主退出及守护进程丢失回收。双系统源码与安装入口验证见 [managed browser](managed-browser.md)。Linux Xvfb/Openbox 上已验证显式 headful 模式与多窗口 visibility get/set、后台建页、reset/turn 状态及退出回收；物理桌面、macOS headful、Windows 与启动期宿主、守护进程同时丢失的持久恢复仍待补齐。
 
 WebMCP 发现已覆盖配置浏览器中的未绑定 HTTP(S) 页面及后续创建、导航、关闭，保持 turn 归属和 128 页预算；源码及源码移除后的安装模块已有双系统双会话实测，发现阶段的调用计数与标签页归属保持不变。真实 consent、headful/Windows 与外部站点覆盖仍待补齐。
+
+托管 headful 浏览器已支持系统/显示会话剪贴板与原生 text/HTML/PNG 粘贴；只允许匹配宿主当前 endpoint/socket/进程身份的浏览器。Linux 隔离 Gtk/X11 双会话、源码移除后的安装模块及真实 MCP 已验证原生互通、隐藏 helper、外部客户端拒绝和断线/reset 恢复。物理桌面/macOS、Windows、跨宿主协调与用户接管仍待验证；系统剪贴板数据可被其他应用修改，也可能在宿主退出后保留。

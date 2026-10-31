@@ -42,12 +42,14 @@ const HOST_BROWSER_DOWNLOADS = new BrowserDownloads(undefined,(owner,error)=>BRO
 const HOST_BROWSER_FOCUS = new BrowserFocusLeases(updateBrowserFocus);
 const HOST_BROWSER_LOGS = new BrowserConsoleLogs();
 const HOST_BROWSER_DIALOGS = new BrowserDialogs();
-const HOST_BROWSER_CLIPBOARD = new BrowserClipboard(() => browserEndpoint(process.env)?.href,withConnection,(owner,args,prepare)=>args.action==='paste'?HOST_BROWSER_INPUTS.paste(owner,args,prepare):HOST_BROWSER_INPUTS.request(owner,args),browserIdentity);
+const HOST_BROWSER_CLIPBOARD = new BrowserClipboard(() => browserEndpoint(process.env)?.href,withConnection,(owner,args,prepare)=>args.action==='paste'?HOST_BROWSER_INPUTS.paste(owner,args,prepare):HOST_BROWSER_INPUTS.request(owner,args),browserIdentity,openConnection);
 const HOST_BROWSER_CHROME=new BrowserChrome(()=>browserEndpoint(process.env)?.href,openConnection);
 const HOST_BROWSER_VIEWPORT = new BrowserViewport(() => browserEndpoint(process.env)?.href,openConnection,withConnection,()=>{const hidden=HOST_BROWSER_CHROME.hidden();return [...HOST_BROWSER_CLIPBOARD.internalTargets(),...hidden.ids,...hidden.urls];},(owner,error)=>BROWSER_FAILURE_HANDLERS.get(owner)?.(error));
 const HOST_BROWSER_DROPS = new BrowserDrops(() => browserEndpoint(process.env)?.href,openConnection,withConnection,()=>HOST_BROWSER_VIEWPORT.request(null,{action:"state"}));
 const HOST_BROWSER_TABS = new BrowserTabs(()=>browserEndpoint(process.env)?.href,openConnection);
 async function browserIdentity(endpoint,socket) {
+  const managed=browserRuntime.current;
+  if(managed?.headless===false&&!managed.closing&&managed.endpoint===endpoint&&managed.socket===socket&&managed.proof&&!managed.proof.browserGone())return {...managed.proof,systemClipboard:true};
   const browser=HOST_BROWSER_DIALOGS.browsers.get(endpoint);
   return browser && (!socket || browser.browserId===new URL(socket).pathname) ? browser.exitProof : undefined;
 }

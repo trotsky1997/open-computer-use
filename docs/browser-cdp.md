@@ -473,13 +473,14 @@ await tab.pressKey(elementIndex, "meta+v"); // macOS; ctrl+v on Linux/Windows
 await tab.paste(elementIndex, "<i>Formatted</i>", {format:"html"});
 ```
 
-The API uses Chromium's real process-specific virtual clipboard, enabled by
-headless mode. Launch the dedicated browser with `--headless=new` (or `--headless`)
-and `--enable-automation`. Browser.getBrowserCommandLine must confirm that mode
-before a control page or permission grant is created. Ordinary headful browsers,
-including unverified custom configurations, fail explicitly. Native app
-clipboard/paste remains separate work. typeText stays available independently of
-this clipboard support.
+The API uses Chromium's real process-specific virtual clipboard in headless mode.
+Launch with `--headless=new` (or `--headless`) and `--enable-automation`. For the
+[host-owned managed headful browser](managed-browser.md), it uses the actual
+system/display clipboard. Command-line mode and the host's exact current
+endpoint/socket/live-process proof are checked before headful helper pages or
+permission grants. Ordinary externally configured/unverified headful browsers
+fail explicitly. Native app clipboard/paste uses a separate runtime. typeText
+stays available independently of clipboard support.
 
 Items have `entries` and optional `presentationStyle` (`unspecified`, `inline`,
 `attachment`). Each entry has a MIME type and exactly one `text` string or canonical
@@ -490,10 +491,14 @@ and native clipboard normalization; read-back metadata/bytes follow the browser'
 representation. Plain text, HTML and valid PNG were tested. Unsupported formats,
 invalid images and multiple-item combinations can be rejected by the native API.
 
-Clipboard state belongs to the browser process, shared across its tabs, contexts
-and JS sessions. Reset/timeout/close dispose control resources and retain browser
-clipboard contents. A new browser process starts its own clipboard. Clipboard
-operations use a hidden, empty loopback control page in the target browser context,
+Headless clipboard state belongs to the browser process and is shared across its
+tabs, contexts and JS sessions. Reset/timeout/close dispose control resources and
+retain clipboard contents. A new headless browser starts its own clipboard.
+Managed headful mode shares the system/display clipboard with other applications;
+accepted writes are not restored on cancellation/reset, and clipboard managers
+may retain them after host exit. External applications/users can change them;
+coordination across hosts and user-takeover arbitration remain open. Clipboard
+operations use an empty loopback control page in the target browser context,
 with a clipboard-read grant scoped to that private origin and temporary emulated
 focus. Public inventories hide control tabs. The browser must be able to reach
 the host's loopback server; remote transport is unverified. The control server
@@ -583,11 +588,11 @@ checks installed-runtime drag followed by capture after removing the source.
 
 ## Managed paste ownership
 
-The clipboard service verifies headless mode and prepares the browser's virtual
-clipboard through a private preparation callback inside BrowserInputs. The queue awaits that
+The clipboard service verifies the virtual or owned system-clipboard backend and
+prepares it through a private callback inside BrowserInputs. The queue awaits that
 manager's complete dispatch/release/focus-cleanup attempt, preserving payload
 serialization. A target recheck can fail or cancellation can stop input after an accepted
-clipboard preparation; accepted virtual clipboard changes are retained.
+clipboard preparation; accepted clipboard changes are retained.
 
 Native paste uses one fixed editor-paste down and a separate up with no paste
 command. Reset/timeout/close, turn end and Worker exit stop later stages and use
@@ -608,5 +613,21 @@ clipboard script to prevent a new write. The installed-runtime fixture also past
 source removal. Existing text/HTML/PNG, undo, editability, password and clipboard
 resource/permission checks remain in the clipboard controller.
 
-This path still requires verified headless Chromium. Atomic focus/edit dispatch,
+This path requires verified headless Chromium or the host-owned managed headful
+browser. Atomic focus/edit dispatch,
 external raw clients and broader platform/editor behavior remain open.
+
+Managed headful helpers are native hidden targets with dedicated host-owned
+browser connections, so they do not appear in the Chrome tab strip. Cleanup
+settles accepted jobs, closes the target and waits for the persistent connection
+to disconnect; failed close retains ownership for retry. A lost helper connection
+fails before more clipboard work. Known completed jobs allow reset/fresh helpers;
+uncertain completion retains the existing native input fence.
+
+Linux Xvfb/Openbox/system Gtk 3 checks prove actual system clipboard interop for
+Unicode text and PNG, trusted text/HTML/image paste, native HTML sanitization,
+helper invisibility, foreign headful-client rejection without writes, helper
+disconnect/reset and hidden-window reads in both session implementations and
+source/installed MCP entries. Default-headless text/HTML/PNG, copy/cut/paste, undo,
+editability, password and cleanup regressions pass on macOS/Linux. Physical
+macOS/system clipboard, physical desktop interference and Windows remain open.

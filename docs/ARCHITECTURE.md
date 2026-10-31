@@ -674,3 +674,11 @@ Observers/queued startup work are released before transport shutdown. Both JS
 hosts on macOS and arm64 Linux verify direct/scripted/nested popup bytes,
 unrelated download isolation, observer loss and active reset/close cancellation.
 See [browser downloads](browser-cdp.md) for policy and filesystem boundaries.
+
+Managed headful clipboard/paste reuses native job completion evidence and host
+input leases. The current managed endpoint/socket/process proof authorizes system
+clipboard access before creating helpers/permissions. External headful peers stay
+rejected. Hidden native helper targets keep a dedicated browser connection for
+completion evidence and close after settlement; failed disconnect retains the
+owner. Headful data belongs to the system/display clipboard and may outlive the
+host. See [clipboard and paste](browser-cdp.md#browser-clipboard-and-native-paste).

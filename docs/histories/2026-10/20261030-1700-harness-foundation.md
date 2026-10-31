@@ -2732,3 +2732,32 @@ flows pass. Installer headful tests require --headful and the documented X11 too
 Physical desktop/macOS headful, Windows, takeover arbitration, headful clipboard
 and durable recovery remain unverified/open. Native clipboard/paste continue to
 require the isolated verified-headless backend.
+
+## Managed headful native clipboard and paste
+
+The verified host-owned headful browser can now use the actual system/display
+clipboard. Its current endpoint, debugger socket and captured live-process proof
+authorize access before helper/permission creation. Unowned/externally configured
+headful clients are rejected before writes, while headless retains its process
+virtual clipboard. Existing native job settlement and input/focus leases handle
+text/HTML/PNG and trusted native editor paste.
+
+Headful helpers are hidden native targets held by a dedicated browser connection.
+They stay outside the Chrome tab strip. Cleanup settles jobs and waits for the
+connection to disconnect; failed close retains its owner. Disconnect testing
+exposed an overbroad read-path guard in cleanup; cleanup now accepts a disconnected
+helper so known completed work can reset safely. Uncertain native completion
+retains the existing input fence. Native visibility skips targets without windows.
+
+macOS passes 189 Node checks; arm64 Linux passes 188 with one macOS-only skip.
+Owned Linux Xvfb/Openbox/Gtk 3 checks prove native GTK/Chrome clipboard interop,
+Unicode text, PNG, trusted text/HTML/image paste, sanitization, hidden helpers,
+foreign-client refusal without clipboard changes and helper disconnect/reset
+recovery. Source/Worker, real MCP and source-removed installed payloads pass these
+flows, including hidden-window reads and lifecycle cleanup. Both platforms pass
+full headless clipboard regressions; macOS system clipboard remains unchanged.
+
+Headful data is shared with other apps/users on that display and may outlive host
+exit through a clipboard manager. Physical desktop/macOS system clipboard,
+Windows, external headful support, cross-host coordination, takeover arbitration
+and durable recovery remain open.

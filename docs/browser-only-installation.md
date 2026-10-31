@@ -75,9 +75,12 @@ owned Chrome 158: existing/unbound/dynamic targets, no claims or automatic tool
 calls, and turn/reset resubscription. See [WebMCP](browser-webmcp.md).
 
 Managed headful visibility requires a graphical Linux test fixture. With Xvfb,
-Openbox, xprop and xwininfo installed, include the source-removed headful session
+Openbox, xprop, xwininfo and system Python Gtk 3 installed, include the source-removed headful session
 and MCP checks explicitly:
 
 ```sh
 node scripts/tests/browser-only-install-smoke.mjs /path/to/chrome --headful
 ```
+
+The headful fixture also checks native system clipboard interop and trusted paste
+with synthetic GTK data, hidden helper targets and unowned-client refusal.

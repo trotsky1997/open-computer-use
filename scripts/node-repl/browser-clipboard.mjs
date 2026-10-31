@@ -99,10 +99,10 @@ export async function nativeClipboardJob(phase, key, url, operation) {
 }
 
 export class BrowserClipboard {
-  constructor(endpoint, connect, input, identity) {
+  constructor(endpoint, connect, input, identity, open) {
     this.endpoint = endpoint;
     this.connect = connect;
-    this.input = input;this.identity=identity;
+    this.input = input;this.identity=identity;this.open=open;
     this.owners = new Map();
     this.closedOwners = new WeakSet();
     this.tokens = new Set();
@@ -193,8 +193,10 @@ export class BrowserClipboard {
       return this.connect(version.webSocketDebuggerUrl,async send => {
         let commandLine;
         try {commandLine=await send("Browser.getBrowserCommandLine");}
-        catch {throw new Error("Clipboard requires headless Chromium launched with --enable-automation");}
-        if (!commandLine.arguments?.some(argument=>["--headless","--headless=new"].includes(argument))) throw new Error("Clipboard requires verified headless Chromium with an isolated virtual clipboard");
+        catch {throw new Error("Clipboard requires Chromium launched with --enable-automation");}
+        const headless=commandLine.arguments?.some(argument=>["--headless","--headless=new"].includes(argument));
+        const identity=!headless&&this.identity?await this.identity(endpoint,version.webSocketDebuggerUrl):undefined;
+        if(!headless&&(identity?.systemClipboard!==true||identity.browserGone?.()!==false||typeof this.open!=='function'))throw new Error("Clipboard requires verified headless Chromium or the host-owned headful browser");
         const {targetInfo} = await send("Target.getTargetInfo",{targetId:args.targetId});
         if (targetInfo.type !== "page" || this.internalTargets().includes(args.targetId)) throw new Error("Clipboard requires a live user tab");
         const contexts = await send("Target.getBrowserContexts");
@@ -202,18 +204,24 @@ export class BrowserClipboard {
         const key = targetInfo.browserContextId ?? "default";
         let bridge = state.bridges.get(key);
         if (!bridge) {
-          bridge = {context,jobs:new Set(),endpoint,browser:version.webSocketDebuggerUrl,exitProof:this.identity ? await this.identity(endpoint,version.webSocketDebuggerUrl) : await browserExitProof(endpoint,version.webSocketDebuggerUrl,send)};
+          bridge = {context,jobs:new Set(),endpoint,browser:version.webSocketDebuggerUrl,exitProof:identity ?? (this.identity ? await this.identity(endpoint,version.webSocketDebuggerUrl) : await browserExitProof(endpoint,version.webSocketDebuggerUrl,send))};
           state.bridges.set(key,bridge);
           const origin = await this.ensureServer();
           bridge.path = `/__ocu_clipboard_${randomUUID()}`;
           this.tokens.add(bridge.path);
           bridge.url = origin + bridge.path;
           bridge.origin = origin;
-          const created = await send("Target.createTarget",{url:bridge.url,background:true,...context});
+          if(!headless){
+            // Hidden target lifetime follows this connection; keep it until jobs settle.
+            let acknowledge;bridge.closed=new Promise(resolve=>{acknowledge=resolve;});
+            bridge.connection=await this.open(version.webSocketDebuggerUrl,undefined,()=>{bridge.disconnected=true;acknowledge();});
+          }
+          const created = await (headless?send:bridge.connection.send)("Target.createTarget",{url:bridge.url,background:true,...(!headless?{hidden:true}:{}),...context});
           bridge.targetId = created.targetId;
           if (!controls.has(endpoint)) controls.set(endpoint,new Set());
           controls.get(endpoint).add(bridge.targetId);
         }
+        if(bridge.disconnected)throw new Error("Clipboard helper connection lost; reset the owning session before reuse");
         if(bridge.browser!==version.webSocketDebuggerUrl)throw new Error("Clipboard browser changed; reset the owning session");
         await send("Browser.setPermission",{permission:{name:"clipboard-read",allowWithoutSanitization:true},setting:"granted",origin:bridge.origin,...context});
         const target = (await this.json(endpoint,"/json/list")).find(target=>target.id===bridge.targetId);
@@ -301,6 +309,10 @@ export class BrowserClipboard {
           const target = (await send("Target.getTargets")).targetInfos.find(target=>target.targetId===bridge.targetId);
           if (target && !(await send("Target.closeTarget",{targetId:bridge.targetId})).success) throw new Error("Browser refused clipboard control tab cleanup");
         });
+      }
+      if(bridge.connection){
+        bridge.connection.close();let timer;
+        try{await Promise.race([bridge.closed,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('Clipboard helper disconnect remains unconfirmed')),5000);})]);}finally{clearTimeout(timer);}
       }
       this.tokens.delete(bridge.path);
       controls.get(endpoint)?.delete(bridge.targetId);

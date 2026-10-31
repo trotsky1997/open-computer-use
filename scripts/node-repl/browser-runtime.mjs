@@ -90,7 +90,7 @@ export class BrowserRuntime {
     const {targetInfos}=await send('Target.getTargets',{filter:[{type:'page'}]}),windows=new Map();
     for(const target of targetInfos){
      try{const {windowId,bounds}=await send('Browser.getWindowForTarget',{targetId:target.targetId});if(!windows.has(windowId))windows.set(windowId,bounds);}
-     catch(error){if(!error.cdpError)throw error;const {targetInfos:live}=await send('Target.getTargets',{filter:[{type:'page'}]});if(live.some(info=>info.targetId===target.targetId))throw error;}
+     catch(error){if(!error.cdpError)throw error;if(error.message==='No browser window found')continue;const {targetInfos:live}=await send('Target.getTargets',{filter:[{type:'page'}]});if(live.some(info=>info.targetId===target.targetId))throw error;}
     }
     for(const id of record.hiddenWindows.keys())if(!windows.has(id))record.hiddenWindows.delete(id);
     if(args.action==='getVisibility')return [...windows.values()].some(bounds=>bounds.windowState!=='minimized');
