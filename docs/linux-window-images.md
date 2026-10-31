@@ -20,7 +20,9 @@ the runtime names the selected frame's existing redirected backing pixmap with
 stacking, raises windows or moves focus. Mapped background, occluded and partially
 offscreen frames can be captured independently of the visible desktop.
 
-The mapped descendant tree must have a single matching PID and consistent depth.
+The mapped descendant tree must have a single matching PID. Descendant depths
+may differ: XComposite storage contains the complete hierarchy, including WM
+decoration children; the named pixmap is validated against the frame visual.
 Same-geometry ambiguity, shaped frames, absent backing storage, native errors and
 changed pixmap dimensions fail capture. XRender must report a supported direct
 24/32-bit visual with RGB888 masks and optional eight-bit alpha. The native image
@@ -58,9 +60,15 @@ Private Ubuntu arm64 Xvfb/D-Bus checks with a real xcompmgr pass through both so
 and Worker JS hosts: same-title red/blue isolation, background and overlapping
 frames, partially offscreen pixels, half-alpha red, opaque black, unchanged native
 focus, same-geometry/hidden/closed refusal, inactive-input rejection and actual
-ARGB-window click recipients. The existing noncomposited checks retain their
-exposure/black-frame and refusal behavior. Python self-checks cover PNG byte order/CRC/alpha conversion,
-PID/geometry validation, identity changes and resource cleanup on failure.
+ARGB-window click recipients. The same controller also passes with Openbox in
+both decorated and undecorated modes, including mixed-depth reparented ARGB
+frames, RGB/ARGB growth, shrink and hide/show remapping. It verifies PNG
+dimensions after resize and native negative window position before offscreen
+capture. Frame-relative fixture coordinates include WM borders/titlebars. The
+existing noncomposited checks retain their exposure/black-frame and refusal
+behavior. Python self-checks cover PNG byte order/CRC/alpha conversion,
+PID/geometry validation, mixed-depth frame acceptance with foreign-PID refusal,
+identity changes and resource cleanup on failure.
 
 ```sh
 # In an owned private Xvfb/D-Bus desktop, with GTK3, AT-SPI and Cairo installed:
@@ -69,16 +77,21 @@ compositor=$!
 trap 'kill "$compositor"; wait "$compositor"' EXIT
 XDG_SESSION_TYPE=x11 GDK_BACKEND=x11 \
   node scripts/tests/linux-composite-image-js-smoke.mjs /path/to/open-computer-use-linux
+# With Openbox running in that private desktop, run the same controller twice:
+# OCU_WINDOW_FIXTURE_DECORATED=0 node scripts/tests/linux-composite-image-js-smoke.mjs /path/to/open-computer-use-linux
+# OCU_WINDOW_FIXTURE_DECORATED=1 node scripts/tests/linux-composite-image-js-smoke.mjs /path/to/open-computer-use-linux
+# See linux-click-input.md for private WM startup/readiness/cleanup.
 # Run linux-image-js-smoke.mjs separately in a desktop without a compositor.
 python3 -m unittest discover -s apps/OpenComputerUseLinux -p '*_test.py'
 ```
 
-Real GNOME/KWin desktops, decorated/reparented frames, GPU/full-screen paths,
+Real GNOME/KWin desktops, other WM themes/shapes, GPU/full-screen paths,
 minimized/unmapped windows, Wayland/portal capture and other providers remain open.
-Current evidence covers owned undecorated GTK windows in Xvfb with xcompmgr.
+Current evidence uses owned GTK windows in Xvfb with xcompmgr and Openbox.
 
 The upstream X.Org `Xcomposite(3)` manual specifies named redirected pixmaps,
-map/resize lifetimes, the 0.2 minimum and explicit pixmap release. The installed
+per-hierarchy storage including descendant contents, map/resize lifetimes, the
+0.2 minimum and explicit pixmap release. The installed
 Xrender header defines the visual format/alpha masks used here. The
 [Xlib specification](https://xorg.freedesktop.org/archive/current/doc/libX11/libX11/libX11.html)
 describes stacking, grabs, image formats and obscured-window pixel limitations.

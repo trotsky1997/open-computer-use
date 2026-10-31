@@ -118,6 +118,16 @@ class ImageTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'ambiguous'):
             client.composite_frame(42, (0, 0, 2, 1), float('inf'))
 
+    def test_composite_frame_accepts_mixed_depth_but_rejects_foreign_pid(self):
+        client = self.client()
+        client.tree = lambda window: (0, [2]) if window == 1 else (1, [3]) if window == 2 else (2, [])
+        client.attributes = lambda window: types.SimpleNamespace(map_state=2, window_class=1, depth=32 if window == 2 else 24)
+        client.pid = lambda window: 42 if window == 2 else None
+        self.assertEqual(client.composite_frame(42, (0, 0, 2, 1), float('inf')), 2)
+        client.pid = lambda window: 42 if window == 2 else 99
+        with self.assertRaisesRegex(RuntimeError, 'PID/geometry'):
+            client.composite_frame(42, (0, 0, 2, 1), float('inf'))
+
     def test_composite_pixmap_and_image_are_freed_on_success_and_format_failure(self):
         for valid in (True, False):
             client = self.client()

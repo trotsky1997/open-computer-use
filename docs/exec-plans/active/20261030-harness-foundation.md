@@ -900,3 +900,41 @@ GNOME/KWin and physical/GPU desktops, wider decorated ARGB/mixed-depth frames,
 Wayland, background native input, external interruption/claims and broader
 providers remain open. No installation package or registry release was produced
 in this phase. The full harness parity goal stays active.
+
+## Mixed-depth compositor frames
+
+A real Openbox ARGB pixel run failed before image capture: a 32-bit WM frame
+contained a mapped 24-bit decoration child, and the descendant-depth check
+rejected it. X.Org's upstream Xcomposite manual specifies complete per-hierarchy
+offscreen storage, including descendant contents. The XGetImage source here is
+the named backing pixmap. Remove the descendant-depth restriction from this
+route while retaining frame/pixmap visual, dimensions, depth, color layout,
+identity, shape, tree budget, single-PID and geometry validation. The separate
+noncomposited root-image depth restriction remains intact.
+
+The owned GTK controller now supports decorated windows, RGB/ARGB grow/shrink
+and frame-relative receiving coordinates. Its semantic action lookup uses exact
+button names so Grow A and Grow Alpha stay distinct. It checks native negative
+position before offscreen capture, validates fresh PNG dimensions after resize,
+recovers after hide/show remapping and records exact ARGB pointer recipients.
+Documentation and the parity/quality tables now describe Openbox image evidence
+and preserve broader WM/theme/shape and Wayland gaps. The Linux architecture
+text also corrects its stale AT-SPI-only drag description.
+
+Validation passed: 90 Python checks on macOS and Ubuntu arm64; 47 native Linux Go
+checks plus 10 subchecks. Both JS hosts passed actual xcompmgr pixel runs without
+a WM, and Openbox runs in both decorated and undecorated modes: same-title
+red/blue isolation, background/occlusion, actual partly offscreen position,
+straight half-alpha red, opaque black, grow/shrink/remap, unchanged capture focus,
+ARGB input recipients and inactive/ambiguous/hidden/closed refusal. Both hosts
+also passed the original noncomposited image controller. The new focused check
+accepts mixed descendant depth and rejects a foreign descendant PID. No project
+dependency or CI was added; no installation package or registry release was
+produced. Checks used owned private Xvfb/D-Bus desktops with private WM config/
+cache locations. An extracted upstream development-package manual supplied the
+primary XComposite reference and was kept within the disposable test directory.
+
+See [Linux window images](../../linux-window-images.md). GNOME/KWin, other WM
+themes/shapes, GPU/full-screen, minimized windows, Wayland/portal, external
+interruption/claims and broader providers remain open. The full harness parity
+goal stays active.

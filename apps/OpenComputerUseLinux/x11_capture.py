@@ -255,7 +255,7 @@ class X11:
         return png(raw, width, height, *layout)
 
     def composite_frame(self, expected_pid, rectangle, deadline):
-        # shortcut: root-level frames only; extend reparented capture after real WM validation.
+        # XComposite backing storage includes the frame's mixed-depth descendants.
         matches = []
         _, windows = self.tree(self.root)
         for window in windows:
@@ -276,8 +276,6 @@ class X11:
                 if child_attrs.map_state != 2:
                     continue
                 if child_attrs.window_class == 1:
-                    if child_attrs.depth != attrs.depth:
-                        raise RuntimeError("Mixed-depth XComposite frame unsupported")
                     pid = self.pid(child)
                     if pid is not None:
                         pids.add(pid)

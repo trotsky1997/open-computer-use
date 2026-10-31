@@ -100,7 +100,8 @@ These checks include real decorated/reparented RGB GTK frames and WM passive
 grabs. Fixture points use client origins and frame extents so borders/titlebars
 are included in screenshot coordinates; the transparent input-only interceptor
 keeps keyboard focus and is explicitly raised above the receiving window.
-Broader GNOME/KWin, mixed-depth decorated ARGB, GPU/full-screen and physical
-input behavior remain open. The [XAllowEvents specification](https://xorg.freedesktop.org/archive/X11R7.5/doc/man/man3/XAllowEvents.3.html)
+RGB/ARGB image checks now also cover mixed-depth decorated/reparented Openbox
+frames and exact ARGB pointer recipients. Broader GNOME/KWin, other WM themes/
+shapes, GPU/full-screen and physical input behavior remain open. The [XAllowEvents specification](https://xorg.freedesktop.org/archive/X11R7.5/doc/man/man3/XAllowEvents.3.html)
 describes the window manager's replay mechanism; this runtime never releases
 another client's grab.
