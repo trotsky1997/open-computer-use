@@ -1064,7 +1064,7 @@ export function createBrowserApi(activeOutput, environment = process.env, {runti
           if(id==='visibility'){
             await bootstrap();
             if(!managed||headless)throw Error('Visibility requires a managed headful browser');
-            return Object.freeze({documentation:async()=>"visibility.get() reads whether any managed window is presented. visibility.set(true) restores the private browser windows; set(false) minimizes them. Changes persist across turns and JS resets. This affects only this managed browser. Partial native failures require inspection before retrying.",get:()=>runtimeRequest({action:'getVisibility'}),set:visible=>runtimeRequest({action:'setVisibility',visible})});
+            return Object.freeze({documentation:async()=>"visibility.get() reads whether any managed window is presented. visibility.set(true) restores the private browser windows, creating one blank window when none exist; set(false) minimizes them and is a no-op when empty. Changes persist across turns and JS resets. This affects only this managed browser. Partial native failures require inspection before retrying.",get:()=>runtimeRequest({action:'getVisibility'}),set:visible=>runtimeRequest({action:'setVisibility',visible})});
           }
           if(id==='management')return Object.freeze({
             documentation:async()=>MANAGEMENT_DOCUMENTATION,
@@ -1100,10 +1100,13 @@ export function createBrowserApi(activeOutput, environment = process.env, {runti
       if (!["http:", "https:", "about:"].includes(parsed.protocol)) throw new Error("Unsupported navigation URL protocol");
       await bootstrap();
       if(managed&&headless&&options.visible===true)throw new Error("Managed headless browsers cannot create visible tabs");
-      if(managed&&!headless&&options.visible!==undefined)await runtimeRequest({action:'setVisibility',visible:options.visible});
+      let visible=options.visible;
+      if(managed&&!headless&&visible===undefined&&!await runtimeRequest({action:'getVisibility'}))visible=false;
+      if(managed&&!headless&&visible!==undefined)await runtimeRequest({action:'setVisibility',visible});
       if(options.sessionName!==undefined)await nameSession(options.sessionName);
-      const result=await requestTab({action:"create",visible:options.visible});
+      const result=await requestTab({action:"create",visible});
       try {
+        if(managed&&!headless&&visible===false)await runtimeRequest({action:'setVisibility',visible:false});
         const target = (await targets()).find(target => target.id === result.targetId);
         if (!target) throw new Error("Created tab is unavailable");
         const tab = await prepare(target);

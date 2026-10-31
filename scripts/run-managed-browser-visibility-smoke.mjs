@@ -20,11 +20,20 @@ async function stop(child){if(child?.pid&&child.exitCode===null&&child.signalCod
 const gtk="import gi,json,sys;gi.require_version('Gtk','3.0');from gi.repository import Gtk,Gdk;Gtk.init([]);clipboard=Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD);";
 async function nativeText(){return JSON.parse((await execute('/usr/bin/python3',['-c',gtk+'print(json.dumps(clipboard.wait_for_text()))'])).stdout);}
 async function seedClipboard(text){const child=spawn('/usr/bin/python3',['-u','-c',gtk+"clipboard.set_text(sys.argv[1],-1);print('ready',flush=True);Gtk.main()",text],{stdio:['ignore','pipe','inherit']});let ready=false;child.stdout.on('data',()=>{ready=true;});await until(()=>ready,'Native fixture clipboard owner did not start');return child;}
+async function closeWindows(socket){
+ await withConnection(socket,async send=>{
+    const {targetInfos}=await send('Target.getTargets',{filter:[{type:'page'}]}),visible=[];
+    for(const info of targetInfos){try{await send('Browser.getWindowForTarget',{targetId:info.targetId});visible.push(info.targetId);}catch(error){if(error.message!=='No browser window found')throw error;}}
+    for(const targetId of visible)await send('Target.closeTarget',{targetId});
+   });
+}
 async function nativeWindows(pid){
  const {stdout}=await execute('xprop',['-root','_NET_CLIENT_LIST']);const result=[];
  for(const id of stdout.match(/0x[\da-f]+/giu)??[]){
-  const owner=await execute('xprop',['-id',id,'_NET_WM_PID']);if(!owner.stdout.trim().endsWith('= '+pid))continue;
-  const info=await execute('xwininfo',['-id',id]);result.push({id,visible:/Map State: IsViewable/u.test(info.stdout)});
+  try{
+   const owner=await execute('xprop',['-id',id,'_NET_WM_PID']);if(!owner.stdout.trim().endsWith('= '+pid))continue;
+   const info=await execute('xwininfo',['-id',id]);result.push({id,visible:/Map State: IsViewable/u.test(info.stdout)});
+  }catch(error){if(!/BadWindow|Bad Drawable|No such window/u.test(error.stderr??''))throw error;}
  }return result;
 }
 try{
@@ -35,7 +44,7 @@ try{
  const executable=path.join(scratch,'owned-chrome'),quoted="'"+path.resolve(binary).replaceAll("'","'\\''")+"'";
  await writeFile(executable,`#!/bin/sh\nexec ${quoted} --no-sandbox "$@"\n`,{mode:0o700});
  process.env.OPEN_COMPUTER_USE_BROWSER_EXECUTABLE=executable;process.env.OPEN_COMPUTER_USE_BROWSER_MODE='headful';delete process.env.OPEN_COMPUTER_USE_CDP_URL;
- server=createServer((_request,response)=>{response.setHeader('Content-Type','text/html');response.end(`<title>Owned visibility fixture</title><label>Value<input onpaste="this.dataset.trusted=event.isTrusted"></label><div contenteditable="true" role="textbox" aria-label="Rich" onpaste="this.dataset.trusted=event.isTrusted;this.dataset.fileType=event.clipboardData.files[0]?.type??''"></div><script>var canvas=document.createElement('canvas');canvas.width=canvas.height=1;canvas.getContext('2d').fillRect(0,0,1,1);document.body.dataset.png=canvas.toDataURL('image/png').split(',')[1];</script>`);});await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));const url=`http://127.0.0.1:${server.address().port}/`;
+ server=createServer((request,response)=>{response.setHeader('Content-Type','text/html');response.setHeader('Set-Cookie','window_retained=1; Path=/; SameSite=Lax');response.end(`<title>Owned visibility fixture</title><output>${request.headers.cookie??''}</output><label>Value<input onpaste="this.dataset.trusted=event.isTrusted"></label><div contenteditable="true" role="textbox" aria-label="Rich" onpaste="this.dataset.trusted=event.isTrusted;this.dataset.fileType=event.clipboardData.files[0]?.type??''"></div><script>var canvas=document.createElement('canvas');canvas.width=canvas.height=1;canvas.getContext('2d').fillRect(0,0,1,1);document.body.dataset.png=canvas.toDataURL('image/png').split(',')[1];</script>`);});await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));const url=`http://127.0.0.1:${server.address().port}/`;
  for(const Session of [runtime.WorkerJavaScriptSession,runtime.PersistentJavaScriptSession]){
   const clipboardOwner=await seedClipboard('Native GTK 你好');
   const session=new Session({native:{async request(){throw Error('Desktop runtime must remain unused');}}});let owned;
@@ -83,7 +92,27 @@ try{
    assert.equal(await run(session,'nodeRepl.write(JSON.stringify(await tab.clipboard.readText()));'),'Clipboard retained across reset');
    await session.endTurn();assert.equal(session.browserRuntime.current,owned);
    assert.equal(await run(session,'nodeRepl.write(JSON.stringify(await visibility.get()));'),true);
-   console.log(`${Session.name} PASS owned headful startup, native multi-window presentation/hide, native input/text/HTML/PNG clipboard/paste with GTK interop, reset/turn state and validation`);
+   assert.match(await run(session,`await tab.goto(${JSON.stringify(url+'cookie-before-close')});nodeRepl.write(JSON.stringify(await tab.playwright.locator('output').innerText()));`),/window_retained=1/);
+   await run(session,'await tab.clipboard.readText();nodeRepl.write(JSON.stringify(true));');
+   await closeWindows(owned.socket);
+   await until(async()=>(await nativeWindows(owned.pid)).length===0,'Visible windows remained after close');
+   assert.equal(owned.proof.browserGone(),false,'Hidden helper did not retain the browser');
+   assert.equal(await run(session,'nodeRepl.write(JSON.stringify(await visibility.get()));'),false);
+   assert.equal(await run(session,'await visibility.set(false);nodeRepl.write(JSON.stringify(await visibility.get()));'),false);
+   assert.equal((await nativeWindows(owned.pid)).length,0,'Hiding an empty browser created a window');
+   for(const options of [{visible:false},{}]){
+    assert.equal(await run(session,`var background=await cua.createBrowserTab('cdp',${JSON.stringify(url+'empty-background')},${JSON.stringify(options)});nodeRepl.write(JSON.stringify(await visibility.get()));`),false);
+    await until(async()=>{const windows=await nativeWindows(owned.pid);return windows.length===1&&windows.every(window=>!window.visible);},'Empty-browser background creation showed a window');
+    await closeWindows(owned.socket);await until(async()=>(await nativeWindows(owned.pid)).length===0,'Background window did not close');
+   }
+   assert.equal(await run(session,'await visibility.set(true);nodeRepl.write(JSON.stringify(await visibility.get()));'),true);
+   await until(async()=>(await nativeWindows(owned.pid)).some(window=>window.visible),'Showing an empty browser did not create a native window');
+   assert.deepEqual(await run(session,"nodeRepl.write(JSON.stringify((await cua.listTabs({emit:false})).map(tab=>tab.url)));"),['about:blank'],'Showing an empty browser restored closed tabs');
+   await closeWindows(owned.socket);await until(async()=>(await nativeWindows(owned.pid)).length===0,'Recreated window did not close');
+   const presented=await run(session,`var reopened=await cua.createBrowserTab('cdp',${JSON.stringify(url+'reopened')},{visible:true});await reopened.markHandoff();nodeRepl.write(JSON.stringify(await visibility.get()));`);assert.equal(presented,true);assert.equal(session.browserRuntime.current,owned);
+   assert.match(await run(session,"nodeRepl.write(JSON.stringify(await reopened.playwright.locator('output').innerText()));"),/window_retained=1/);
+   assert.equal(await run(session,'nodeRepl.write(JSON.stringify(await reopened.clipboard.readText()));'),'Clipboard retained across reset');
+   console.log(`${Session.name} PASS owned headful startup, native multi-window presentation/hide, native input/text/HTML/PNG clipboard/paste with GTK interop, reset/turn state, empty-window reopening and retained session cookies`);
   }finally{try{await session.close();}finally{try{if(Session===runtime.WorkerJavaScriptSession&&owned){owned.child.kill('SIGKILL');await owned.closed;}await session.browserRuntime.close();}finally{await stop(clipboardOwner);}}}
   await assert.rejects(access(owned.profile),/ENOENT/);
  }
@@ -100,9 +129,14 @@ try{
   await peer.request('tools/call',{name:'js_reset',arguments:{}});
   const retained=await peer.request('tools/call',{name:'js',arguments:{code:`var browser=await cua.getBrowser({id:'cdp'});var visibility=await browser.capabilities.get('visibility');var tab=await cua.getTab({url:${JSON.stringify(url+'mcp')}});var retainedClipboard=await tab.clipboard.readText();nodeRepl.write(JSON.stringify({visible:await visibility.get(),clipboard:retainedClipboard}));`}});assert.equal(retained.isError,false);assert.deepEqual(JSON.parse(retained.content.at(-1).text),{visible:false,clipboard:'MCP paste'});
   await until(async()=>{const windows=await nativeWindows(mcpBrowser.pid);return windows.length>0&&windows.every(window=>!window.visible);},'Hidden clipboard read unexpectedly presented a native window');
+  await closeWindows(webSocketDebuggerUrl);await until(async()=>(await nativeWindows(mcpBrowser.pid)).length===0,'MCP windows remained open');
+  const reopened=await peer.request('tools/call',{name:'js',arguments:{code:`var reopened=await cua.createBrowserTab('cdp',${JSON.stringify(url+'mcp-reopened')},{visible:true});await reopened.markHandoff();nodeRepl.write(JSON.stringify({visible:await visibility.get(),cookie:await reopened.playwright.locator('output').innerText(),clipboard:await reopened.clipboard.readText()}));`}});
+  assert.equal(reopened.isError,false,reopened.content.at(-1)?.text);const reopenedState=JSON.parse(reopened.content.at(-1).text);assert.equal(reopenedState.visible,true);assert.match(reopenedState.cookie,/window_retained=1/);assert.equal(reopenedState.clipboard,'MCP paste');
+  await until(async()=>(await nativeWindows(mcpBrowser.pid)).some(window=>window.visible),'MCP did not reopen a window in the original browser');
+
  }finally{await peer.close();}
  await until(async()=>{try{process.kill(mcpBrowser.pid,0);return false;}catch(error){if(error.code!=='ESRCH')throw error;}try{await access(mcpBrowser.profile);return false;}catch(error){if(error.code==='ENOENT')return true;throw error;}},'MCP headful browser/profile survived shutdown');
- console.log('PASS headful MCP native paste/clipboard, presentation, hidden reset retention and browser/profile shutdown');
+ console.log('PASS headful MCP native paste/clipboard, presentation, hidden reset retention, empty-window reopening and browser/profile shutdown');
  if(!process.argv[2])for(const kill of [false,true]){
   const child=spawn(process.execPath,[fileURLToPath(new URL('./run-managed-browser-smoke.mjs',import.meta.url)),'--host-child',...(kill?['--hold']:[])],{env:{...process.env,OCU_MANAGED_FIXTURE_URL:url},stdio:['ignore','pipe','inherit']});
   const exited=once(child,'exit');exited.catch(()=>{});let output='';child.stdout.on('data',chunk=>{output+=chunk;});

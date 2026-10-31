@@ -2761,3 +2761,30 @@ Headful data is shared with other apps/users on that display and may outlive hos
 exit through a clipboard manager. Physical desktop/macOS system clipboard,
 Windows, external headful support, cross-host coordination, takeover arbitration
 and durable recovery remain open.
+
+## Managed headful empty-window reopening
+
+Closing every visible window could terminate the managed process and break the
+next browser action. Headful startup now uses Chromium process keep-alive. Native
+Linux session cleanup also deleted session cookies when the last window closed,
+so the temporary owned profile sets the native session preference to preserve
+them. These changes affect only the private managed browser; the guardian still
+removes its profile on host shutdown.
+
+Visibility treats an empty browser as hidden: hide is a no-op and show opens one
+blank window. Startup continues to require and verify its first minimized window.
+Explicit background creation and omitted visibility in a hidden browser remain
+hidden, with a post-creation check before navigating to the requested URL.
+
+Owned Linux source/Worker and source-removed installed/MCP flows pass repeated
+window closure/reopening, native window mapping, background/default-hidden and
+visible creation, unchanged PID/profile, session-cookie delivery on a fresh HTTP
+request and retained native clipboard data. Empty show opens exactly one blank
+tab without restoring closed pages. The X11 checker now handles IDs that were
+confirmed destroyed between enumeration and inspection; other errors still fail.
+Node checks pass macOS 189/189 and Linux 188/189 with one macOS-only skip. Existing
+clipboard, visibility, guardian/host exit and macOS headless lifecycle checks pass.
+
+Physical desktops/macOS headful, Windows, takeover arbitration, cross-host
+coordination and durable recovery remain open. Upstream behavior and the native
+session rule are linked in the managed-browser documentation.

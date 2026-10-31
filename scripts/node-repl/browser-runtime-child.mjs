@@ -13,10 +13,11 @@ async function start(executable,headless){
  send({type:'profile',profile});
  const downloads=path.join(profile,'downloads');
  await mkdir(downloads,{mode:0o700});await mkdir(path.join(profile,'Default'),{mode:0o700});
- await writeFile(path.join(profile,'Default','Preferences'),JSON.stringify({download:{default_directory:downloads,prompt_for_download:false,directory_upgrade:true},savefile:{default_directory:downloads}}));
+ // Keep this host-owned session's cookies when its last visible window closes.
+ await writeFile(path.join(profile,'Default','Preferences'),JSON.stringify({...(!headless?{session:{restore_on_startup:1}}:{}),download:{default_directory:downloads,prompt_for_download:false,directory_upgrade:true},savefile:{default_directory:downloads}}));
  if(closing)return;
  const extension=fileURLToPath(new URL('./chrome-browser-extension',import.meta.url));
- browser=spawn(executable,[...(headless?['--headless=new']:['--start-minimized']),'--enable-automation','--no-first-run','--no-default-browser-check','--disable-background-networking','--disable-component-update','--disable-sync','--enable-features=WebMCP,CDPScreenshotNewSurface','--remote-debugging-address=127.0.0.1','--remote-debugging-port=0',`--user-data-dir=${profile}`,`--load-extension=${extension}`,`--disable-extensions-except=${extension}`,...(process.platform==='darwin'?['--use-mock-keychain']:[]),'about:blank'],{stdio:['ignore','ignore','inherit']});
+ browser=spawn(executable,[...(headless?['--headless=new']:['--start-minimized','--keep-alive-for-test']),'--enable-automation','--no-first-run','--no-default-browser-check','--disable-background-networking','--disable-component-update','--disable-sync','--enable-features=WebMCP,CDPScreenshotNewSurface','--remote-debugging-address=127.0.0.1','--remote-debugging-port=0',`--user-data-dir=${profile}`,`--load-extension=${extension}`,`--disable-extensions-except=${extension}`,...(process.platform==='darwin'?['--use-mock-keychain']:[]),'about:blank'],{stdio:['ignore','ignore','inherit']});
  exited=once(browser,'exit');exited.catch(()=>{});let error;browser.once('error',value=>{error=value;});
  send({type:'browser',pid:browser.pid});
  const deadline=Date.now()+15000;let port,route;

@@ -56,7 +56,7 @@ export class BrowserRuntime {
       const deadline=Date.now()+10000;
       for(;;){
        if(record.closing)throw Error('Managed browser startup canceled');
-       try{record.visibilityPending=this.windowVisibility(record,{action:'setVisibility',visible:false});await record.visibilityPending;break;}
+       try{record.visibilityPending=this.windowVisibility(record,{action:'setVisibility',visible:false},true);await record.visibilityPending;break;}
        catch(error){if(!error.message.startsWith('No managed browser windows')||Date.now()>deadline)throw error;await new Promise(resolve=>setTimeout(resolve,20));}
       }
      }
@@ -85,7 +85,7 @@ export class BrowserRuntime {
    return this.windowVisibility(record,args);
   });record.visibilityPending=work;return work;
  }
- async windowVisibility(record,args){
+ async windowVisibility(record,args,requireWindow=false){
    return withConnection(record.socket,async send=>{
     const {targetInfos}=await send('Target.getTargets',{filter:[{type:'page'}]}),windows=new Map();
     for(const target of targetInfos){
@@ -94,7 +94,12 @@ export class BrowserRuntime {
     }
     for(const id of record.hiddenWindows.keys())if(!windows.has(id))record.hiddenWindows.delete(id);
     if(args.action==='getVisibility')return [...windows.values()].some(bounds=>bounds.windowState!=='minimized');
-    if(!windows.size)throw Error('No managed browser windows available; create a tab first');
+    if(!windows.size){
+     if(requireWindow)throw Error('No managed browser windows available; waiting for startup');
+     if(!args.visible)return;
+     const {targetId}=await send('Target.createTarget',{url:'about:blank',newWindow:true,background:false});
+     const {windowId,bounds}=await send('Browser.getWindowForTarget',{targetId});windows.set(windowId,bounds);
+    }
     for(const [windowId,bounds] of windows){
      if(!args.visible){if(bounds.windowState!=='minimized'){record.hiddenWindows.set(windowId,bounds);await send('Browser.setWindowBounds',{windowId,bounds:{windowState:'minimized'}});}}
      else if(bounds.windowState==='minimized'){

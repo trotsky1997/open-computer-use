@@ -50,8 +50,8 @@ ocu repl
 The mode accepts headless or headful and is fixed for the browser lifetime;
 restart the host to change it. Headful mode needs a graphical display/window
 manager. The host explicitly minimizes and verifies its initial windows before
-publishing the endpoint; startup may briefly create a native window while Chrome
-initializes. The existing headless configuration remains the default.
+publishing the endpoint; startup or a new-window operation may briefly create a blank native window while
+Chrome initializes. Requested URLs load after visibility is applied. The existing headless configuration remains the default.
 
 ```js
 var browser=await cua.getBrowser({id:'cdp'});
@@ -66,7 +66,11 @@ await visibility.set(false);
 The optional visibility capability is advertised only for managed headful
 browsers. get() reads native Chrome window state; set(false) minimizes all current
 windows in the private browser and set(true) restores their previous bounds/state.
-Tab selection is preserved. Explicit visible options apply before tab creation;
+Tab selection is preserved. Closing all visible windows keeps the private
+headful process/profile alive for this host session. An empty browser reports
+hidden; hide is a no-op and show opens one blank window. Closed tabs stay closed.
+Session cookies remain until the managed browser/profile is reclaimed.
+ Explicit visible options apply before tab creation;
 omitting the option leaves presentation unchanged. Changes persist across turns
 and JS resets. Accepted operations serialize at the host and shutdown waits for
 them. Native errors can leave a partial window change: inspect get() and the
@@ -123,3 +127,14 @@ without clipboard changes, helper disconnect/reset recovery and hidden-window
 reads. These flows pass source/Worker and real MCP entry points, including the
 source-removed installed payload. Physical desktop/macOS system clipboard and
 Windows remain unverified.
+
+The managed headful launcher uses Chromium's
+[keep-alive switch](https://github.com/chromium/chromium/blob/main/chrome/common/chrome_switches.h)
+and a private profile session preference to retain session cookies. Chromium's
+[session-data deletion code](https://github.com/chromium/chromium/blob/main/chrome/browser/sessions/session_data_deleter.cc)
+checks that preference after the last window closes. These settings are written
+only into the newly created temporary profile, which the guardian removes on host
+shutdown. Source/Worker and installed/MCP Linux checks cover repeated empty-window
+show/hide, explicit background and omitted visibility creation, ordinary visible
+creation, cookies on a fresh HTTP request and retained clipboard data in the same
+PID/profile. Showing an empty browser opens exactly one blank tab.

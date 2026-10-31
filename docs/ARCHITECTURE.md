@@ -216,7 +216,10 @@ The JavaScript REPL exposes an opt-in CDP browser provider alongside native apps
 no external endpoint is configured. Headless is the default; explicit
 OPEN_COMPUTER_USE_BROWSER_MODE=headful adds host-serialized visibility get/set
 using only the private root browser windows. Startup verifies minimization before
-exposing the endpoint; window bounds/state survive hide/restore and JS resets. BrowserRuntime brokers the canonical endpoint
+exposing the endpoint; window bounds/state survive hide/restore and JS resets. Managed headful Chrome
+keeps its process and session cookies when visible windows close; show recreates
+a blank window, while hide on an empty browser is a no-op. Background and omitted
+visibility creation stay hidden before requested navigation. BrowserRuntime brokers the canonical endpoint
 to both session implementations; its detached guardian owns the direct browser
 child and private profile across JS resets. Host shutdown closes resources before
 the browser; IPC disconnect handles host death. See [managed startup](managed-browser.md)

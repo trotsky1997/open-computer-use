@@ -2056,3 +2056,35 @@ System clipboard changes may persist after host exit and can be overwritten by
 other applications/users. Physical desktop/macOS system clipboard, Windows,
 external headful support, cross-host coordination, takeover arbitration and
 durable recovery remain open. The full parity goal remains active.
+
+## Headful empty-window reopening
+
+The owned Linux fixture reproduces a broken connection after closing the last
+visible window, even with hidden clipboard targets. Keep the managed headful
+process/profile alive across ordinary window closure, using Chromium's supported
+keep-alive switch. Visibility must treat an empty browser as hidden, make hide a
+no-op, and recreate a window on show. Preserve startup minimization verification
+and current/background creation semantics before navigating to requested content.
+Validate profile/cookie/clipboard retention and the actual X11 map state through
+source/Worker and source-removed installed/MCP entries.
+
+Implemented headful process keep-alive and a session preference confined to the
+new private temporary profile. The first reproduction lost the browser after
+last-window closure; the next retained the PID but Chromium deleted session
+cookies. The native session preference preserves cookies while the host lives;
+normal guardian cleanup still removes the entire profile. Empty visibility reads
+false, hide creates no window, and show creates one blank window. Startup still
+waits for and verifies the initial minimized window. Background/omitted-hidden
+creation is rechecked before navigation; requested pages load after hiding.
+
+Owned Linux source/Worker and source-removed installed/MCP checks pass repeated
+empty-window cycles, explicit background/omitted/visible creation, unchanged
+PID/profile, a session cookie received on a fresh HTTP request and retained native
+clipboard data. Showing an empty browser has exactly one blank tab and restores
+no closed page. X11 observation now ignores only confirmed missing-window errors
+when IDs disappear between the client-list and window-info queries. Existing
+clipboard, visibility, host-exit and guardian-loss cleanup checks pass. Node
+checks remain macOS 189/189 and Linux 188/189 (one macOS-only skip); macOS default
+headless lifecycle checks also pass. Physical desktops/macOS headful, Windows,
+takeover arbitration, cross-host coordination and durable recovery remain open.
+The complete parity goal remains active.
