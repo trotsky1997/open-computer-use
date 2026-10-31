@@ -66,7 +66,7 @@ def load_runtime():
     repository.Atspi = types.SimpleNamespace(
         Text=FakeText,
         EditableText=FakeEditableText,
-        StateType=types.SimpleNamespace(EDITABLE="editable", FOCUSED="focused", ACTIVE="active"),
+        StateType=types.SimpleNamespace(EDITABLE="editable", FOCUSED="focused", ACTIVE="active", VISIBLE="visible", SHOWING="showing"),
     )
     repository.Gdk = types.SimpleNamespace()
     gi.repository = repository
@@ -466,7 +466,7 @@ class RuntimeActionReadBackTests(unittest.TestCase):
         self.addCleanup(self.stack.close)
         self.stack.enter_context(mock.patch.object(self.runtime, "resolve_app"))
         self.stack.enter_context(mock.patch.object(self.runtime, "main_window", return_value=(0, object())))
-        for name in ("extents", "find_element", "send_key", "send_drag", "send_mouse_click",
+        for name in ("extents", "find_element", "send_key", "send_drag", "send_verified_click",
                      "invoke_secondary_action", "scroll_element", "insert_text", "set_element_value"):
             self.stack.enter_context(mock.patch.object(self.runtime, name))
         self.snapshot = self.stack.enter_context(mock.patch.object(self.runtime, "build_snapshot", return_value={"elements": []}))
@@ -553,6 +553,45 @@ class WindowBindingTests(unittest.TestCase):
                 runtime.find_element(object(), {"objectPath": "/old", "runtimeId": [0]}, window=object(), strict=True)
         with mock.patch.object(runtime, "iter_all", return_value=[old]):
             self.assertIs(runtime.find_element(object(), {"objectPath": "/old"}, window=object(), strict=True), old)
+
+
+class VerifiedClickTests(unittest.TestCase):
+    def test_non_action_nodes_are_not_queried_through_action_interface(self):
+        runtime = load_runtime()
+        node = InterfaceOnlyAccessible(["Text"])
+        node.get_n_actions = mock.Mock()
+        self.assertEqual(runtime.action_names(node), [])
+        self.assertIsNone(runtime.preferred_action_index(node))
+        node.get_n_actions.assert_not_called()
+
+    def test_attempted_accessibility_failure_never_replays_as_pointer(self):
+        runtime = load_runtime()
+        app, window, element = object(), object(), object()
+        with mock.patch.object(runtime, "resolve_target", return_value=(app, 0, window)), mock.patch.object(runtime, "extents"), mock.patch.object(runtime, "find_element", return_value=element), mock.patch.object(runtime, "preferred_action_index", return_value=0) as preferred, mock.patch.object(runtime, "do_action_by_index", return_value=False) as action, mock.patch.object(runtime, "send_verified_click") as pointer:
+            with self.assertRaisesRegex(RuntimeError, "was not confirmed"):
+                runtime.perform_operation({"tool": "click", "app": "Editor", "element": {"objectPath": "/owned"}, "skip_read_back": True})
+            pointer.assert_not_called()
+            preferred.return_value = None
+            action.reset_mock()
+            self.assertTrue(runtime.perform_operation({"tool": "click", "app": "Editor", "element": {"objectPath": "/owned"}, "skip_read_back": True})["ok"])
+            pointer.assert_called_once()
+            action.assert_not_called()
+
+    def test_hidden_indexed_element_never_reaches_pointer_backend(self):
+        runtime = load_runtime()
+        provider = types.SimpleNamespace(click_visible_window=mock.Mock())
+        with mock.patch.dict(sys.modules, {"x11_capture": provider}), mock.patch.object(runtime, "verified_window_identity", return_value={"pid": 42}), mock.patch.object(runtime, "state_contains", return_value=False):
+            with self.assertRaisesRegex(RuntimeError, "not currently visible"):
+                runtime.send_verified_click(object(), object(), {}, object(), None, None, "left", 1)
+        provider.click_visible_window.assert_not_called()
+
+    def test_indexed_pointer_uses_current_element_geometry(self):
+        runtime = load_runtime()
+        provider = types.SimpleNamespace(click_visible_window=mock.Mock())
+        bounds = {"x": 100, "y": 200, "width": 400, "height": 300}
+        with mock.patch.dict(sys.modules, {"x11_capture": provider}), mock.patch.object(runtime, "verified_window_identity", return_value={"pid": 42}), mock.patch.object(runtime, "state_contains", return_value=True), mock.patch.object(runtime, "extents", return_value={"x": 103, "y": 205, "width": 20, "height": 10}):
+            runtime.send_verified_click(object(), object(), bounds, object(), None, None, "left", 1)
+        provider.click_visible_window.assert_called_once_with(42, bounds, 113, 210, "left", 1)
 
 
 class BoundImageTests(unittest.TestCase):

@@ -25,7 +25,8 @@ rectangular frames, no intersecting mapped windows above the frame, and matching
 32-bit pixels with standard RGB masks. Compositor-manager ownership, shaped
 frames, mixed-depth descendants, ambiguous geometry, missing PID/focus evidence,
 unsupported layouts and provider/native errors all return no image. No focus or
-stacking change is made to obtain a picture. Native pointer routing remains open.
+stacking change is made to obtain a picture. [Basic X11 clicks](linux-click-input.md)
+reuse the frame verifier; wider pointer/drag/held routes remain open.
 
 The implementation uses XGetImage from the verified exposed frame's root region.
 It supplies visible-frame pixels under these conditions. Background/occluded and

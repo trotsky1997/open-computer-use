@@ -287,6 +287,8 @@ def resolve_target(query):
 
 
 def action_names(node):
+    if not supports_interface(node, "Action"):
+        return []
     names = []
     count = int(safe(node.get_n_actions, 0) or 0)
     for index in range(count):
@@ -421,32 +423,53 @@ def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT, m
     return records, lines
 
 
-def capture_bound_window_png(app, window, bounds):
+def verified_window_identity(app, window, bounds):
     if bounds is None or os.environ.get("XDG_SESSION_TYPE") == "wayland":
-        return None
+        raise RuntimeError("Verified native window routing requires local X11 geometry")
+    identity = window_identity(window)
+    if child_count(app) > MAX_ELEMENTS:
+        raise RuntimeError("Window verification exceeds budget")
+    candidates, active = [], []
+    for _index, candidate in app_windows(app):
+        candidate.clear_cache_single()
+        candidate_identity = window_identity(candidate)
+        if extents(candidate) == bounds:
+            candidates.append(candidate_identity)
+        if state_contains(candidate, Atspi.StateType.ACTIVE):
+            active.append(candidate_identity)
+    if candidates != [identity] or active != [identity] or window_identity(window) != identity:
+        raise RuntimeError("Selected window is inactive, ambiguous or changed; refresh app state")
+    return identity
+
+
+def capture_bound_window_png(app, window, bounds):
     try:
         from x11_capture import capture_visible_window
-        identity = window_identity(window)
-        def validate():
-            if child_count(app) > MAX_ELEMENTS:
-                return False
-            candidates, active = [], []
-            for _index, candidate in app_windows(app):
-                candidate.clear_cache_single()
-                candidate_identity = window_identity(candidate)
-                if extents(candidate) == bounds:
-                    candidates.append(candidate_identity)
-                if state_contains(candidate, Atspi.StateType.ACTIVE):
-                    active.append(candidate_identity)
-            return candidates == [identity] and active == [identity] and window_identity(window) == identity
-        if not validate():
-            return None
+        identity = verified_window_identity(app, window, bounds)
         image = capture_visible_window(identity["pid"], bounds)
-        if not validate():
+        if verified_window_identity(app, window, bounds) != identity:
             return None
         return base64.b64encode(image).decode("ascii")
     except Exception:
         return None
+
+
+def send_verified_click(app, window, bounds, element, x, y, button, count):
+    identity = verified_window_identity(app, window, bounds)
+    if element is not None:
+        if not state_contains(element, Atspi.StateType.VISIBLE) or not state_contains(element, Atspi.StateType.SHOWING):
+            raise RuntimeError("Exact element is not currently visible")
+        live = extents(element)
+        if live is None or live["width"] <= 0 or live["height"] <= 0:
+            raise RuntimeError("Exact element has no current pointer geometry")
+        x, y = live["x"] + live["width"] / 2, live["y"] + live["height"] / 2
+    else:
+        x, y = screen_point(bounds, None, x, y)
+    from x11_capture import click_visible_window
+    try:
+        click_visible_window(identity["pid"], bounds, int(round(x)), int(round(y)), button, count)
+    except Exception as exc:
+        raise RuntimeError("Verified pointer click failed; inspect before retrying: " + str(exc)) from exc
 
 
 def focus_details(window, text_limit=DEFAULT_TEXT_LIMIT, max_nodes=MAX_ELEMENTS, max_depth=MAX_DEPTH):
@@ -632,6 +655,8 @@ def find_element(app, record, window=None, strict=False):
 
 
 def preferred_action_index(node):
+    if not supports_interface(node, "Action"):
+        return None
     preferred_exact = {
         "click",
         "press",
@@ -674,26 +699,6 @@ def screen_point(window_bounds, element=None, x=None, y=None):
     if x is None or y is None or window_bounds is None:
         raise RuntimeError("coordinate action requires window bounds and x/y")
     return window_bounds["x"] + float(x), window_bounds["y"] + float(y)
-
-
-def mouse_button_events(button):
-    normalized = (button or "left").lower()
-    if normalized == "right":
-        return "b3p", "b3r"
-    if normalized == "middle":
-        return "b2p", "b2r"
-    return "b1p", "b1r"
-
-
-def send_mouse_click(x, y, button, count):
-    down, up = mouse_button_events(button)
-    repeat = max(1, int(count or 1))
-    for _ in range(repeat):
-        Atspi.generate_mouse_event(int(round(x)), int(round(y)), "abs")
-        Atspi.generate_mouse_event(int(round(x)), int(round(y)), down)
-        time.sleep(0.035)
-        Atspi.generate_mouse_event(int(round(x)), int(round(y)), up)
-        time.sleep(0.05)
 
 
 def send_drag(from_x, from_y, to_x, to_y):
@@ -985,7 +990,7 @@ def perform_operation(operation):
     bound = query.startswith(WINDOW_PREFIX)
     bounds = operation.get("windowBounds") or extents(window)
     element_record = operation.get("element")
-    element = find_element(app, element_record, window=window, strict=bound or (tool in ("type_text", "select_text") and element_record is not None))
+    element = find_element(app, element_record, window=window, strict=bound or (tool in ("type_text", "select_text", "click") and element_record is not None))
 
     def physical(pointer=False, force=False):
         if not bound and not force:
@@ -1000,6 +1005,8 @@ def perform_operation(operation):
     if tool == "click":
         click_method = (operation.get("click_method") or "auto").lower()
         if click_method == "accessibility":
+            if operation.get("click_count", 1) != 1:
+                raise RuntimeError("Accessibility click supports one click; use auto for a click sequence")
             if element is None:
                 raise RuntimeError("click_method 'accessibility' requires element_index")
             if operation.get("mouse_button", "left") != "left":
@@ -1014,35 +1021,17 @@ def perform_operation(operation):
             raise RuntimeError("click_method 'app_post' is not supported on Linux")
         elif click_method == "sky_click":
             raise RuntimeError("click_method 'sky_click' is not supported on Linux")
-        elif click_method == "global":
-            physical(pointer=True)
-            x, y = screen_point(
-                bounds,
-                element_record,
-                operation.get("x"),
-                operation.get("y"),
-            )
-            send_mouse_click(
-                x, y, operation.get("mouse_button", "left"), operation.get("click_count", 1)
-            )
-        elif click_method == "auto":
+        elif click_method in ("global", "auto"):
             handled = False
-            if element is not None and operation.get("mouse_button", "left") == "left":
-                handled = do_action_by_index(element, preferred_action_index(element))
+            count, button = operation.get("click_count", 1), operation.get("mouse_button", "left")
+            if click_method == "auto" and element is not None and button == "left" and count == 1:
+                action = preferred_action_index(element)
+                if action is not None:
+                    if not do_action_by_index(element, action):
+                        raise RuntimeError("Accessibility click was not confirmed; inspect before retrying")
+                    handled = True
             if not handled:
-                physical(pointer=True)
-                x, y = screen_point(
-                    bounds,
-                    element_record,
-                    operation.get("x"),
-                    operation.get("y"),
-                )
-                send_mouse_click(
-                    x,
-                    y,
-                    operation.get("mouse_button", "left"),
-                    operation.get("click_count", 1),
-                )
+                send_verified_click(app, window, bounds, element, operation.get("x"), operation.get("y"), button, count)
         else:
             raise RuntimeError("Invalid click_method '{}'".format(click_method))
     elif tool == "perform_secondary_action":

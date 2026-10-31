@@ -262,6 +262,28 @@ func (s *service) callTool(name string, args map[string]any) toolCallResult {
 		if _, ok := args["duration_ms"]; ok {
 			return textResult("Held click duration_ms is not supported by this platform", true)
 		}
+		if _, present := args["element_index"]; present && optionalElementIndex(args) == "" {
+			return textResult("Invalid click element_index", true)
+		}
+		count, err := optionalPositiveInt(args, "click_count")
+		if err != nil {
+			return textResult(err.Error(), true)
+		}
+		clickCount := 1
+		if count != nil {
+			clickCount = *count
+		}
+		if clickCount > 3 {
+			return textResult("click_count must be 1..3", true)
+		}
+		button := "left"
+		if raw, present := args["mouse_button"]; present {
+			value, ok := raw.(string)
+			if !ok || (value != "left" && value != "middle" && value != "right") {
+				return textResult("mouse_button must be left, middle or right", true)
+			}
+			button = value
+		}
 		clickMethod, err := parseClickMethod(optionalString(args, "click_method"))
 		if err != nil {
 			return textResult(err.Error(), true)
@@ -271,8 +293,8 @@ func (s *service) callTool(name string, args map[string]any) toolCallResult {
 			optionalElementIndex(args),
 			optionalFloat(args, "x"),
 			optionalFloat(args, "y"),
-			intValue(optionalFloat(args, "click_count"), 1),
-			defaultString(optionalString(args, "mouse_button"), "left"),
+			clickCount,
+			button,
 			clickMethod,
 		)
 	case "perform_secondary_action":
@@ -1411,9 +1433,9 @@ func toolDefinitions() []toolDefinition {
 				"element_index": stringProperty("Element index to click"),
 				"x":             numberProperty("X coordinate in screenshot pixel coordinates"),
 				"y":             numberProperty("Y coordinate in screenshot pixel coordinates"),
-				"click_count":   integerProperty("Number of clicks. Defaults to 1"),
+				"click_count":   integerProperty("Number of clicks, 1..3. Defaults to 1"),
 				"mouse_button":  enumStringProperty("Mouse button to click. Defaults to left.", []string{"left", "right", "middle"}),
-				"click_method":  enumStringProperty("Click implementation: auto (default), accessibility, app_post, sky_click, or global. Accessibility requires element_index. Linux supports global AT-SPI mouse synthesis and does not currently support app_post or sky_click.", clickMethodValues),
+				"click_method":  enumStringProperty("Click implementation: auto (default), accessibility, app_post, sky_click, or global. Accessibility requires element_index. Linux pointer clicks verify a local noncomposited X11 frame and pointer target; explicit global also requires its opt-in environment flag. app_post and sky_click are unsupported.", clickMethodValues),
 			}, []string{"app"}),
 		},
 		{

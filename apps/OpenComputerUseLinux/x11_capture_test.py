@@ -28,6 +28,7 @@ class ImageTests(unittest.TestCase):
         client.display, client.root, client.error = 1, 1, False
         client.lib, client.shape = mock.Mock(), mock.Mock()
         client.lib.XDefaultScreen.return_value = 0
+        client.lib.XGrabPointer.return_value = 0
         client.lib.XInternAtom.return_value = 0
         client.lib.XGetInputFocus.side_effect = lambda _d, focus, _r: setattr(focus._obj, 'value', 2)
         client.shape.XShapeQueryExtents.return_value = 1
@@ -86,6 +87,74 @@ class ImageTests(unittest.TestCase):
         self.assertTrue(client.read(42, (0, 0, 2, 1)).startswith(b'\x89PNG'))
         client.lib.XDestroyImage.assert_called_once_with(pointer)
         client.lib.XUngrabServer.assert_called_once()
+
+
+    def test_pointer_failure_pairs_release_and_never_repeats_press(self):
+        client = self.client()
+        client.verify_frame = mock.Mock(return_value=2)
+        client.pointer = mock.Mock(side_effect=[(1, 0, 0, 0), (2, 1, 0, 0), (2, 1, 0, 0)])
+        xtest = mock.Mock()
+        xtest.XTestQueryExtension.return_value = 1
+        xtest.XTestFakeMotionEvent.return_value = 1
+        xtest.XTestFakeButtonEvent.side_effect = [0, 1]
+        with mock.patch.object(capture.C, 'CDLL', return_value=xtest):
+            with self.assertRaisesRegex(RuntimeError, 'press failed'):
+                client.click(42, (0, 0, 2, 1), (1, 0), 'left', 3)
+        self.assertEqual(xtest.XTestFakeButtonEvent.call_args_list, [mock.call(1, 1, 1, 0), mock.call(1, 1, 0, 0)])
+        client.lib.XUngrabServer.assert_called_once()
+
+    def test_held_button_and_wrong_pointer_target_stop_before_press(self):
+        for state in (0x100, 0):
+            client = self.client()
+            client.verify_frame = mock.Mock(return_value=2)
+            client.pointer = mock.Mock(side_effect=[(1, 0, 0, state), (99, 1, 0, 0)])
+            xtest = mock.Mock()
+            with mock.patch.object(capture.C, 'CDLL', return_value=xtest):
+                with self.assertRaises(RuntimeError):
+                    client.click(42, (0, 0, 2, 1), (1, 0), 'left', 1)
+            xtest.XTestFakeButtonEvent.assert_not_called()
+            if state:
+                xtest.XTestFakeMotionEvent.assert_not_called()
+            client.lib.XUngrabServer.assert_called_once()
+
+    def test_input_is_delivered_after_server_release_and_allows_new_popup(self):
+        client = self.client()
+        client.verify_frame = mock.Mock(return_value=2)
+        client.pointer = mock.Mock(side_effect=[(1, 0, 0, 0), (2, 1, 0, 0), (2, 1, 0, 0), (99, 1, 0, 0)])
+        xtest = mock.Mock()
+        def button(*_args):
+            client.lib.XUngrabServer.assert_called_once()
+            return 1
+        xtest.XTestFakeButtonEvent.side_effect = button
+        with mock.patch.object(capture.C, 'CDLL', return_value=xtest):
+            client.click(42, (0, 0, 2, 1), (1, 0), 'right', 1)
+        self.assertEqual(xtest.XTestFakeButtonEvent.call_count, 2)
+
+    def test_existing_pointer_grab_stops_before_motion(self):
+        client = self.client()
+        client.verify_frame = mock.Mock(return_value=2)
+        client.pointer = mock.Mock(return_value=(1, 0, 0, 0))
+        client.lib.XGrabPointer.return_value = 1
+        xtest = mock.Mock()
+        with mock.patch.object(capture.C, 'CDLL', return_value=xtest):
+            with self.assertRaisesRegex(RuntimeError, 'grab unavailable'):
+                client.click(42, (0, 0, 2, 1), (1, 0), 'left', 1)
+        xtest.XTestFakeMotionEvent.assert_not_called()
+        xtest.XTestFakeButtonEvent.assert_not_called()
+        client.lib.XUngrabPointer.assert_not_called()
+        client.lib.XUngrabServer.assert_called_once()
+
+    def test_lock_modifier_is_allowed_but_action_modifier_is_rejected(self):
+        client = self.client()
+        keys = (capture.C.c_ubyte * 8)(0, 0, 66, 0, 0, 0, 0, 0)
+        mapping = capture.ModifierMap(max_keypermod=1, modifiermap=keys)
+        client.lib.XGetModifierMapping.return_value = capture.C.pointer(mapping)
+        client.lib.XKeycodeToKeysym.return_value = 0xffe5
+        client.require_neutral(4)
+        client.lib.XKeycodeToKeysym.return_value = 0xffe9
+        with self.assertRaisesRegex(RuntimeError, 'modifier is already held'):
+            client.require_neutral(4)
+        self.assertEqual(client.lib.XFreeModifiermap.call_count, 2)
 
 
 if __name__ == '__main__':

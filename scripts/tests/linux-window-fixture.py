@@ -8,15 +8,22 @@ from gi.repository import Gtk, GLib, Gdk
 
 root = os.environ['OCU_WINDOW_FIXTURE_ROOT']
 name = os.environ['OCU_WINDOW_FIXTURE_NAME']
+error_fd = os.open(root + '/fixture-errors.log', os.O_CREAT | os.O_WRONLY | os.O_APPEND, 0o600)
+os.dup2(error_fd, 2)
+os.close(error_fd)
 GLib.set_prgname(name)
 GLib.set_application_name(name)
 windows, entries, notes, keys = {}, {}, {}, {}
 clipboard_data = []
-image_windows = []
+image_windows, popup_menus = [], []
+pointer_events, pointer_areas = {}, {}
+interceptors, pointer_grabbed = [], False
+retired_interceptors = []
 
 def state(*_args):
     with open(root + '/state.tmp', 'w', encoding='utf-8') as output:
-        json.dump({'pid': os.getpid(), 'windows': list(windows), 'keys': keys, 'clipboard': clipboard_data,
+        json.dump({'pid': os.getpid(), 'windows': list(windows), 'keys': keys, 'clipboard': clipboard_data, 'popups': sum(menu.get_visible() for menu in popup_menus), 'pointer': pointer_events, 'pointerGrabbed': pointer_grabbed, 'interceptors': len(interceptors), 'pointerSizes': {key: [area.get_allocated_width(), area.get_allocated_height()] for key, area in pointer_areas.items() if key in windows},
+                   'pointerPoints': {key: area.translate_coordinates(windows[key], area.get_allocated_width() // 2, area.get_allocated_height() // 2) for key, area in pointer_areas.items() if key in windows},
                    'values': {key: entry.get_text() for key, entry in entries.items()},
                    'selections': {key: entry.get_selection_bounds() for key, entry in entries.items()},
                    'carets': {key: entry.get_position() for key, entry in entries.items()},
@@ -29,6 +36,11 @@ def entry_for(key, value):
     entry.get_accessible().set_name('Editor ' + key)
     entry.set_text(value)
     entry.connect('changed', state)
+    def popup(_entry, menu):
+        popup_menus.append(menu)
+        menu.connect('show', state)
+        menu.connect('hide', state)
+    entry.connect('populate-popup', popup)
     for signal in ['notify::cursor-position', 'notify::selection-bound', 'focus-in-event', 'focus-out-event']:
         entry.connect(signal, state)
     entries[key] = entry
@@ -67,7 +79,14 @@ def create(key, value):
     keys[key] = {'press': [], 'release': []}
     key_area = Gtk.DrawingArea()
     key_area.set_can_focus(True)
-    key_area.add_events(Gdk.EventMask.KEY_PRESS_MASK | Gdk.EventMask.KEY_RELEASE_MASK)
+    key_area.add_events(Gdk.EventMask.KEY_PRESS_MASK | Gdk.EventMask.KEY_RELEASE_MASK | Gdk.EventMask.BUTTON_PRESS_MASK | Gdk.EventMask.BUTTON_RELEASE_MASK)
+    pointer_events[key], pointer_areas[key] = [], key_area
+    def record_pointer(_area, event, phase):
+        pointer_events[key].append({"phase": phase, "button": event.button, "type": event.type.value_nick, "x": event.x, "y": event.y})
+        state()
+        return True
+    key_area.connect("button-press-event", record_pointer, "press")
+    key_area.connect("button-release-event", record_pointer, "release")
     key_area.set_size_request(100, 24)
     color = '#ff0000' if key == 'A' else '#0000ff'
     marker = Gtk.Label()
@@ -92,6 +111,36 @@ def create(key, value):
         window.present()
         key_area.grab_focus()
         window.get_window().focus(Gdk.CURRENT_TIME)
+    def intercept_pointer(_button):
+        global pointer_grabbed
+        display = Gdk.Display.get_default()
+        if interceptors:
+            pointer_grabbed = display.get_default_seat().grab(interceptors[0], Gdk.SeatCapabilities.POINTER, False, None, None, None, None) == Gdk.GrabStatus.SUCCESS
+        else:
+            px, py = pointer_areas['B'].translate_coordinates(windows['B'], pointer_areas['B'].get_allocated_width() // 2, pointer_areas['B'].get_allocated_height() // 2)
+            wx, wy = windows['B'].get_position()
+            attrs = Gdk.WindowAttr()
+            attrs.window_type, attrs.wclass = Gdk.WindowType.TEMP, Gdk.WindowWindowClass.INPUT_ONLY
+            attrs.x, attrs.y, attrs.width, attrs.height = wx + px - 10, wy + py - 10, 20, 20
+            overlay = Gdk.Window.new(Gdk.get_default_root_window(), attrs, Gdk.WindowAttributesType.X | Gdk.WindowAttributesType.Y)
+            interceptors.append(overlay)
+            overlay.show()
+        display.sync()
+        state()
+    def separate_windows(_button):
+        global pointer_grabbed
+        display = Gdk.Display.get_default()
+        display.get_default_seat().ungrab()
+        pointer_grabbed = False
+        for overlay in interceptors:
+            overlay.hide()
+        # Keep GDK grab-event references alive until the fixture process exits.
+        retired_interceptors.extend(interceptors)
+        interceptors.clear()
+        windows['A'].move(10, 10)
+        windows['B'].move(520, 10)
+        display.sync()
+        state()
     def select_notes(_button):
         buffer = notes[key].get_buffer()
         buffer.select_range(buffer.get_iter_at_offset(2), buffer.get_iter_at_offset(8))
@@ -99,10 +148,11 @@ def create(key, value):
              ('Prepare selection', lambda _b: entries[key].select_region(1, 4)),
              ('Select notes', select_notes), ('Focus entry', focus),
              ('Read only', lambda _b: entries[key].set_editable(False)), ('Focus keys', focus_keys),
-             ('Separate windows', lambda _b: (windows['A'].move(10, 10), windows['B'].move(520, 10))),
+             ('Separate windows', separate_windows), ('Intercept pointer', intercept_pointer),
              ('Black image', black_image),
              ('Close black', lambda _b: [window.destroy() for window in image_windows]),
              ('Offscreen A', lambda _b: windows['A'].move(-10, 10)),
+             ('Occlude B', lambda _b: (windows['A'].move(530, 20), windows['A'].get_window().raise_())),
              ('Occlude A', lambda _b: (windows['B'].move(20, 20), windows['B'].get_window().raise_())),
              ('Copy external', lambda _b: Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD).set_text('external-owned', -1)),
              ('Focus notes', lambda _b: (window.present(), notes[key].grab_focus(), window.get_window().focus(Gdk.CURRENT_TIME)))]

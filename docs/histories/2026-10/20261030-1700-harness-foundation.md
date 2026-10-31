@@ -1146,3 +1146,40 @@ No package dependency or CI added; X11/Shape shared libraries are prerequisites.
 Headful/decorated/composited desktops, Qt/Electron, backing-store images, Wayland,
 other native platforms and physical routing remain open. See
 [verified window images](../../linux-window-images.md).
+
+
+## Verified visible X11 coordinate/index clicks
+
+Added basic left/middle/right XTest clicks and counts 1..3 through the existing
+app.click API. Shared frame verification checks AT-SPI identity/state/geometry,
+native focus/PID/stacking and supported local X11 bounds. Pointer placement is
+checked against its native recipient; active core buttons, action modifiers,
+input-only interception and existing pointer grabs prevent sending a button.
+Lock modifiers are classified from the native map without changing their state.
+The verification server grab is released before delivery so passive grabs can be
+replayed. Every attempted press has a release attempt; unconfirmed input stops
+without replay. Legitimate popup/closure after delivery is allowed.
+
+Indexed fallback uses exact current objects, visible/showing state and fresh
+positive geometry. A single left auto click uses a usable accessibility action;
+a failed attempted action is never retried as pointer input. Non-Action nodes
+are no longer queried through the Action interface. Native malformed index,
+button and count arguments are rejected before the bridge. Explicit global keeps
+its existing opt-in flag; drag/held/chord and other platform routes remain open.
+
+Passed 145 Node checks, 64 Python checks (51 runtime, 10 X11, 3 clipboard), and
+Linux Go's 44 top-level checks plus 8 subchecks on arm64 Ubuntu. Both REPLs passed
+real receiving-widget coordinates, three buttons, double/triple sequences and
+paired releases; input-only/active-grab, inactive/occluded/outside/stale rejection;
+and normal GTK context-menu creation followed by blocked pointer input. Existing
+image, paste, text/key/selection, multi-window and launch flows also passed.
+The fixture keeps hidden temporary grab surfaces until process exit after transient provider/lifetime failures
+during GTK teardown; owned processes/resources
+were fully cleaned up. No package dependency or CI added; XTest is a system
+library prerequisite.
+
+Clicks visibly move the pointer. Hardware/UI changes can race sequential checks,
+and hard interruption or withdrawn XTest support can prevent release confirmation.
+Real window managers, concurrent users, compositor/Wayland/background input,
+complex clipping, drag and long-press/chord behavior remain unverified/open.
+The full harness goal remains active. See [Linux click input](../../linux-click-input.md).

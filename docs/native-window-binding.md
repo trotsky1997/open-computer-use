@@ -56,12 +56,14 @@ windows return no image. Both window-ID and string bindings use this route;
 the unchecked legacy desktop crop was removed. See [window images](linux-window-images.md)
 for budgets, evidence and remaining backing-store/Wayland work.
 
-Physical pointer/drag fallback for bound windows fails before input until native
-window hit routing is verified. Semantic accessibility click/set-value actions
-remain usable. Keyboard/scroll/text-synthesis fallback requires native ACTIVE
-state and focused content inside the selected window. A failed focus check sends
-no global input; there is no automatic focus transfer. Provider-specific focus,
-hit testing, capture and the broader native input surface remain open.
+Basic physical clicks now use verified visible X11 frame/recipient routing,
+including pointer-grab and input-only interception checks. Semantic accessibility
+actions remain available, and failed attempted semantic clicks are never replayed
+as physical clicks. See [click input](linux-click-input.md) for pointer effects,
+constraints and actual GTK evidence. Drag and held-click routes stay unavailable
+for bound windows. Keyboard/scroll/text-synthesis fallback requires native ACTIVE
+state and focused content inside the selected window; there is no automatic focus
+transfer. Wider provider, background and Wayland input remain open.
 
 ## Verification
 
