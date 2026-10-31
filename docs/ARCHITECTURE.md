@@ -525,7 +525,7 @@ for limits, validation and remaining platform work.
 
 Browser/tab discovery starts a shared endpoint observer. Newly auto-attached page
 targets keep their startup wait until their own capture session enables Page
-events (or reports a dialog), then receive Runtime.runIfWaitingForDebugger.
+events (or delivers a Page-domain event), then receive Runtime.runIfWaitingForDebugger.
 Popup dialogs route through native opener identity to the nearest active action
 watcher, retaining its owner, completion barrier and resumed errors. Passive
 inventory owners can leave without explicitly responding to dialogs; binding
@@ -550,3 +550,18 @@ the captured dialog/owner and blocks JS reuse. Existing browser/native controls
 or a surviving observer can close that dialog, after which the retained observer
 captures follow-ups and reset can complete. The real-browser controller verifies
 this boundary and successful retry; automatic takeover remains open.
+
+
+## Popup download attribution
+
+Download waiting retains its context lease/cancellation/policy restoration path
+and adds a raw CDP startup observer supplied by the host/API transport factory.
+A baseline native target inventory excludes pre-existing windows; native opener
+lineage and browser context admit only new descendant popups. Page frame events
+and frame trees supply frame identities, with bounded unmatched download metadata
+and retained terminal progress for cross-connection ordering. Target startup is
+resumed after capture readiness while frame-tree responses continue asynchronously.
+Observers/queued startup work are released before transport shutdown. Both JS
+hosts on macOS and arm64 Linux verify direct/scripted/nested popup bytes,
+unrelated download isolation, observer loss and active reset/close cancellation.
+See [browser downloads](browser-cdp.md) for policy and filesystem boundaries.

@@ -350,6 +350,7 @@ export class BrowserDialogs {
   }
   event(entry, event) {
     if (entry.closed) return;
+    if (event.method.startsWith("Page.")) entry.captureReady?.();
     if (event.method === "Page.javascriptDialogOpening") {
       const watches = [...entry.watches];
       const seen = new Set([entry.targetId]);
@@ -400,9 +401,9 @@ export class BrowserDialogs {
         entry.connection = connection;
         if (entry.closed) { connection.close(); throw new Error("Browser dialog session closed"); }
         let notify;
-        const opened = new Promise(resolve=>{notify=resolve;entry.dialogWaiters.add(resolve);});
+        const opened = new Promise(resolve=>{notify=resolve;entry.captureReady=resolve;entry.dialogWaiters.add(resolve);});
         try { await Promise.race([connection.send("Page.enable"),opened]); }
-        finally { entry.dialogWaiters.delete(notify); }
+        finally { entry.dialogWaiters.delete(notify);if(entry.captureReady===notify)delete entry.captureReady; }
       })().catch(error => {entry.error=error;entry.connection?.close();throw error;});
       entry.ready.catch(() => {});
     }
@@ -611,7 +612,7 @@ act with click/dblclick/fill/press/check/uncheck/setChecked/selectOption/hover/s
 locator.drop({data?:{mimeType:string},files?:absolutePaths},{position?:{x,y},timeoutMs?}) sends trusted native HTML/file drag-and-drop. Files must be regular files on the browser host. Position uses padding-box CSS pixels. Cross-process frames bind native target/frame IDs and support nested frame hit testing. Same-process owners bind by native node identity through isolated DOM/shadow traversal, supporting identical URLs and reordered siblings. A dialog pauses the action deadline until answered; reset/timeout/close cancel remaining stages. Already dispatched page effects may finish.
 Playwright resolves fresh elements and waits for actionability; ambiguous matches fail. Default action timeout is 10 seconds.
 Navigation waits: tab.playwright.expectNavigation(async action, {url?,waitUntil?,timeoutMs?}), waitForURL(url, {waitUntil?,timeoutMs?}), waitForLoadState({state?,timeoutMs?}). expectNavigation installs a main-frame watcher before running the action and returns its result after navigation.
-Playwright actions invalidate prior AX and screenshot indices. Read current state afterwards. File chooser events: start tab.playwright.waitForEvent("filechooser", {timeoutMs?}) before clicking, then await the handle and use isMultiple() / setFiles(absolutePaths, {timeoutMs?}). The file handle is one-shot. Downloads: start waitForEvent("download") before clicking, then await download.path({timeoutMs?}) for the completed local artifact.
+Playwright actions invalidate prior AX and screenshot indices. Read current state afterwards. File chooser events: start tab.playwright.waitForEvent("filechooser", {timeoutMs?}) before clicking, then await the handle and use isMultiple() / setFiles(absolutePaths, {timeoutMs?}). The file handle is one-shot. Downloads: start waitForEvent("download") before clicking, then await download.path({timeoutMs?}) for the completed local artifact. It includes new descendant popups opened during that wait. Bind an existing popup separately to collect its downloads.
 Developer logs: await tab.dev.logs({filter?,levels?,limit?}) returns chronological console entries with level/message/timestamp/url. Capture begins at tab binding, continues across calls/navigation, and ends on close/reset/timeout. Levels: debug/info/log/warn/error (warning aliases warn). Default limit 100; retained cap 1000 entries, each at most 16,384 UTF-16 code units. Objects use shallow CDP descriptions; no page getters are executed. Prior console history and out-of-process frame/worker logs are excluded.
 JavaScript dialogs: await tab.getJsDialog() returns undefined or a handle with type. alert/beforeunload support dismiss(); confirm supports accept()/dismiss(); prompt supports accept(text)/dismiss(). Actions return when they open a dialog; answer it before further page reads/input. accept()/dismiss() reports failures from the resumed action. Handles are scoped to the observed dialog and owning session. Reset/timeout/close dismiss owned active dialogs. Beforeunload dismiss cancels navigation. Browser/tab discovery starts early dialog observation. New page targets resume after their capture session is ready; popup dialogs inherit an active opener action. Created tabs attach observers before loading their URL. A dialog already open before observation starts may prevent CDP initialization; resolve it through existing browser/native controls first.
 Clipboard: tab.clipboard.read()/readText()/write(items)/writeText(text) uses the browser native process clipboard. Items contain entries [{mimeType,text? ,base64?}] and optional presentationStyle. Exactly one payload per entry; native Chrome validates supported formats. Requires verified --headless / --headless=new plus --enable-automation and a browser that can reach the host loopback bridge. Browser clipboard state is shared across tabs/JS sessions and survives js_reset. Internal control tabs are hidden and cleaned up on reset/timeout/close. paste(index,text,{format:"text"|"html"}) writes the isolated clipboard and dispatches trusted native paste atomically; typeText remains clipboard-independent. Headful clipboard APIs fail explicitly.
@@ -690,7 +691,7 @@ export function createBrowserApi(activeOutput, environment = process.env, {focus
     if (args.action === "stop") return logs.stop(logOwner,args.targetId);
     throw new Error("Unknown browser logs action");
   });
-  const downloads = downloadRequest ? undefined : new BrowserDownloads(() => endpoint()?.href);
+  const downloads = downloadRequest ? undefined : new BrowserDownloads(() => endpoint()?.href,undefined,openConnection);
   const downloadOwner = {};
   const requestDownload = downloadRequest ?? (args => {
     if(args.action === "start") return downloads.start(downloadOwner,args.targetId,args.options);

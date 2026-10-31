@@ -37,7 +37,7 @@ const MAX_TIMEOUT_MS = 300_000;
 const MAX_FRAME_BYTES = 32 * 1024 * 1024;
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const BROWSER_FAILURE_HANDLERS = new WeakMap();
-const HOST_BROWSER_DOWNLOADS = new BrowserDownloads(undefined,(owner,error)=>BROWSER_FAILURE_HANDLERS.get(owner)?.(error));
+const HOST_BROWSER_DOWNLOADS = new BrowserDownloads(undefined,(owner,error)=>BROWSER_FAILURE_HANDLERS.get(owner)?.(error),openConnection);
 const HOST_BROWSER_FOCUS = new BrowserFocusLeases(updateBrowserFocus);
 const HOST_BROWSER_LOGS = new BrowserConsoleLogs();
 const HOST_BROWSER_DIALOGS = new BrowserDialogs();

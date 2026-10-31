@@ -1513,3 +1513,38 @@ limits. Headful native recovery, sole-observer takeover, external-client
 coordination, broader frame/provider and Windows behavior remain unverified.
 The full harness goal stays active. Checks used only owned browser profiles,
 local fixture pages and an explicitly created surviving observer.
+
+
+## Native frame attribution for popup downloads
+
+Selected-tab download waits now include newly opened descendant popups. A raw
+startup observer is injected through the existing host/API transport and uses
+native opener IDs, browser-context equality and a baseline target inventory to
+exclude old/unrelated windows. Native Page frame events/trees prove frame
+ownership. Bounded unmatched event metadata preserves terminal progress when
+frame discovery arrives later; filenames and local artifact handling retain the
+existing GUID/regular-file validation. Context exclusivity, cancellation and
+default policy restoration remain in the existing path. Observer shutdown drains
+startup work and disables auto-attach before closing its transport.
+
+A real direct-popup download exposed an initialization deadlock: waiting for
+renderer enable/frame-tree replies before resuming the new page prevented its
+navigation. Page-domain events now prove capture readiness in the dialog and
+download observers, and frame discovery proceeds asynchronously after startup
+resume. This preserves native identity proof without guessing frame IDs.
+
+Validation passed: 155 Node checks on macOS; arm64 Linux passed 154 with one
+macOS-only skip. Both JS hosts/platforms passed direct attachment, scripted and
+nested popup download bytes, old-window and unrelated new-window rejection,
+observer disconnect/reuse, active reset/close cancellation and policy/transport
+release. Original download checks (filenames, timeouts, cross-call handles,
+context exclusivity, policy restore failure/retry and chooser sequencing) and
+early/popup/lost-dialog recovery flows also passed on both platforms. Focused
+checks cover completion-before-frame ordering and bounded/invalid metadata.
+macOS local/global npm tarball installation and installed JS/CLI/MCP browser
+flows passed; the local browser-only artifact was refreshed. No dependency or CI
+added. Tests used owned profiles, local fixtures and private artifact directories.
+
+See [browser CDP](../../browser-cdp.md). Headful/native picker presentation,
+broader popup/iframe/provider races, host crash recovery, remote filesystems and
+Windows remain unverified. The full harness parity goal remains active.

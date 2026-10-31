@@ -253,13 +253,26 @@ nodeRepl.write(await download.path({timeoutMs:30000}));
 
 The host prepares a private temporary directory and enables CDP download events
 before input proceeds. A download is attributed to the selected tab's frames,
-including frames attached during the wait. The host records browser-generated
+including frames attached during the wait and newly opened descendant popups.
+Native opener identity and the browser context establish new-window lineage;
+native Page events/frame trees establish frame ownership. Existing popups and
+unrelated windows stay outside that wait. Bind an existing popup separately and
+start its own download wait when needed. The host records browser-generated
 GUIDs; response filenames are not used to construct local paths. `path()` waits
 for completion and verifies a regular local file before returning its absolute
 path. It throws for canceled, missing or incomplete artifacts. Completed paths
 can be read repeatedly and files survive Worker reset/close; they remain in the
 OS temporary directory until normal external cleanup. Artifact retention/export
 management is still open work.
+
+An additional startup observer is installed before input proceeds. It captures
+new page metadata, resumes targets after Page capture is installed, and keeps
+frame discovery asynchronous so waiting for renderer startup cannot block the
+navigation that produces the download. Up to 128 unmatched download events are
+buffered until frame identity arrives; terminal progress received before frame
+attribution is retained. The first proven matching event resolves the waiter.
+A closed temporary popup can still produce its completed artifact. Observer
+connections and pending startup work are released during completion/cancellation.
 
 Event and completion timeouts default to 10 seconds and accept `timeoutMs:0` for
 an unlimited local wait within the Worker execution budget. Handles can be saved
@@ -285,11 +298,15 @@ even when no JavaScript path read is currently awaiting them. Interrupted clicks
 never produce a path; private partial files/directories may remain for OS cleanup.
 
 `OPEN_COMPUTER_USE_CDP_URL=http://127.0.0.1:9222 node scripts/run-download-smoke.mjs`
-runs a local download fixture. Real macOS headless Chrome checks byte contents,
+runs a local download fixture. macOS and arm64 Linux headless Chromium check byte contents,
 untrusted filenames, repeated paths, cross-call Worker handles, active cancellation,
 reset/close, context exclusivity, policy restore failure/retry and file-chooser to
-download sequencing. Host process crashes, remote browser filesystems, popup-owned
-downloads and headful presentation remain unverified. The artifact directory must
+download sequencing. `node scripts/run-popup-download-smoke.mjs` additionally
+checks direct attachment links, scripted/nested popup downloads, byte contents,
+existing/unrelated window rejection, observer disconnect, active reset/close
+cancellation and context policy/transport release in both JS hosts. Host process
+crashes, broader iframe/provider races, remote browser filesystems and headful
+presentation remain unverified. The artifact directory must
 be visible to the browser and host; a remote transfer layer is not implemented.
 
 ## Browser-only runtime
@@ -364,9 +381,9 @@ when a dialog closes or the next dialog opens.
 
 Browser and tab discovery install an endpoint-wide CDP observer that remains
 host-owned across JS calls. New page targets wait for their capture session to
-enable Page events before Runtime.runIfWaitingForDebugger is dispatched. The
-opening event itself also establishes readiness when a dialog delays the enable
-reply. Capture uses the attached session directly; a second renderer connection
+enable Page events before Runtime.runIfWaitingForDebugger is dispatched. A
+Page-domain event also establishes readiness when renderer startup or a dialog
+delays the enable reply. Capture uses the attached session directly; a second renderer connection
 can stall while a target is paused. An
 input/navigation action that opens a dialog returns at that point, so the next
 call can inspect and respond. Native CDP input, locator actions and file-chooser
