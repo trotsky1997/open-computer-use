@@ -43,13 +43,14 @@ execution deadline still controls a live call. A hard kill or hung backend can
 prevent confirmed release. Accepted UI effects remain applied; inspect before
 retrying. No automatic replay or clipboard fallback is used.
 
-Private GTK checks in both REPL modes verify modifier-only and ordinary-key
+Private GTK checks without compositing and with xcompmgr + Openbox pass through
+both REPL modes and verify modifier-only and ordinary-key
 chords, duplicate keys, exact mouse modifier state, per-press receiver timestamps,
 key ownership across double clicks, reverse key releases, zero dwell, invalid
 rejection, mid-hold reset/close and successful fresh global input. Targeted checks
 cover native mapping/keyboard bits, existing-key rejection, cancellation and
 release failure. Other providers, real window managers/hardware, background,
-composited/Wayland input remain open or unverified.
+broader compositor/WM and Wayland input remain open or unverified.
 
 ```sh
 # Inside an owned D-Bus/Xvfb desktop with AT-SPI enabled:
@@ -64,16 +65,17 @@ Explicit duration holds the whole chord using the same native mapping and
 reverse-release scope as held clicks. Modifier-only chords, duplicate keys and
 zero duration are supported. Auto is the supported method; sky_key fails before
 input. A prior AX-only observation is sufficient. The current route requires the
-selected active exposed local noncomposited X11 frame and confirms its native
-keyboard focus. It reads input state without moving or clicking the pointer.
+selected active exposed local X11 frame, with or without a compositor, and
+confirms its native keyboard focus. It reads input state without moving or clicking the pointer.
 
 Native frame, logical held keys and modifier/button state are checked during the
 hold. Focus/frame/input changes stop the hold and trigger reverse releases. The
 operation allowance includes requested dwell. Ordinary pressKey without explicit
 duration retains the existing AT-SPI delivery path. This new verified route does
-not add background, compositor/Wayland or wider keymap/IME support.
+not add background, Wayland or wider keymap/IME support.
 
-Both source and Worker GTK checks cover modifier-only and ordinary-key chords,
+Both source and Worker GTK checks, without compositing and with xcompmgr +
+Openbox, cover modifier-only and ordinary-key chords,
 receiver timestamps, reverse releases, duplicate keys, zero duration, AX-only
 use, inactive/occluded/invalid rejection, mid-hold reset/close and successful
 fresh input after reset. The fixture receives no mouse events. Targeted checks

@@ -57,9 +57,9 @@ the before/after identity checks.
 Private Ubuntu arm64 Xvfb/D-Bus checks with a real xcompmgr pass through both source
 and Worker JS hosts: same-title red/blue isolation, background and overlapping
 frames, partially offscreen pixels, half-alpha red, opaque black, unchanged native
-focus, same-geometry/hidden/closed refusal and rejection of composited pointer
-input. The existing noncomposited checks retain their exposure/black-frame and
-refusal behavior. Python self-checks cover PNG byte order/CRC/alpha conversion,
+focus, same-geometry/hidden/closed refusal, inactive-input rejection and actual
+ARGB-window click recipients. The existing noncomposited checks retain their
+exposure/black-frame and refusal behavior. Python self-checks cover PNG byte order/CRC/alpha conversion,
 PID/geometry validation, identity changes and resource cleanup on failure.
 
 ```sh

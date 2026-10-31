@@ -17,13 +17,17 @@ requirement and uses the same verified route. `app_post` and `sky_click` remain 
 events through auto/global and bypass semantic actions.
 
 The current route shares [visible-window verification](linux-window-images.md):
-local, noncomposited X11; sole active AT-SPI window and unique geometry; native
+local X11 with or without a compositor; sole active AT-SPI window and unique geometry; native
 focus/PID/frame agreement; no intersecting mapped window above it. Bounds changes,
 missing evidence and unsupported frame layouts fail before input. Indexed
 fallback requires an exact current native object, VISIBLE/SHOWING state and
 positive live geometry. It never selects a same-name replacement or reuses the
 old element rectangle. App-specific clipping/overlap and effect validation still
 need broader provider coverage.
+
+Root-image compositor/depth restrictions apply only to the root-pixel capture
+route. Input verifies the receiving frame independently and accepts ARGB visual
+depths; it still requires focus, full on-screen bounds and no occlusion.
 
 The helper checks existing core buttons/action modifiers, briefly probes pointer
 grab availability, moves the pointer and verifies its root child/window and pixel
@@ -33,9 +37,11 @@ modifier map identifies them as locks; their state is preserved.
 
 The server is grabbed during frame verification/pointer placement and released
 before button delivery, allowing a window manager to replay passive grabs. Every
-attempted press has a matching release attempt, and an unconfirmed attempt stops
-the remaining sequence. Native errors and held-button state are reported; there
-is no automatic replay. A normal popup or window closure after delivery is
+attempted press has a matching release attempt. After release, a bounded 250 ms
+query loop lets a window manager finish passive-grab replay; it only waits for
+the owned core button state to clear and sends no repeated input. An unconfirmed
+attempt stops the remaining sequence. Native errors and held-button state are
+reported; there is no automatic replay. A normal popup or window closure after delivery is
 allowed. Read the resulting UI state to verify the intended action.
 
 Physical clicks visibly move the system pointer and leave it at the selected
@@ -47,9 +53,10 @@ and active-child cleanup coverage. Hard interruption and XTest withdrawal can pr
 confirmation. [Verified within-window drag](linux-drag-input.md) and
 [coordinate/index scroll](linux-scroll-input.md) share pointer target/preflight checks.
 Wider keymap/layout, background,
-Wayland/composited and wider window-manager/provider routes remain open.
+Wayland and wider window-manager/provider routes remain open.
 
-Private Ubuntu arm64 Xvfb checks in both REPL modes verify actual receiving-widget
+Private Ubuntu arm64 Xvfb checks, both without a compositor and with xcompmgr +
+Openbox, pass through both REPL modes and verify actual receiving-widget
 coordinates, left/middle/right, double/triple click counts and paired releases,
 index fallback, real GTK context-menu completion, transparent input-only and
 active-grab interception, inactive/occluded/outside/stale rejection. Temporary
@@ -68,3 +75,32 @@ XDG_SESSION_TYPE=x11 GDK_BACKEND=x11 \
 The [XTest specification](https://xorg.freedesktop.org/archive/current/doc/libXtst/xtestlib.html)
 describes extension discovery and logical button/motion synthesis. Success is
 native event delivery evidence; the application effect is checked separately.
+
+The same input controllers run under a real compositor and window manager. With
+GTK3/AT-SPI, xcompmgr, Openbox and x11-utils installed, run inside an owned private
+Xvfb/D-Bus desktop with the test GTK accessibility environment enabled:
+
+```sh
+openbox --config-file /etc/xdg/openbox/rc.xml &
+manager=$!
+xcompmgr -n &
+compositor=$!
+trap 'kill "$manager" "$compositor"; wait "$manager" "$compositor"' EXIT
+for attempt in $(seq 1 100); do
+  xprop -root _NET_SUPPORTING_WM_CHECK | grep -q 'window id #' && break
+  sleep .05
+done
+xprop -root _NET_SUPPORTING_WM_CHECK | grep -q 'window id #' || exit 1
+for check in click drag held-click held-key scroll; do
+  node "scripts/tests/linux-$check-js-smoke.mjs" /path/to/open-computer-use-linux || exit
+done
+```
+
+These checks include real decorated/reparented RGB GTK frames and WM passive
+grabs. Fixture points use client origins and frame extents so borders/titlebars
+are included in screenshot coordinates; the transparent input-only interceptor
+keeps keyboard focus and is explicitly raised above the receiving window.
+Broader GNOME/KWin, mixed-depth decorated ARGB, GPU/full-screen and physical
+input behavior remain open. The [XAllowEvents specification](https://xorg.freedesktop.org/archive/X11R7.5/doc/man/man3/XAllowEvents.3.html)
+describes the window manager's replay mechanism; this runtime never releases
+another client's grab.

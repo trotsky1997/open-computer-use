@@ -1577,3 +1577,47 @@ See [Linux window images](../../linux-window-images.md). Real GNOME/KWin,
 decorated/reparented and GPU/full-screen windows, minimized/unmapped windows,
 Wayland/portal capture and wider providers remain unverified. The full harness
 parity goal stays active.
+
+
+## Focused input on composited X11
+
+Native input frame verification now accepts composited X11 and differing visual
+depths. Compositor/depth constraints stay in the root-pixel screenshot route.
+Input retains active AT-SPI identity, native focus/PID/geometry/stacking, shape,
+full on-screen bounds, neutral input and actual pointer/grab checks. No focus,
+stacking, redirection or other client's grab is changed by the runtime.
+
+Real Openbox validation exposed two WM replay races. Button release now polls
+only its already-sent core-button state for up to 250 ms before continuing.
+Drag confirms a queued motion after releasing its short server grab, allowing
+the WM to replay; it waits only while the pointer remains at the previous point.
+Unexpected motion/target/button state or timeout stops the operation. Neither
+path resends input, and cancellation still releases owned buttons/keys.
+
+GTK receiver fixtures now translate client coordinates through native client
+origins and frame extents to screenshot coordinates, including decoration
+borders/titlebars. The synthetic input-only overlay explicitly stays unmanaged,
+restores fixture keyboard focus and raises above its receiving frame. The drag
+cancellation gate permits short cleanup polls while blocking the intended motion
+interval. An ARGB fixture records actual press/release recipients and coordinates.
+
+Validation passed: 89 Python checks on macOS and Ubuntu arm64; 47 native Linux Go
+checks plus 10 subchecks; 155 Node checks on macOS. Both JS hosts passed all five input controllers under
+xcompmgr + Openbox: decorated RGB GTK recipients, button/count/coordinates,
+held drag motion, wheel pane displacement, held/timed key state and timestamps,
+input-only/grab/inactive/occluded/stale rejection, reset/close releases and fresh
+input. All five also passed without a compositor. Both hosts passed the original
+noncomposited image controller and the real xcompmgr background/occluded/partly
+offscreen/alpha/black/image-identity controller, including exact ARGB pointer
+recipient coordinates and inactive-input refusal. Targeted checks cover delayed
+motion/release, release timeout, unchanged root-pixel refusal and wrong PID/
+occluded ARGB input rejection. Native MCP tool descriptions, screenshot failure text and injected JS guidance
+now describe these capabilities. No project dependency or CI was added. Test-only
+Openbox/x11-utils were installed in the Linux VM; all desktop runs used owned
+private Xvfb/D-Bus contexts, with private WM config/cache locations.
+
+See [Linux clicks](../../linux-click-input.md) and [drag](../../linux-drag-input.md).
+GNOME/KWin and physical/GPU desktops, wider decorated ARGB/mixed-depth frames,
+Wayland, background native input, external interruption/claims and broader
+providers remain open. No installation package or registry release was produced
+in this phase. The full harness parity goal stays active.

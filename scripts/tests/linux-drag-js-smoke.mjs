@@ -23,6 +23,7 @@ if op.get('tool')=='drag' and os.path.exists(root+'/arm'):
     import x11_capture
     sleep=time.sleep
     def gate(_duration):
+        if _duration < .02: return sleep(_duration)
         with open(root+'/ready','w') as f: json.dump({'pid':os.getpid()},f)
         while True: sleep(.02)
     x11_capture.time.sleep=gate

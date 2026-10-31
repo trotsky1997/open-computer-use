@@ -21,14 +21,25 @@ pointer_events, pointer_areas, pointer_motion, key_events = {}, {}, {}, {}
 interceptors, pointer_grabbed = [], False
 retired_interceptors = []
 
+def frame_point(area, window, x, y):
+    point = area.translate_coordinates(window, x, y)
+    if point is None or window.get_window() is None:
+        return None
+    px, py = point
+    success, wx, wy = window.get_window().get_origin()
+    if not success:
+        return None
+    frame = window.get_window().get_frame_extents()
+    return [wx + px - frame.x, wy + py - frame.y]
+
 def state(*_args):
     with open(root + '/state.tmp', 'w', encoding='utf-8') as output:
         json.dump({'pid': os.getpid(), 'windows': list(windows), 'keys': keys, 'clipboard': clipboard_data, 'popups': sum(menu.get_visible() for menu in popup_menus), 'pointer': pointer_events, 'pointerMotion': pointer_motion, 'keyEvents': key_events, 'pointerGrabbed': pointer_grabbed, 'interceptors': len(interceptors), 'pointerSizes': {key: [area.get_allocated_width(), area.get_allocated_height()] for key, area in pointer_areas.items() if key in windows},
-                   'pointerPoints': {key: area.translate_coordinates(windows[key], area.get_allocated_width() // 2, area.get_allocated_height() // 2) for key, area in pointer_areas.items() if key in windows},
+                   'pointerPoints': {key: frame_point(area, windows[key], area.get_allocated_width() // 2, area.get_allocated_height() // 2) for key, area in pointer_areas.items() if key in windows},
                    'windowPositions': {key: window.get_position() for key, window in windows.items()}, 'scroll': scroll_events,
                    'scrollOffsets': {key: [pane.get_hadjustment().get_value(), pane.get_vadjustment().get_value()] for key, pane in scrollers.items() if key in windows},
                    'scrollLimits': {key: [pane.get_hadjustment().get_upper() - pane.get_hadjustment().get_page_size(), pane.get_vadjustment().get_upper() - pane.get_vadjustment().get_page_size()] for key, pane in scrollers.items() if key in windows},
-                   'scrollPoints': {key: notes[key].translate_coordinates(windows[key], notes[key].get_allocated_width() // 2, notes[key].get_allocated_height() // 2) for key in scrollers if key in windows},
+                   'scrollPoints': {key: frame_point(notes[key], windows[key], notes[key].get_allocated_width() // 2, notes[key].get_allocated_height() // 2) for key in scrollers if key in windows},
                    'values': {key: entry.get_text() for key, entry in entries.items()},
                    'selections': {key: entry.get_selection_bounds() for key, entry in entries.items()},
                    'carets': {key: entry.get_position() for key, entry in entries.items()},
@@ -146,13 +157,16 @@ def create(key, value):
             pointer_grabbed = display.get_default_seat().grab(interceptors[0], Gdk.SeatCapabilities.POINTER, False, None, None, None, None) == Gdk.GrabStatus.SUCCESS
         else:
             px, py = pointer_areas['B'].translate_coordinates(windows['B'], pointer_areas['B'].get_allocated_width() // 2, pointer_areas['B'].get_allocated_height() // 2)
-            wx, wy = windows['B'].get_position()
+            _success, wx, wy = windows['B'].get_window().get_origin()
             attrs = Gdk.WindowAttr()
             attrs.window_type, attrs.wclass = Gdk.WindowType.TEMP, Gdk.WindowWindowClass.INPUT_ONLY
+            attrs.override_redirect = True
             attrs.x, attrs.y, attrs.width, attrs.height = wx + px - 10, wy + py - 10, 20, 20
-            overlay = Gdk.Window.new(Gdk.get_default_root_window(), attrs, Gdk.WindowAttributesType.X | Gdk.WindowAttributesType.Y)
+            overlay = Gdk.Window.new(Gdk.get_default_root_window(), attrs, Gdk.WindowAttributesType.X | Gdk.WindowAttributesType.Y | Gdk.WindowAttributesType.NOREDIR)
             interceptors.append(overlay)
             overlay.show()
+        window.get_window().focus(Gdk.CURRENT_TIME)
+        interceptors[0].raise_()
         display.sync()
         state()
     def separate_windows(_button):

@@ -8,7 +8,7 @@ window-ID bindings and application-name bindings and visibly moves the pointer.
 
 The runtime reuses [verified click preflight](linux-click-input.md): exact AT-SPI
 window identity/active geometry, native focus/PID/frame/stacking agreement, local
-noncomposited X11, no occlusion, neutral input state, available pointer grab and
+X11 with or without a compositor, no occlusion, neutral input state, available pointer grab and
 confirmed pointer placement. Both endpoints are validated before pointer motion.
 The legacy AT-SPI global drag route has been removed. No opt-in global fallback
 is involved; unsupported desktop routes return an error.
@@ -17,8 +17,11 @@ One press is followed by twelve interpolated moves, with 20 ms between steps,
 then one release. Between steps the runtime rechecks native frame evidence,
 expected previous pointer position, the held left button and other button/modifier
 state. Each move is confirmed at its requested native position. A brief server
-grab protects each verification/move and is released before receivers process
-motion. Input delivery uses the [XTest API](https://xorg.freedesktop.org/archive/current/doc/libXtst/xtestlib.html).
+grab protects verification and the motion request, then releases before the
+confirmation query so the WM can replay its passive grab. If the pointer still
+has the previous position, a bounded 250 ms poll waits for the queued motion.
+Unexpected motion, target/button changes and timeout stop the drag; no motion
+is resent. Input delivery uses the [XTest API](https://xorg.freedesktop.org/archive/current/doc/libXtst/xtestlib.html).
 
 An attempted press always has a release attempt, including failed motion,
 changed frame/pointer state and cooperative cancellation. Cleanup releases at the
@@ -28,7 +31,8 @@ bounded child cleanup path; a forced kill cannot confirm release. Already
 accepted effects remain applied, so inspect the UI before retrying.
 
 The isolated GTK fixture records actual press/release positions and held-button
-motion. Both source and Worker REPLs verify bidirectional endpoints, one paired
+motion. Both source and Worker REPLs, without compositing and with xcompmgr + Openbox,
+verify bidirectional endpoints, one paired
 press/release per drag, no input to sibling windows, outside/omitted/inactive/
 occluded/input-only/grab rejection, and actual receiver release during mid-drag
 reset/close. Fresh post-reset drag is also verified. Targeted checks cover
@@ -45,6 +49,6 @@ XDG_SESSION_TYPE=x11 GDK_BACKEND=x11 \
 Verification is sequential: concurrent hardware input, newly acquired grabs and
 UI changes can race checks. Application drag effects require observation.
 Cross-window drag/drop, complex clipping, real window managers, physical devices,
-Qt/Electron, compositors, Wayland and other platform routes
+Qt/Electron, broader compositor/WM behavior, Wayland and other platform routes
 remain open or unverified. This within-window route does not complete the full
 harness parity goal.

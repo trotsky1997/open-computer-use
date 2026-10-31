@@ -29,13 +29,14 @@ for(const Session of [PersistentJavaScriptSession,WorkerJavaScriptSession]){
   await action('b','Separate');await action('b','Focus');
   let a=await image('a'),b=await image('b');assert.ok(a.red>1000);assert.equal(a.blue,0);assert.ok(b.blue>1000);assert.equal(b.red,0);
   await action('b','Cover A');a=await image('a');assert.ok(a.red>1000);assert.equal(a.blue,0,'Occluded image included the covering window');
-  assert.ok((await image('black')).black>1000);await image('b');const blocked=await session.run('await b.click([10,30]);');assert.equal(blocked.isError,true);assert.match(blocked.content.at(-1).text,/Composited/);
+  assert.ok((await image('black')).black>1000);await image('a');const blocked=await session.run('await a.click([10,30]);');assert.equal(blocked.isError,true);assert.match(blocked.content.at(-1).text,/inactive/);
   const translucent=await image('alpha');assert.equal(translucent.channels,4);assert.ok(translucent.half>1000,'Premultiplied window alpha was not restored');
+  await action('alpha','Focus');await image('alpha');await run(session,`await alpha.click([40,40]);nodeRepl.write(JSON.stringify(true));`);const received=await until(async()=>{const state=JSON.parse(await readFile(path.join(root,'state.json'),'utf8'));return state.events.Alpha.length===2?state.events:null;});assert.deepEqual(received.Alpha.map(event=>[event.phase,event.button]),[['press',1],['release',1]]);assert.ok(received.Alpha.every(event=>Math.abs(event.x-40)<=1&&Math.abs(event.y-23)<=1));assert.ok(['A','B','Black'].every(key=>received[key].length===0));await action('b','Focus');
   await action('b','Offscreen A');assert.ok((await image('a')).red>1000);
   await action('b','Ambiguous A');assert.equal((await session.run('await a.getScreenshot({emit:false});')).isError,true);
   await action('b','Separate');await action('b','Hide A');assert.equal((await session.run('await a.getScreenshot({emit:false});')).isError,true);
   await action('b','Separate');assert.ok((await image('a')).red>1000);
   await action('b','Close A');assert.equal((await session.run('await a.getScreenshot({emit:false});')).isError,true);
-  console.log(`${Session.name} PASS real compositor background/occluded/offscreen native pixels, same-title isolation, straight alpha, focus preservation and ambiguous/hidden/stale refusal`);
+  console.log(`${Session.name} PASS real compositor background/occluded/offscreen native pixels, same-title isolation, straight alpha, ARGB pointer recipient, focus preservation and inactive/ambiguous/hidden/stale refusal`);
  }finally{await session.close();await native.close();if(pid)try{process.kill(pid,'SIGTERM');}catch(e){if(e.code!=='ESRCH')throw e;}await rm(root,{recursive:true,force:true});}
 }

@@ -558,7 +558,7 @@ def build_snapshot(query, text_limit=DEFAULT_TEXT_LIMIT, max_tree_nodes=MAX_ELEM
     if include_screenshot:
         image = capture_bound_window_png(app, window, bounds)
         if image is None:
-            lines.append("Verified X11 window screenshot unavailable: requires an unambiguous active, fully exposed native frame on a local noncomposited display.")
+            lines.append("Verified X11 window screenshot unavailable: requires an unambiguous mapped local X11 frame with verified compositor backing, or an active fully exposed frame without a compositor.")
     pid = node_pid(app)
     return {
         "app": {

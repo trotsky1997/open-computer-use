@@ -61,6 +61,7 @@ class ImageTests(unittest.TestCase):
             client.read(42, (0, 0, 2, 1))
         client.lib.XUngrabServer.assert_called_once()
         client.lib.XGetImage.assert_not_called()
+
         client = self.client()
         def shaped(_d, _w, bounding, *_args):
             bounding._obj.value = 1
@@ -71,6 +72,18 @@ class ImageTests(unittest.TestCase):
         client.lib.XUngrabServer.assert_called_once()
         client.lib.XGetImage.assert_not_called()
 
+    def test_compositor_and_argb_depth_do_not_bypass_input_frame_verification(self):
+        client = self.client()
+        client.lib.XInternAtom.return_value = 7
+        client.lib.XGetSelectionOwner.return_value = 9
+        client.tree = lambda window: (1, []) if window == 2 else (0, [2])
+        client.attributes = lambda window: types.SimpleNamespace(map_state=2, width=100, height=100, window_class=1, depth=24 if window == 1 else 32)
+        self.assertEqual(client.verify_frame(42, (0, 0, 2, 1), float('inf')), 2)
+        with self.assertRaisesRegex(RuntimeError, 'PID/frame'):
+            client.verify_frame(99, (0, 0, 2, 1), float('inf'))
+        client.tree = lambda window: (1, []) if window == 2 else (0, [2, 3])
+        with self.assertRaisesRegex(RuntimeError, 'occluded'):
+            client.verify_frame(42, (0, 0, 2, 1), float('inf'))
 
     def test_remote_display_and_mixed_depth_fail_before_pixel_read(self):
         with mock.patch.dict(capture.os.environ, {"DISPLAY": "localhost:10.0"}), mock.patch.object(capture, "X11") as native:
@@ -142,7 +155,7 @@ class ImageTests(unittest.TestCase):
     def test_pointer_failure_pairs_release_and_never_repeats_press(self):
         client = self.client()
         client.verify_frame = mock.Mock(return_value=2)
-        client.pointer = mock.Mock(side_effect=[(1, 0, 0, 0), (2, 1, 0, 0), (2, 1, 0, 0)])
+        client.pointer = mock.Mock(side_effect=[(1, 0, 0, 0), (2, 1, 0, 0), (2, 1, 0, 0), (2, 1, 0, 0)])
         xtest = mock.Mock()
         xtest.XTestQueryExtension.return_value = 1
         xtest.XTestFakeMotionEvent.return_value = 1
@@ -170,7 +183,7 @@ class ImageTests(unittest.TestCase):
     def test_input_is_delivered_after_server_release_and_allows_new_popup(self):
         client = self.client()
         client.verify_frame = mock.Mock(return_value=2)
-        client.pointer = mock.Mock(side_effect=[(1, 0, 0, 0), (2, 1, 0, 0), (2, 1, 0, 0), (99, 1, 0, 0)])
+        client.pointer = mock.Mock(side_effect=[(1, 0, 0, 0), (2, 1, 0, 0), (2, 1, 0, 0), (99, 1, 0, 0), (99, 1, 0, 0)])
         xtest = mock.Mock()
         def button(*_args):
             client.lib.XUngrabServer.assert_called_once()
@@ -206,6 +219,19 @@ class ImageTests(unittest.TestCase):
             client.require_neutral(4)
         self.assertEqual(client.lib.XFreeModifiermap.call_count, 2)
 
+    def test_release_wait_observes_clear_or_times_out_without_new_input(self):
+        client = self.client()
+        client.pointer = mock.Mock(side_effect=[(2, 1, 0, 0x400), (99, 1, 0, 0)])
+        with mock.patch.object(capture.time, 'sleep') as sleep:
+            client.wait_button_release(3)
+        sleep.assert_called_once()
+        self.assertEqual(client.lib.mock_calls, [])
+        client.pointer = mock.Mock(return_value=(2, 1, 0, 0x400))
+        with mock.patch.object(capture.time, 'monotonic', side_effect=[0, 0.3]):
+            with self.assertRaisesRegex(RuntimeError, 'release remains unconfirmed'):
+                client.wait_button_release(3)
+        self.assertEqual(client.lib.mock_calls, [])
+
 
 class CancellationTests(unittest.TestCase):
     client = ImageTests.client
@@ -213,7 +239,7 @@ class CancellationTests(unittest.TestCase):
         import native_cancel as cancel
         client = self.client()
         client.verify_frame = mock.Mock(return_value=2)
-        client.pointer = mock.Mock(side_effect=[(1, 0, 0, 0), (2, 1, 0, 0), (2, 1, 0, 0)])
+        client.pointer = mock.Mock(side_effect=[(1, 0, 0, 0), (2, 1, 0, 0), (2, 1, 0, 0), (2, 1, 0, 0)])
         xtest = mock.Mock()
         def button(_display, _code, down, _delay):
             if down:
@@ -242,8 +268,11 @@ class DragTests(unittest.TestCase):
         client, xtest = self.prepared()
         positions = []
         for step in range(1, 13):
-            positions.extend([(2, step - 1, 0, 0x100), (2, step, 0, 0x100)])
-        client.pointer = mock.Mock(side_effect=positions + [(2, 12, 0, 0)])
+            positions.append((2, step - 1, 0, 0x100))
+            if step == 1:
+                positions.append((2, 0, 0, 0x100))
+            positions.append((2, step, 0, 0x100))
+        client.pointer = mock.Mock(side_effect=positions + [(2, 12, 0, 0), (2, 12, 0, 0)])
         with mock.patch.object(capture.time, 'sleep'):
             client.drag(42, (0, 0, 13, 1), (0, 0), (12, 0))
         self.assertEqual(xtest.XTestFakeButtonEvent.call_args_list, [mock.call(1, 1, 1, 0), mock.call(1, 1, 0, 0)])

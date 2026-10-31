@@ -12,10 +12,11 @@ root, name = os.environ['OCU_WINDOW_FIXTURE_ROOT'], os.environ['OCU_WINDOW_FIXTU
 GLib.set_prgname(name)
 GLib.set_application_name(name)
 windows = {}
+events = {}
 
 
 def state(*_args):
-    result = {'pid': os.getpid(), 'windows': {key: {'x': window.get_position()[0], 'y': window.get_position()[1], 'visible': window.get_visible()} for key, window in windows.items()}}
+    result = {'pid': os.getpid(), 'events': events, 'windows': {key: {'x': window.get_position()[0], 'y': window.get_position()[1], 'visible': window.get_visible()} for key, window in windows.items()}}
     with open(os.path.join(root, 'state.next'), 'w') as output:
         json.dump(result, output)
     os.replace(os.path.join(root, 'state.next'), os.path.join(root, 'state.json'))
@@ -25,6 +26,7 @@ def state(*_args):
 def create(key, position, rgba=False):
     window = Gtk.Window(title=name + (' same title' if key in ('A', 'B') else ' ' + key))
     windows[key] = window
+    events[key] = []
     window.set_decorated(False)
     window.set_default_size(280, 180)
     window.move(*position)
@@ -40,6 +42,13 @@ def create(key, position, rgba=False):
     box.pack_start(Gtk.Label(label='Window ' + key), False, False, 0)
     canvas = Gtk.DrawingArea()
     canvas.set_size_request(260, 80)
+    canvas.add_events(Gdk.EventMask.BUTTON_PRESS_MASK | Gdk.EventMask.BUTTON_RELEASE_MASK)
+    def received(_widget, event, phase):
+        events[key].append({'phase': phase, 'button': event.button, 'x': event.x, 'y': event.y})
+        state()
+        return False
+    canvas.connect('button-press-event', received, 'press')
+    canvas.connect('button-release-event', received, 'release')
     def paint(_widget, context):
         context.set_operator(cairo.OPERATOR_SOURCE)
         context.set_source_rgba(0 if key in ('B', 'Black') else 1, 0, 1 if key == 'B' else 0, 0.5 if rgba else 1)

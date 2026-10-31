@@ -163,14 +163,15 @@ class X11:
             if data:
                 self.lib.XFree(data)
 
-    def verify_frame(self, expected_pid, rectangle, deadline):
+    def verify_frame(self, expected_pid, rectangle, deadline, *, root_pixels=False):
         x, y, width, height = rectangle
         if min(x, y) < 0 or min(width, height) <= 0 or width * height > 16_000_000:
             raise RuntimeError("X11 window bounds unavailable")
-        screen = self.lib.XDefaultScreen(self.display)
-        compositor = self.lib.XInternAtom(self.display, ("_NET_WM_CM_S" + str(screen)).encode("ascii"), 1)
-        if compositor and self.lib.XGetSelectionOwner(self.display, compositor):
-            raise RuntimeError("Composited native window routing is unsupported")
+        if root_pixels:
+            screen = self.lib.XDefaultScreen(self.display)
+            compositor = self.lib.XInternAtom(self.display, ("_NET_WM_CM_S" + str(screen)).encode("ascii"), 1)
+            if compositor and self.lib.XGetSelectionOwner(self.display, compositor):
+                raise RuntimeError("Composited root pixels are unsupported")
         focus, revert = C.c_ulong(), C.c_int()
         self.lib.XGetInputFocus(self.display, C.byref(focus), C.byref(revert))
         window, found_pid = focus.value, None
@@ -209,7 +210,7 @@ class X11:
             attributes = self.attributes(child)
             if attributes.map_state != 2:
                 continue
-            if attributes.window_class == 1 and attributes.depth != root.depth:
+            if root_pixels and attributes.window_class == 1 and attributes.depth != root.depth:
                 raise RuntimeError("Mixed-depth native frame routing is unsupported")
             _, children = self.tree(child)
             pending.extend((entry, depth + 1) for entry in children)
@@ -236,7 +237,7 @@ class X11:
         deadline = time.monotonic() + 0.25
         image = None
         try:
-            self.verify_frame(expected_pid, rectangle, deadline)
+            self.verify_frame(expected_pid, rectangle, deadline, root_pixels=True)
             image = self.lib.XGetImage(self.display, self.root, x, y, width, height, C.c_ulong(-1).value, 2)
             self.lib.XSync(self.display, 0)
             if self.error or not image:
@@ -381,6 +382,15 @@ class X11:
                     raise RuntimeError("An action modifier is already held")
         finally:
             self.lib.XFreeModifiermap(mapping)
+
+    def wait_button_release(self, button):
+        # A WM's passive grab may still be replaying the already queued release.
+        deadline = time.monotonic() + 0.25
+        while self.pointer()[3] & (1 << (button + 7)):
+            remaining = deadline - time.monotonic()
+            if self.error or remaining <= 0:
+                raise RuntimeError("Button release remains unconfirmed; inspect pointer state before retrying")
+            time.sleep(min(0.005, remaining))
 
     def require_point(self, rectangle, point):
         x, y, width, height = rectangle
@@ -536,6 +546,7 @@ class X11:
                             if not xtest.XTestFakeButtonEvent(self.display, code, 0, 0):
                                 raise RuntimeError("Button release failed; inspect pointer state before retrying")
                             self.lib.XSync(self.display, 0)
+                            self.wait_button_release(code)
         self.require_neutral(self.pointer()[3])
         if self.error or (extended and self.keyboard_state()):
             raise RuntimeError("Native click delivery/release failed; inspect before retrying")
@@ -564,7 +575,8 @@ class X11:
                 finally:
                     if not xtest.XTestFakeButtonEvent(self.display, buttons[direction], 0, 0):
                         raise RuntimeError("Wheel release failed; inspect pointer state before retrying")
-                self.lib.XSync(self.display, 0)
+                    self.lib.XSync(self.display, 0)
+                    self.wait_button_release(buttons[direction])
             self.require_neutral(self.pointer()[3])
             if self.error:
                 raise RuntimeError("Wheel delivery failed; inspect before retrying")
@@ -627,18 +639,28 @@ class X11:
                     self.require_neutral(state & ~0x100)
                     if (child, actual_x, actual_y) != (frame, px, py) or not state & 0x100 or self.error:
                         raise RuntimeError("Drag pointer/button state changed; inspect before retrying")
+                    previous = (px, py)
                     px = round(start[0] + (end[0] - start[0]) * step / 12)
                     py = round(start[1] + (end[1] - start[1]) * step / 12)
                     if not xtest.XTestFakeMotionEvent(self.display, self.lib.XDefaultScreen(self.display), px, py, 0):
                         raise RuntimeError("Drag motion failed; inspect before retrying")
                     self.lib.XSync(self.display, 0)
-                    child, actual_x, actual_y, state = self.pointer()
-                    self.require_neutral(state & ~0x100)
-                    if self.error or (child, actual_x, actual_y) != (frame, px, py) or not state & 0x100:
-                        raise RuntimeError("Drag motion was not confirmed; inspect before retrying")
                 finally:
                     self.lib.XUngrabServer(self.display)
                     self.lib.XSync(self.display, 0)
+                deadline = time.monotonic() + 0.25
+                while True:
+                    check_cancelled()
+                    child, actual_x, actual_y, state = self.pointer()
+                    self.require_neutral(state & ~0x100)
+                    if self.error or child != frame or not state & 0x100:
+                        raise RuntimeError("Drag motion was not confirmed; inspect before retrying")
+                    if (actual_x, actual_y) == (px, py):
+                        break
+                    remaining = deadline - time.monotonic()
+                    if (actual_x, actual_y) != previous or remaining <= 0:
+                        raise RuntimeError("Drag motion was not confirmed; inspect before retrying")
+                    time.sleep(min(0.005, remaining))
                 time.sleep(0.02)
         finally:
             if attempted:
@@ -646,6 +668,7 @@ class X11:
                     if not xtest.XTestFakeButtonEvent(self.display, 1, 0, 0):
                         raise RuntimeError("Drag release failed; inspect pointer state before retrying")
                     self.lib.XSync(self.display, 0)
+                    self.wait_button_release(1)
         self.require_neutral(self.pointer()[3])
         if self.error:
             raise RuntimeError("Native drag delivery failed; inspect before retrying")

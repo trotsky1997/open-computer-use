@@ -1528,12 +1528,12 @@ func toolDefinitions() []toolDefinition {
 				"duration_ms":   numberProperty("Finite non-negative milliseconds to hold each mouse press; zero allowed. Auto/global only."),
 				"click_count":   integerProperty("Number of clicks, 1..3. Defaults to 1"),
 				"mouse_button":  enumStringProperty("Mouse button to click. Defaults to left.", []string{"left", "right", "middle"}),
-				"click_method":  enumStringProperty("Click implementation: auto (default), accessibility, app_post, sky_click, or global. Accessibility requires element_index. Linux pointer clicks verify a local noncomposited X11 frame and pointer target; explicit global also requires its opt-in environment flag. app_post and sky_click are unsupported.", clickMethodValues),
+				"click_method":  enumStringProperty("Click implementation: auto (default), accessibility, app_post, sky_click, or global. Accessibility requires element_index. Linux pointer clicks verify a focused, exposed local X11 frame and pointer target, with or without a compositor; explicit global also requires its opt-in environment flag. app_post and sky_click are unsupported.", clickMethodValues),
 			}, []string{"app"}),
 		},
 		{
 			Name:        "drag",
-			Description: "Drag with the left button between screenshot pixel coordinates inside a verified local noncomposited X11 window. Visibly moves the pointer. This tool is part of plugin `Computer Use`.",
+			Description: "Drag with the left button between screenshot pixel coordinates inside a verified focused, exposed local X11 window, with or without a compositor. Visibly moves the pointer. This tool is part of plugin `Computer Use`.",
 			Annotations: defaultAnnotations(),
 			InputSchema: objectSchema(map[string]any{
 				"app":    stringProperty("App name or bundle identifier"),
@@ -1586,7 +1586,7 @@ func toolDefinitions() []toolDefinition {
 		},
 		{
 			Name:        "scroll",
-			Description: "Scroll at an exact element or screenshot point through verified local noncomposited X11 wheel input. Visibly moves the pointer. This tool is part of plugin `Computer Use`.",
+			Description: "Scroll at an exact element or screenshot point through verified focused, exposed local X11 wheel input, with or without a compositor. Visibly moves the pointer. This tool is part of plugin `Computer Use`.",
 			Annotations: defaultAnnotations(),
 			InputSchema: objectSchema(map[string]any{
 				"app":           stringProperty("App name or bundle identifier"),
