@@ -349,7 +349,7 @@ lazy startup and source-level sessions. See [native held clicks](native-held-cli
 for schema gating, exact verification and current lock/platform boundaries.
 
 
-BrowserInputs owns held CDP click sequences outside the Worker. It shares the
+BrowserInputs owns CDP pointer drags and held click sequences outside the Worker. It shares the
 configured-origin pointer lease with BrowserDrops, guards document/geometry
 before presses, and releases buttons/keys through a fresh controller after
 cancellation. Raw input and locator action entry points consult this lease.
@@ -362,6 +362,14 @@ The host focuses validated backend-node IDs after acquiring the origin lease,
 checks the loader before each new down, holds the whole chord and releases in
 reverse. Key-triggered scroll/navigation is allowed after the last down; key-up
 cleanup does not depend on the original geometry or loader.
+
+Host-owned drags share BrowserInputs' pointer/focus ownership and fresh-controller
+cleanup. Screenshot points and the initial geometry are validated before down;
+motion permits document scroll/content effects while guarding loader and
+coordinate viewport identity. An unheld initial move carries no button flag.
+Both JS hosts have receiver-event evidence for turn/reset/timeout/close,
+Worker-exit and failed-release recovery. Linux headless captures use the documented
+CDPScreenshotNewSurface backend configuration; no engine flags change at runtime.
 
 BrowserTabs tracks logical-session ownership separately from per-turn resources.
 The host creates and closes targets, discovers opener ancestry and reconciles

@@ -605,7 +605,7 @@ and scroll(elementIndex, direction, pages). Read fresh AX state after actions.
 pressKey owns actual modifier/primary down and reverse up events, supports modifier-only keys and holds the chord for durationMs without synthesizing repeat. An element index focuses its validated target under the input lease; null uses the current focus. Key-induced navigation/scroll can complete before release. Held click keys/chords stay down across the click sequence; durationMs holds each press (finite, non-negative). Uses host-owned trusted CDP events and virtual focus. Ordinary keys type at the current focus before the click. Managed pointer actions block other raw input/locator actions until release; reset/timeout/close releases held state, and cleanup failure retains ownership for retry. Dialogs can be answered in later calls. Releases may finish already admitted effects.
 Screenshot-only reads invalidate element indices. Navigation invalidates all indices.
 setValue(elementIndex, value) replaces editable text; selectText(elementIndex, text, {prefix?,suffix?,selectionType?}) selects exact text or positions the cursor.
-click and scroll also accept screenshot pixel pairs. drag(fromPixelPair, toPixelPair) performs a pointer drag. Capture a new screenshot after input; changed document or viewport geometry invalidates coordinates. Pinch zoom is unsupported.
+click and scroll also accept screenshot pixel pairs. drag(fromPixelPair, toPixelPair) performs a host-owned pointer drag with managed cancellation and focus restoration. Scroll/content effects during motion are allowed; navigation or a changed coordinate viewport stops remaining movement. Capture a new screenshot after input; changed document or viewport geometry invalidates coordinates. Pinch zoom is unsupported.
 tab.playwright exposes locator/getByRole/getByText/getByLabel/getByPlaceholder/getByTestId/getByTitle/getByAltText/frameLocator.
 Chain locator/filter({hasText})/nth/first/last; read count/innerText/textContent/allTextContents/getAttribute/inputValue/isVisible/isEnabled/isChecked/waitFor;
 act with click/dblclick/fill/press/check/uncheck/setChecked/selectOption/hover/scrollIntoViewIfNeeded.
@@ -895,15 +895,7 @@ export function createBrowserApi(activeOutput, environment = process.env, {focus
         if (!Array.isArray(from) || !Array.isArray(to)) throw new Error("drag requires screenshot coordinate pairs");
         await input(async send => {
           const start = await coordinate(send, from), end = await coordinate(send, to);
-          await send("Input.dispatchMouseEvent", {type:"mouseMoved", ...start});
-          await send("Input.dispatchMouseEvent", {type:"mousePressed", ...start, button:"left", buttons:1, clickCount:1});
-          try {
-            for (let step=1; step<=12; step++) {
-              await send("Input.dispatchMouseEvent", {type:"mouseMoved", x:start.x+(end.x-start.x)*step/12, y:start.y+(end.y-start.y)*step/12, button:"left", buttons:1});
-            }
-          } finally {
-            await send("Input.dispatchMouseEvent", {type:"mouseReleased", ...end, button:"left", buttons:0, clickCount:1});
-          }
+          return requestInput({action:"drag",targetId:target.id,position:start,end,geometry:await geometry(send)});
         });
       },
       async setValue(index, value) {

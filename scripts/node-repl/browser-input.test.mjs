@@ -3,6 +3,32 @@ import assert from "node:assert/strict";
 import {BrowserFocusLeases} from "./browser-playwright.mjs";
 import {BrowserInputs,heldKeys,validateClick,validatePressKey,browserPointerLeases} from "./browser-input.mjs";
 
+test('managed drags validate destinations, permit document scroll/content changes and stop on resize or navigation',async()=>{
+ for(const mode of ['normal','resize','navigation']) {
+  const endpoint='http://drag-'+mode+'/',calls=[],geometry={loaderId:'old',viewport:{clientWidth:320,clientHeight:240,pageX:0,pageY:0,scale:1},contentSize:{width:320,height:240},viewportRevision:0};let moves=0;
+  const input=new BrowserInputs(()=>endpoint,async()=>({close(){},async send(method,args){
+   calls.push({method,args});
+   if(method==='Page.getFrameTree')return {frameTree:{frame:{loaderId:mode==='navigation'&&moves?'new':'old'}}};
+   if(method==='Page.getLayoutMetrics')return {cssVisualViewport:{...geometry.viewport,pageY:moves?100:0,clientWidth:mode==='resize'&&moves?300:320},cssContentSize:{width:320,height:moves?900:240}};
+   if(method==='Input.dispatchMouseEvent'&&args.type==='mouseMoved'&&args.buttons===1)moves++;
+   if(method==='Page.handleJavaScriptDialog')throw Error('No dialog is showing');
+   return {};
+  }}),()=>0);
+  input.supported=async()=>{};input.target=async()=>({webSocketDebuggerUrl:'page'});
+  const args={action:'drag',targetId:'tab',position:{x:20,y:20},end:{x:200,y:100},geometry};
+  for(const end of [undefined,{x:NaN,y:2},{x:320,y:20},{x:0,y:-1}])await assert.rejects(input.request({},{...args,end}),/destination/);
+  assert.equal(calls.length,0);
+  const work=input.request({},args);
+  if(mode==='normal')await work;else await assert.rejects(work,/document|viewport/);
+  const events=calls.filter(call=>call.method==='Input.dispatchMouseEvent').map(call=>call.args);
+  assert.equal(events[0].button,'none');assert.equal(events[0].buttons,0);
+  assert.equal(events.filter(event=>event.type==='mousePressed').length,1);
+  assert.deepEqual(events.filter(event=>event.type==='mouseReleased').map(event=>[event.x,event.y,event.buttons]),[mode==='normal'?[200,100,0]:[-1,-1,0]]);
+  assert.equal(moves,mode==='normal'?12:1);assert.equal(browserPointerLeases.has(endpoint),false);
+  assert.equal(calls.filter(call=>call.method==='Emulation.setFocusEmulationEnabled').at(-1).args.enabled,false);
+ }
+});
+
 test("held click options validate chords, aliases and balanced modifier releases",()=>{
  const parsed=validateClick({mouseButton:'r',key:'shift+ctrl+shift',durationMs:0,clickCount:2});
  assert.equal(parsed.button,'right');assert.equal(parsed.keys.length,2);

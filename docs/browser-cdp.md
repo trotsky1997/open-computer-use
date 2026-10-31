@@ -75,7 +75,7 @@ DOM textContent; structural line breaks require matching the actual DOM text.
 
 Coordinate `click([x,y])` and `scroll([x,y], direction, pages)` use pixel
 coordinates from the most recent screenshot. `drag([fromX,fromY], [toX,toY])`
-performs a left-button pointer drag with interpolated movement and releases the
+performs a host-owned left-button pointer drag with interpolated movement and releases the
 button in a finally block. Each input operation consumes the coordinate snapshot;
 capture again before the next coordinate action. Screenshot pixels are scaled to
 CSS viewport coordinates. Navigation, scrolling, viewport geometry changes and
@@ -556,3 +556,21 @@ Use a disposable browser profile; the controller creates and closes its own page
 and popup fixtures. It also intentionally closes the owned observer connection
 and checks explicit failure and recovery. It does not dismiss an existing user
 browser dialog to initialize capture.
+
+## Headless screenshot rendering
+
+For owned Linux headless Chrome 158 testing, launch with
+`--enable-features=CDPScreenshotNewSurface` alongside `--headless=new` and
+`--enable-automation`. If enabling WebMCP as well, combine them in one flag:
+`--enable-features=WebMCP,CDPScreenshotNewSurface`. This configures a new process;
+the harness does not restart an existing browser or change its flags.
+
+The default/explicitly disabled screenshot path reproduced post-drag capture
+stalls in an owned pointer-only fixture. Enabling the feature passed all thirteen
+managed-drag cases, including background screenshots, with unchanged deadlines.
+Chromium's [feature definition](https://github.com/chromium/chromium/blob/158.0.8127.2/content/common/features.cc#L154)
+selects a new LocalSurfaceId instead of waiting for ForceRedraw; the pinned Chrome 158 default is
+disabled. This remains an explicit backend setup requirement for the verified
+Linux configuration. No front-tab activation, screenshot retry, alternate image
+source or increased timeout was added. The installer smoke uses this flag and
+checks installed-runtime drag followed by capture after removing the source.

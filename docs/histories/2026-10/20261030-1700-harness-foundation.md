@@ -2130,3 +2130,48 @@ enabling Page on the screenshot connection also failed. These controls were
 not adopted in production. The retained disposable test checkout and raw failed
 controls support continued screenshot investigation; no browser job remains
 running after the checks.
+
+## Host-owned browser pointer drag
+
+Raw drag previously ran inside the JS worker and lacked host input/focus ownership.
+Moved it into BrowserInputs, reusing origin exclusivity, virtual focus, native
+connection ownership, dialog handling and failed-release retention. Endpoints and
+initial screenshot geometry validate before dispatch. During motion, content-size
+and document-scroll effects are allowed; navigation, coordinate viewport changes
+and viewport revisions stop further moves. Cancellation releases outside through
+a fresh controller, without replaying downs or moves. The initial move now uses
+button none: Chromium ORs the button flag into the supplied buttons mask, which
+previously delivered a held move before down for managed clicks.
+
+The owned Linux no-focus control took about 65 seconds through the movement
+sequence and then timed out on capture; temporary virtual focus and managed
+ownership completed motion promptly. A second independent backend issue remained:
+the default/disabled CDP screenshot path stalled after input. Chromium's explicit
+CDPScreenshotNewSurface feature uses a new LocalSurfaceId instead of ForceRedraw.
+Enabling it passes the controlled headless screenshot/drag cases. The required
+Linux setup is documented; existing processes are not restarted or reconfigured.
+Unsuccessful render-fence, duplicate-focus and release-order experiments were
+removed. No screenshot retry, foreground activation or longer timeout was added.
+
+Added one focused geometry/boundary check and a native receiver-event controller.
+Mac/Linux Chrome 158 each pass thirteen cases across both JS hosts: normal drag,
+content resize, capture, turn/reset/timeout/close, Worker exit, competing input,
+failed release with blocked reuse and cleanup retry. Events verify trusted input,
+unheld movement before the down, balanced release, restored visibility and no
+new presses on cleanup. Installation validation now checks copied-runtime drag
+and capture after source removal, using an owned profile and explicit screenshot
+feature; macOS uses a test keychain. No dependency, CI or registry release is added.
+
+Native inline WebMCP registration, default Linux screenshot engine behavior,
+Windows/headful, broader native HTML drag/drop and overall harness parity remain
+open. Full goal stays active.
+
+Validation completed: macOS passes all 170 Node checks; Linux passes 169 with its
+macOS-only virtual-display skip. Generic browser and held-input controllers pass
+on both platforms. Linux Chrome 159 with the same screenshot feature also passes
+all thirteen drag cases and the generic browser controller. Installed standalone
+MCP, both installed JS hosts and the installed plugin launcher pass real field
+input, drag, post-drag capture and read-only QuickJS evaluation on macOS/Linux
+after source removal. The installer controller now tolerates bounded ENOTEMPTY
+cleanup races from its own Chrome helpers; unrelated configuration and sources
+remain protected by the existing preparation checks.

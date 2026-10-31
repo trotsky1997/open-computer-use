@@ -55,6 +55,7 @@ export class BrowserInputs {
       return;
     }
     if(args?.action==="key") return this.pressKey(owner,args);
+    if(args?.action==="drag") return this.perform(owner,args,validateClick({}));
     if(args?.action!==undefined && args.action!=="click") throw new Error("Unknown browser input action");
     return this.click(owner,args);
   }
@@ -87,6 +88,11 @@ export class BrowserInputs {
     const metrics=await send("Page.getLayoutMetrics",{},0);
     const actual={loaderId,viewport:metrics.cssVisualViewport,contentSize:metrics.cssContentSize,viewportRevision:await this.revision()};
     this.check(record);
+    if(record.dragging) {
+      // Drag handlers may scroll or resize content; the coordinate viewport must stay stable.
+      if(loaderId!==record.geometry.loaderId || actual.viewportRevision!==record.geometry.viewportRevision || !['clientWidth','clientHeight','scale','zoom','offsetX','offsetY'].every(key=>actual.viewport[key]===record.geometry.viewport[key])) throw new Error("Browser drag document or viewport changed");
+      return;
+    }
     if(JSON.stringify(actual)!==JSON.stringify(record.geometry)) throw new Error("Browser input document or geometry changed");
   }
   click(owner,args) {return this.perform(owner,args,validateClick(args.options));}
@@ -102,6 +108,7 @@ export class BrowserInputs {
     if(active.has(endpoint)) throw new Error("A native input action already owns this browser");
     const {x,y}=args.position ?? {},viewport=args.geometry?.viewport;
     if(!keyboard && (![x,y].every(Number.isFinite) || x<0 || y<0 || x>=viewport?.clientWidth || y>=viewport?.clientHeight || !viewport)) throw new Error("Invalid browser input position");
+    if(args.action==='drag' && (![args.end?.x,args.end?.y].every(Number.isFinite) || args.end.x<0 || args.end.y<0 || args.end.x>=viewport.clientWidth || args.end.y>=viewport.clientHeight)) throw new Error("Invalid browser drag destination");
     if(keyboard && (!args.geometry?.loaderId || (args.backendNodeId!==undefined && (!Number.isInteger(args.backendNodeId) || args.backendNodeId<=0)))) throw new Error("Invalid browser key target");
     const record={keyboard,owner,endpoint,targetId:args.targetId,position:{x,y},geometry:args.geometry,keys:[],modifiers:0,abort:new AbortController()};
     active.set(endpoint,record);this.leases.set(endpoint,record);
@@ -127,12 +134,20 @@ export class BrowserInputs {
       for(let count=1;count<=options.count;count++) {
         await this.guard(record);
         const mouse={...record.position,button:options.button,clickCount:count,modifiers:record.modifiers};
-        await send("Input.dispatchMouseEvent",{type:"mouseMoved",...mouse,buttons:0},0);this.check(record);
+        // CDP adds button's flag to buttons, even on a move before the press.
+        await send("Input.dispatchMouseEvent",{type:"mouseMoved",...mouse,button:'none',buttons:0},0);this.check(record);
         record.mouse=mouse;
         await send("Input.dispatchMouseEvent",{type:"mousePressed",...mouse,buttons:{left:1,right:2,middle:4}[options.button]},0);
+        if(args.action==='drag') {
+          record.dragging=true;
+          for(let step=1;step<=12;step++) {
+            await this.guard(record);
+            await send("Input.dispatchMouseEvent",{type:"mouseMoved",...mouse,x:x+(args.end.x-x)*step/12,y:y+(args.end.y-y)*step/12,buttons:1},0);
+          }
+        }
         await this.dwell(record,options.durationMs);
         await this.guard(record);
-        await send("Input.dispatchMouseEvent",{type:"mouseReleased",...mouse,buttons:0},0);record.mouse=undefined;
+        await send("Input.dispatchMouseEvent",{type:"mouseReleased",...mouse,...(args.action==='drag'?args.end:{}),buttons:0},0);record.mouse=undefined;record.dragging=false;
       }
       while(record.keys.length) {
         await this.idle(record);

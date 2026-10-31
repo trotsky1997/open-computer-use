@@ -32,7 +32,7 @@ presses and before normal release. Explicit viewport revisions and screenshot
 crop/DPR mapping remain enforced. Input uses trusted CDP events, with reverse key
 release and no text/editor commands on key-up.
 
-Managed key presses, held clicks and HTML/file drops share a configured-origin input lease.
+Managed pointer drags, key presses, held clicks and HTML/file drops share a configured-origin input lease.
 New raw tab input and locator actions fail while that lease is active; read-only
 observations from existing bindings remain available. The lease coordinates one host process. External
 clients, pre-existing legacy gestures, native-app input and clipboard management
@@ -66,3 +66,32 @@ release-triggered dialogs, cancellation over draggable targets, pointer/drop exc
 failed cleanup with blocked reuse and retry, explicit viewport/cropped-pixel
 coordinates and in-process sessions. Mac headless Chrome evidence is recorded
 in the task history; headful/hardware keyboard state remains unverified.
+
+## Host-owned pointer drag
+
+`await tab.drag(fromPixels, toPixels)` resolves both points against a fresh
+viewport screenshot, then transfers the gesture to BrowserInputs outside the
+Worker. The host validates both endpoints and the initial geometry before input,
+acquires the shared origin pointer lease and virtual focus, and interpolates
+trusted left-button motion. The initial move uses `button: "none"`: Chromium
+adds the button flag to the buttons mask, so `button: "left", buttons: 0` would
+report a held move before the actual press. See the [Chromium dispatch implementation](https://github.com/chromium/chromium/blob/158.0.8127.2/content/browser/devtools/protocol/input_handler.cc#L454).
+
+After the down, drag handlers may change content size or scroll the document.
+Navigation, viewport size/zoom/offset changes and explicit viewport revisions stop
+further motion. Normal release uses the destination. Turn end, reset, timeout,
+close or Worker exit stops remaining moves and uses the existing fresh-controller
+outside release, drag cancellation and focus restoration. Release failures keep
+the input lease and block competing input until cleanup succeeds; no new press
+or motion is replayed. Successful drags restore focus before returning.
+
+```sh
+node scripts/run-drag-smoke.mjs
+```
+
+The controller checks trusted down/move/up events and visibility at the receiver,
+content resizing during motion, post-drag screenshots, turn/reset/timeout/close
+and Worker-exit cleanup, competing input and failed-release retry in both JS hosts.
+macOS and Linux Chrome 158 pass all thirteen cases per platform. Windows/headful,
+external clients and broader HTML native-drag/drop behavior remain unverified.
+Linux's headless screenshot configuration is described in [browser CDP](browser-cdp.md#headless-screenshot-rendering).
