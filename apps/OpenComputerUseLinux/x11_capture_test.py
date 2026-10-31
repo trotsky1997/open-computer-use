@@ -308,5 +308,55 @@ class HeldClickTests(unittest.TestCase):
         self.assertEqual(client.keyboard_state(), {50})
 
 
+class TimedKeyTests(unittest.TestCase):
+    client = ImageTests.client
+
+    def prepared(self):
+        client = self.client()
+        xtest, events, pressed = mock.Mock(), [], set()
+        client.xtest = mock.Mock(return_value=xtest)
+        client.resolve_held_keys = mock.Mock(return_value=([50, 37, 38], 5))
+        client.verify_frame = mock.Mock(return_value=2)
+        client.keyboard_state = lambda: set(pressed)
+        client.pointer = lambda: (99, 900, 500, 5 if pressed else 0)
+        client.require_neutral = mock.Mock()
+        def key(_display, code, down, _delay):
+            events.append((code, down))
+            if down:
+                pressed.add(code)
+            else:
+                pressed.discard(code)
+            return 1
+        xtest.XTestFakeKeyEvent.side_effect = key
+        return client, xtest, events
+
+    def test_zero_duration_chord_releases_without_pointer_events(self):
+        client, xtest, events = self.prepared()
+        client.press_key(42, (0, 0, 400, 300), [1], 0)
+        self.assertEqual(events, [(50, 1), (37, 1), (38, 1), (38, 0), (37, 0), (50, 0)])
+        xtest.XTestFakeMotionEvent.assert_not_called()
+        xtest.XTestFakeButtonEvent.assert_not_called()
+
+    def test_cancellation_and_frame_failure_release_whole_chord(self):
+        import native_cancel as cancel
+        for failure in ('cancel', 'frame'):
+            with self.subTest(failure=failure), mock.patch.object(cancel, '_requested', False):
+                client, xtest, events = self.prepared()
+                if failure == 'frame':
+                    client.verify_frame.side_effect = [2, RuntimeError('frame changed')]
+                with mock.patch.object(capture.time, 'sleep', side_effect=lambda _duration: cancel.handle_signal(None, None)):
+                    with self.assertRaises((RuntimeError, cancel.OperationCancelled)):
+                        client.press_key(42, (0, 0, 400, 300), [1], 100)
+                self.assertEqual(events[-3:], [(38, 0), (37, 0), (50, 0)])
+                xtest.XTestFakeMotionEvent.assert_not_called()
+
+    def test_partial_key_press_failure_releases_only_attempted_keys(self):
+        client, xtest, _events = self.prepared()
+        xtest.XTestFakeKeyEvent.side_effect = [1, 0, 1, 1]
+        with self.assertRaisesRegex(RuntimeError, 'key press failed'):
+            client.press_key(42, (0, 0, 400, 300), [1], 0)
+        self.assertEqual(xtest.XTestFakeKeyEvent.call_args_list, [mock.call(1, 50, 1, 0), mock.call(1, 37, 1, 0), mock.call(1, 37, 0, 0), mock.call(1, 50, 0, 0)])
+
+
 if __name__ == '__main__':
     unittest.main()

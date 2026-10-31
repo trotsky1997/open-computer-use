@@ -703,6 +703,15 @@ def screen_point(window_bounds, element=None, x=None, y=None):
     return window_bounds["x"] + float(x), window_bounds["y"] + float(y)
 
 
+def send_verified_key(app, window, bounds, key, duration):
+    identity = verified_window_identity(app, window, bounds)
+    from x11_capture import press_visible_keys
+    try:
+        press_visible_keys(identity["pid"], bounds, held_keysyms(key), duration)
+    except Exception as exc:
+        raise RuntimeError("Verified timed key failed; inspect before retrying: " + str(exc)) from exc
+
+
 def send_verified_drag(app, window, bounds, from_x, from_y, to_x, to_y):
     identity = verified_window_identity(app, window, bounds)
     start = screen_point(bounds, None, from_x, from_y)
@@ -1072,8 +1081,11 @@ def perform_operation(operation):
             physical(force=True)
             send_text(text)
     elif tool == "press_key":
-        physical()
-        send_key(operation.get("key", ""))
+        if "duration_ms" in operation:
+            send_verified_key(app, window, bounds, operation.get("key"), operation.get("duration_ms"))
+        else:
+            physical()
+            send_key(operation.get("key", ""))
     elif tool == "set_value":
         if element is None:
             raise RuntimeError("unknown element_index")

@@ -578,3 +578,24 @@ Owned processes and private VM files were cleaned up. No dependency or CI added.
 Wider layouts/IME, real window managers/hardware, background/composited/Wayland,
 Linux pressKey duration and Windows held input remain open. Hard interruption
 cannot confirm releases or roll back accepted effects. The full goal stays active.
+
+
+## Linux timed key/chord input
+
+Advertise press_key.duration_ms through the existing JS contract. Reuse held-click
+native mapping and shared reverse-release ownership, verify the focused native
+frame and logical key/modifier/button state without moving the pointer, and stop
+on cancellation/failure. Validate real GTK key timestamps, modifier-only/ordinary
+chords, zero duration, inactive/invalid rejection and reset/close cleanup in both
+REPLs. Retain broader platform/routing requirements under the full active goal.
+
+See [Linux timed keys](../../linux-held-clicks.md#timed-presskey). The full goal remains active.
+
+Validation passed: 145 Node checks, 79 Python checks (55 runtime, 21 X11,
+3 clipboard), 46 Linux Go top-level checks plus 10 subchecks, CLI SIGTERM and
+parent-death probes, and both REPL modes across ten isolated GTK controllers
+(timed keys, held clicks, drag, click, image, paste, text, window, launch and
+cancellation). Owned processes and private VM files were cleaned up. No dependency
+or CI added. Wider layouts/IME, real window managers/hardware, background/
+composited/Wayland and Windows input remain open. Hard interruption can prevent
+confirmed releases; accepted effects remain applied. The full goal stays active.

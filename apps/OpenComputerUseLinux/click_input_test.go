@@ -75,3 +75,36 @@ func TestHeldClickValidationAndBridge(t *testing.T) {
 		t.Fatalf("held request lost options: %s", data)
 	}
 }
+
+func TestHeldKeyValidationAndBridge(t *testing.T) {
+	requestPath := fakePythonResponse(t, `{"ok":true}`)
+	t.Setenv("OPEN_COMPUTER_USE_ACTION_READ_BACK", "0")
+	service := newService()
+	service.rememberSnapshot("Editor", &appSnapshot{App: appDescriptor{Name: "Editor", PID: 42}, ScreenshotOmitted: true})
+	for _, change := range []map[string]any{{"duration_ms": nil}, {"duration_ms": true}, {"duration_ms": -1.0}, {"duration_ms": math.NaN()}, {"duration_ms": math.Inf(1)}, {"duration_ms": 1e30}, {"key_method": "sky_key", "duration_ms": 0.0}} {
+		args := map[string]any{"app": "Editor", "key": "shift+ctrl"}
+		for k, v := range change {
+			args[k] = v
+		}
+		if !service.callTool("press_key", args).IsError {
+			t.Fatalf("invalid held key accepted: %#v", args)
+		}
+	}
+	if _, err := os.Stat(requestPath); !os.IsNotExist(err) {
+		t.Fatal("invalid held input reached bridge")
+	}
+	if result := service.callTool("press_key", map[string]any{"app": "Editor", "key": "ctrl+a", "duration_ms": 60000.0}); result.IsError {
+		t.Fatal(result)
+	}
+	data, err := os.ReadFile(requestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var request linuxRequest
+	if err := json.Unmarshal(data, &request); err != nil {
+		t.Fatal(err)
+	}
+	if request.Tool != "press_key" || request.Key != "ctrl+a" || request.DurationMS == nil || *request.DurationMS != 60000 {
+		t.Fatalf("timed key options lost: %s", data)
+	}
+}

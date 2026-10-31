@@ -387,14 +387,18 @@ func (s *service) callTool(name string, args map[string]any) toolCallResult {
 		}
 		return s.typeText(requiredString(args, "app"), requiredString(args, "text"), keyMethod, index)
 	case "press_key":
-		if _, ok := args["duration_ms"]; ok {
-			return textResult("Held key duration_ms is not supported by this platform", true)
+		var duration *float64
+		if _, present := args["duration_ms"]; present {
+			duration = optionalFloat(args, "duration_ms")
+			if duration == nil || math.IsNaN(*duration) || math.IsInf(*duration, 0) || *duration < 0 {
+				return textResult("duration_ms must be finite non-negative milliseconds", true)
+			}
 		}
 		keyMethod, err := parseKeyMethod(optionalString(args, "key_method"))
 		if err != nil {
 			return textResult(err.Error(), true)
 		}
-		return s.pressKey(requiredString(args, "app"), requiredString(args, "key"), keyMethod)
+		return s.pressKey(requiredString(args, "app"), requiredString(args, "key"), keyMethod, duration)
 	case "set_value":
 		return s.setValue(requiredString(args, "app"), requiredElementIndex(args), requiredString(args, "value"))
 	default:
@@ -623,7 +627,7 @@ func (s *service) typeText(app, text, keyMethod, elementIndex string) toolCallRe
 	return s.actionResult(app, request)
 }
 
-func (s *service) pressKey(app, key, keyMethod string) toolCallResult {
+func (s *service) pressKey(app, key, keyMethod string, duration *float64) toolCallResult {
 	if app == "" {
 		return textResult("Missing required argument: app", true)
 	}
@@ -636,7 +640,7 @@ func (s *service) pressKey(app, key, keyMethod string) toolCallResult {
 	if s.currentSnapshot(app) == nil {
 		return textResult("No app state is available for "+app+". Run get_app_state before action tools.", true)
 	}
-	return s.actionResult(app, linuxRequest{Tool: "press_key", App: app, Key: key})
+	return s.actionResult(app, linuxRequest{Tool: "press_key", App: app, Key: key, DurationMS: duration})
 }
 
 func (s *service) setValue(app, elementIndex, value string) toolCallResult {
@@ -1540,9 +1544,10 @@ func toolDefinitions() []toolDefinition {
 			Description: "Press a key or key-combination on the keyboard, including modifier and navigation keys.\n  - This supports xdotool's `key` syntax.\n  - Examples: \"a\", \"Return\", \"Tab\", \"super+c\", \"Up\", \"KP_0\" (for the numpad 0). This tool is part of plugin `Computer Use`.",
 			Annotations: defaultAnnotations(),
 			InputSchema: objectSchema(map[string]any{
-				"app":        stringProperty("App name or bundle identifier"),
-				"key":        stringProperty("Key or key-combination to press"),
-				"key_method": enumStringProperty("Keyboard delivery: auto (default) or sky_key. sky_key is the macOS SkyLight background-window path and is not supported on Linux.", keyMethodValues),
+				"app":         stringProperty("App name or bundle identifier"),
+				"key":         stringProperty("Key or key-combination to press"),
+				"duration_ms": numberProperty("Finite non-negative milliseconds to hold the whole chord through verified focused visible X11 input. Zero allowed. Auto only."),
+				"key_method":  enumStringProperty("Keyboard delivery: auto (default) or sky_key. sky_key is the macOS SkyLight background-window path and is not supported on Linux.", keyMethodValues),
 			}, []string{"app", "key"}),
 		},
 		{

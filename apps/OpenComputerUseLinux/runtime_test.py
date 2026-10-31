@@ -749,6 +749,17 @@ class HeldKeyParsingTests(unittest.TestCase):
                     runtime.held_keysyms(key)
 
 
+class VerifiedTimedKeyTests(unittest.TestCase):
+    def test_explicit_duration_uses_verified_route_without_legacy_replay(self):
+        runtime = load_runtime()
+        app, window, bounds = object(), object(), {'x': 0, 'y': 0, 'width': 400, 'height': 300}
+        with mock.patch.object(runtime, 'resolve_target', return_value=(app, 0, window)), mock.patch.object(runtime, 'find_element', return_value=None), mock.patch.object(runtime, 'extents', return_value=bounds), mock.patch.object(runtime, 'verified_window_identity', return_value={'pid': 42}), mock.patch.object(runtime, 'held_keysyms', return_value=[50, 37]), mock.patch('x11_capture.press_visible_keys', side_effect=RuntimeError('native failure')) as send, mock.patch.object(runtime, 'send_key') as legacy:
+            with self.assertRaisesRegex(RuntimeError, 'native failure'):
+                runtime.perform_operation({'tool': 'press_key', 'app': 'Editor', 'key': 'shift+ctrl', 'duration_ms': 0, 'skip_read_back': True})
+        send.assert_called_once_with(42, bounds, [50, 37], 0)
+        legacy.assert_not_called()
+
+
 class VerifiedDragTests(unittest.TestCase):
     def test_drag_uses_fresh_identity_and_window_relative_coordinates(self):
         runtime = load_runtime()

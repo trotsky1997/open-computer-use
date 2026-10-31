@@ -138,7 +138,7 @@ The runtime exposes an asynchronous app-bound API:
 - \`await app.getAXStateAndScreenshot(options?)\`
 - Optional observation on macOS, Windows and Linux: \`app.getScreenshot({ includeAX: false })\` skips AX/focus/selection and invalidates prior element indexes; refresh AX before element actions. \`app.getAXState({ includeScreenshot: false })\` skips capture; screenshot-coordinate actions require a fresh screenshot. Omitted options retain full native observation.
 - \`await app.click(elementIndexOrPoint, { mouseButton?, clickCount?, clickMethod?, key?, durationMs? })\`
-- Held key duration requires a backend advertising press_key.duration_ms (currently macOS auto). It holds the whole chord and owns reverse releases on cancellation/shutdown. Unsupported methods/platforms reject before input.
+- Held key duration requires a backend advertising press_key.duration_ms (macOS auto and Linux verified visible X11 auto). It holds the whole chord and owns reverse releases on cancellation/shutdown. Unsupported methods/platforms reject before input.
 - Held click options require a backend advertising key/duration_ms (macOS/Linux). key holds a native key/chord across the sequence; durationMs holds each mouse press. macOS auto uses targeted app_post; Linux auto uses verified visible X11 input and current primary native key mappings. Click counts are 1...3. Unsupported backends and explicit non-event methods throw before input.
 - \`await app.scroll(elementIndex, direction, pages?)\`
 - \`await app.drag([fromX, fromY], [toX, toY])\`

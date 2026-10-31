@@ -1264,3 +1264,31 @@ Owned processes and private VM files were cleaned up. No dependency or CI added.
 Wider layouts/IME, real window managers/hardware, background/composited/Wayland,
 Linux pressKey duration and Windows held input remain open. Hard interruption
 cannot confirm releases or roll back accepted effects. The full goal stays active.
+
+
+## Linux timed pressKey and shared key ownership
+
+Advertised press_key.duration_ms through the existing JS facade. Explicit timed
+keys use verified active exposed local X11 focus, native primary key/modifier
+mapping and logical input-state checks without pointer synthesis. AX-only state
+is sufficient. Modifier-only/ordinary chords, duplicate keys and zero duration
+are supported. Normal AT-SPI key delivery remains the no-duration path. Both
+click and timed keys share one attempted-down registry and reverse-release scope;
+XTest extension setup is shared. Invalid duration/method/timer range fails before
+input. Existing session cancellation and duration-aware native deadlines apply.
+
+Both REPL modes passed real GTK key timing/reverse releases, AX-only operation,
+inactive/occluded/invalid rejection and mid-hold reset/close releases, followed by
+fresh successful input. Targeted checks cover no pointer synthesis, partial-down
+failure, changed frame, cancellation cleanup and no legacy replay after verified
+failure. Wider keymaps/IME, background/composited/Wayland and Windows behavior
+remain open. See [timed keys](../../linux-held-clicks.md#timed-presskey).
+
+Validation passed: 145 Node checks, 79 Python checks (55 runtime, 21 X11,
+3 clipboard), 46 Linux Go top-level checks plus 10 subchecks, CLI SIGTERM and
+parent-death probes, and both REPL modes across ten isolated GTK controllers
+(timed keys, held clicks, drag, click, image, paste, text, window, launch and
+cancellation). Owned processes and private VM files were cleaned up. No dependency
+or CI added. Wider layouts/IME, real window managers/hardware, background/
+composited/Wayland and Windows input remain open. Hard interruption can prevent
+confirmed releases; accepted effects remain applied. The full goal stays active.

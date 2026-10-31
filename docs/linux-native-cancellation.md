@@ -4,7 +4,7 @@ MCP and CLI SIGINT/SIGTERM cancellation reaches every one-shot Python operation.
 The Go service rejects later requests, signals the running child with SIGTERM,
 and waits for it to exit. A child that ignores termination is killed after
 500 ms. The ordinary 30-second operation allowance uses the same cleanup path. Timed
-clicks add their requested total mouse dwell to that allowance.
+clicks and key holds add their requested dwell to that allowance.
 Operation JSON travels over stdin; no temporary operation payload file is written.
 
 Owned runtime children receive a Linux parent-death SIGTERM. The creating Go OS

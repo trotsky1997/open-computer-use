@@ -39,8 +39,10 @@ No synthetic repeat is generated. The native key map defines supported names and
 layout behavior still requires broader verification.
 
 The SDK validates the native key options and checks press_key's duration schema.
-Raw Linux/Windows key calls reject duration_ms before platform work; those
-backends do not advertise it. Their timed key delivery remains open.
+Linux now advertises timed pressKey through the same verified visible X11
+key ownership used for its held clicks; see [Linux held input](linux-held-clicks.md#timed-presskey).
+Raw Windows key calls still reject duration_ms before platform work. Windows
+timed key delivery remains open.
 
 Mouse release and reverse-order key release are registered before each down
 is sent. Release bypasses normal action authorization so cancellation or a

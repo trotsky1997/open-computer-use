@@ -1,4 +1,4 @@
-# Linux held clicks and chords
+# Linux held input
 
 Linux advertises native click `key` and `duration_ms`; the JS facade discovers
 these as `key` and `durationMs`:
@@ -49,9 +49,37 @@ key ownership across double clicks, reverse key releases, zero dwell, invalid
 rejection, mid-hold reset/close and successful fresh global input. Targeted checks
 cover native mapping/keyboard bits, existing-key rejection, cancellation and
 release failure. Other providers, real window managers/hardware, background,
-composited/Wayland input and Linux pressKey duration remain open or unverified.
+composited/Wayland input remain open or unverified.
 
 ```sh
 # Inside an owned D-Bus/Xvfb desktop with AT-SPI enabled:
 node scripts/tests/linux-held-click-js-smoke.mjs ./open-computer-use-linux
+```
+
+
+## Timed pressKey
+
+Linux also advertises press_key.duration_ms / `app.pressKey(key, {durationMs})`.
+Explicit duration holds the whole chord using the same native mapping and
+reverse-release scope as held clicks. Modifier-only chords, duplicate keys and
+zero duration are supported. Auto is the supported method; sky_key fails before
+input. A prior AX-only observation is sufficient. The current route requires the
+selected active exposed local noncomposited X11 frame and confirms its native
+keyboard focus. It reads input state without moving or clicking the pointer.
+
+Native frame, logical held keys and modifier/button state are checked during the
+hold. Focus/frame/input changes stop the hold and trigger reverse releases. The
+operation allowance includes requested dwell. Ordinary pressKey without explicit
+duration retains the existing AT-SPI delivery path. This new verified route does
+not add background, compositor/Wayland or wider keymap/IME support.
+
+Both source and Worker GTK checks cover modifier-only and ordinary-key chords,
+receiver timestamps, reverse releases, duplicate keys, zero duration, AX-only
+use, inactive/occluded/invalid rejection, mid-hold reset/close and successful
+fresh input after reset. The fixture receives no mouse events. Targeted checks
+verify no pointer synthesis, partial-down failure, focus failure, cancellation
+cleanup and no legacy replay after an attempted verified-key failure.
+
+```sh
+node scripts/tests/linux-held-key-js-smoke.mjs ./open-computer-use-linux
 ```

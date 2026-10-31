@@ -1,4 +1,5 @@
 """Verify exposed focused X11 frames for observation and pointer input."""
+from contextlib import contextmanager
 import ctypes as C
 import ctypes.util
 import struct
@@ -267,8 +268,7 @@ class X11:
         if not x <= px < x + width or not y <= py < y + height:
             raise RuntimeError("Pointer point is outside the selected frame")
 
-    def prepare_pointer(self, expected_pid, rectangle, point):
-        px, py = map(int, point)
+    def xtest(self):
         xtest = C.CDLL(ctypes.util.find_library("Xtst") or "libXtst.so.6")
         for name, args in {
             "XTestQueryExtension": [C.c_void_p] + [C.POINTER(C.c_int)] * 4,
@@ -281,6 +281,11 @@ class X11:
         event, error, major, minor = C.c_int(), C.c_int(), C.c_int(), C.c_int()
         if not xtest.XTestQueryExtension(self.display, C.byref(event), C.byref(error), C.byref(major), C.byref(minor)):
             raise RuntimeError("XTest pointer synthesis unavailable")
+        return xtest
+
+    def prepare_pointer(self, expected_pid, rectangle, point):
+        px, py = map(int, point)
+        xtest = self.xtest()
         self.lib.XGrabServer(self.display)
         try:
             deadline = time.monotonic() + 0.25
@@ -349,6 +354,30 @@ class X11:
         if self.error or (child, x, y) != (frame, *point) or state != (modifiers | button_mask) or self.keyboard_state() != set(keys):
             raise RuntimeError("Held click input state changed; inspect before retrying")
 
+    @contextmanager
+    def held_keys(self, xtest, keys):
+        held = []
+        try:
+            for key in keys:
+                with defer_cancellation():
+                    check_cancelled()
+                    held.append(key)
+                    if not xtest.XTestFakeKeyEvent(self.display, key, 1, 0):
+                        raise RuntimeError("Held key press failed; inspect before retrying")
+                    self.lib.XSync(self.display, 0)
+            yield
+        finally:
+            with defer_cancellation():
+                failed = False
+                for key in reversed(held):
+                    try:
+                        failed = not bool(xtest.XTestFakeKeyEvent(self.display, key, 0, 0)) or failed
+                    except Exception:
+                        failed = True
+                self.lib.XSync(self.display, 0)
+                if failed:
+                    raise RuntimeError("Held key release failed; inspect keyboard state before retrying")
+
     def click(self, expected_pid, rectangle, point, button, count, symbols=(), duration=None):
         if button not in ("left", "middle", "right") or type(count) is not int or not 1 <= count <= 3:
             raise RuntimeError("Click requires left/middle/right and count 1..3")
@@ -362,15 +391,7 @@ class X11:
         xtest, frame = self.prepare_pointer(expected_pid, rectangle, point)
         modifiers = (self.pointer()[3] & 0xff) | mask if extended else 0
         code = {"left": 1, "middle": 2, "right": 3}[button]
-        held = []
-        try:
-            for key in keys:
-                with defer_cancellation():
-                    check_cancelled()
-                    held.append(key)
-                    if not xtest.XTestFakeKeyEvent(self.display, key, 1, 0):
-                        raise RuntimeError("Held key press failed; inspect before retrying")
-                    self.lib.XSync(self.display, 0)
+        with self.held_keys(xtest, keys):
             for _ in range(count):
                 if extended:
                     self.check_held_click(expected_pid, rectangle, frame, point, keys, modifiers, 0)
@@ -393,20 +414,36 @@ class X11:
                             if not xtest.XTestFakeButtonEvent(self.display, code, 0, 0):
                                 raise RuntimeError("Button release failed; inspect pointer state before retrying")
                             self.lib.XSync(self.display, 0)
-        finally:
-            with defer_cancellation():
-                failed = False
-                for key in reversed(held):
-                    try:
-                        failed = not bool(xtest.XTestFakeKeyEvent(self.display, key, 0, 0)) or failed
-                    except Exception:
-                        failed = True
-                self.lib.XSync(self.display, 0)
-                if failed:
-                    raise RuntimeError("Held key release failed; inspect keyboard state before retrying")
         self.require_neutral(self.pointer()[3])
         if self.error or (extended and self.keyboard_state()):
             raise RuntimeError("Native click delivery/release failed; inspect before retrying")
+
+    def press_key(self, expected_pid, rectangle, symbols, duration):
+        if type(duration) not in (int, float) or not math.isfinite(duration) or duration < 0 or not symbols:
+            raise RuntimeError("Timed key requires a chord and finite non-negative duration")
+        keys, mask = self.resolve_held_keys(symbols)
+        if self.keyboard_state():
+            raise RuntimeError("A keyboard key is already held")
+        xtest = self.xtest()
+        frame = self.verify_frame(expected_pid, rectangle, time.monotonic() + 0.25)
+        state = self.pointer()[3]
+        self.require_neutral(state)
+        modifiers = (state & 0xff) | mask
+        with self.held_keys(xtest, keys):
+            deadline = time.monotonic() + duration / 1000
+            while True:
+                check_cancelled()
+                if self.verify_frame(expected_pid, rectangle, time.monotonic() + 0.25) != frame:
+                    raise RuntimeError("Timed key frame changed; inspect before retrying")
+                if self.error or self.pointer()[3] != modifiers or self.keyboard_state() != set(keys):
+                    raise RuntimeError("Timed key input state changed; inspect before retrying")
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                time.sleep(min(0.02, remaining))
+        self.require_neutral(self.pointer()[3])
+        if self.error or self.keyboard_state():
+            raise RuntimeError("Native key delivery/release failed; inspect before retrying")
 
     def close(self):
         self.lib.XSync(self.display, 0)
@@ -493,5 +530,14 @@ def drag_visible_window(pid, bounds, start, end):
     client = X11()
     try:
         return client.drag(pid, rectangle, start, end)
+    finally:
+        client.close()
+
+
+def press_visible_keys(pid, bounds, symbols, duration):
+    rectangle = local_rectangle(bounds)
+    client = X11()
+    try:
+        return client.press_key(pid, rectangle, symbols, duration)
     finally:
         client.close()

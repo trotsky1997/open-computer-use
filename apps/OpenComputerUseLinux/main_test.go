@@ -54,7 +54,7 @@ func TestActionWithoutReadBackPreservesObservedSnapshot(t *testing.T) {
 	s := newService()
 	observed := &appSnapshot{App: appDescriptor{Name: "Editor", PID: 42}, Elements: []elementRecord{{Index: 7}}}
 	s.rememberSnapshot("Editor", observed)
-	result := s.pressKey("Editor", "Return", "auto")
+	result := s.pressKey("Editor", "Return", "auto", nil)
 	if result.IsError || len(result.Content) != 1 || result.Content[0].Text != "ok" {
 		t.Fatalf("action result = %#v", result)
 	}
@@ -81,7 +81,7 @@ func TestActionReadBackStillRefreshesSnapshotByDefault(t *testing.T) {
 	requestPath := fakePythonResponse(t, `{"ok":true,"snapshot":{"app":{"name":"Editor","pid":42},"treeLines":["updated"],"screenshotPngBase64":"aW1hZ2U="}}`)
 	s := newService()
 	s.rememberSnapshot("Editor", &appSnapshot{App: appDescriptor{Name: "Editor", PID: 42}})
-	result := s.pressKey("Editor", "Return", "auto")
+	result := s.pressKey("Editor", "Return", "auto", nil)
 	if result.IsError || len(result.Content) != 2 || result.Content[1].Type != "image" {
 		t.Fatalf("default action result = %#v", result)
 	}
@@ -651,7 +651,7 @@ func TestLinuxKeyMethodSchemaAndUnsupportedSkyKey(t *testing.T) {
 	if !result.IsError || result.Content[0].Text != "key_method 'sky_key' is not supported on Linux" {
 		t.Fatalf("type_text sky_key result = %#v", result)
 	}
-	result = service.pressKey("Text Editor", "Return", "sky_key")
+	result = service.pressKey("Text Editor", "Return", "sky_key", nil)
 	if !result.IsError || result.Content[0].Text != "key_method 'sky_key' is not supported on Linux" {
 		t.Fatalf("press_key sky_key result = %#v", result)
 	}
@@ -683,14 +683,5 @@ func TestDoctorJSONRejectsUnsupportedPermissionDiagnostics(t *testing.T) {
 	}
 	if out.Len() != 0 {
 		t.Fatal("unsupported JSON mode must not emit text on stdout")
-	}
-}
-
-func TestHeldKeyDurationFailsBeforePlatformInput(t *testing.T) {
-	for _, value := range []any{float64(0), float64(10), "bad", nil} {
-		result := newService().callTool("press_key", map[string]any{"duration_ms": value})
-		if !result.IsError {
-			t.Fatal("Unsupported held key duration was accepted")
-		}
 	}
 }
