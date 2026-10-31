@@ -12,9 +12,12 @@ const server=createServer((req,res)=>{
  events.push({type:e.type,target:e.target.tagName,id:e.target.id,data:e.data,inputType:e.inputType,visibility:document.visibilityState,x:e.clientX,y:e.clientY,key:e.key,shift:e.shiftKey,ctrl:e.ctrlKey,alt:e.altKey,meta:e.metaKey,buttons:e.buttons,detail:e.detail,scrollY,repeat:e.repeat,trusted:e.isTrusted,time:e.timeStamp});log.textContent=JSON.stringify(events);
  if(e.type==='focusin'&&e.target.id==='typing'&&location.search==='?text-redirect')document.getElementById('other').focus();
  if(e.type==='focusin'&&e.target.id==='typing'&&location.search==='?text-selection')e.target.setSelectionRange(1,3);
+ if(e.type==='keydown'&&e.key==='Shift'&&location.search==='?key-shift-redirect')document.getElementById('other').focus();
+ if(e.type==='keydown'&&e.key==='Shift'&&location.search==='?key-shift-name')document.getElementById('typing').setAttribute('aria-label','Changed typing');
  if(e.type==='beforeinput'&&location.search==='?text-dialog'){history.replaceState({},'',location.pathname);prompt('Text pause');}
  if(e.type==='mousedown' && location.search==='?dialog') {history.replaceState({},'',location.pathname);prompt('Held pause');}
  if(e.type==='keydown' && e.key==='ArrowDown' && location.search==='?key-dialog') {history.replaceState({},'',location.pathname);prompt('Key pause');}
+ if(e.type==='keyup'&&sessionStorage.getItem('navigationEvents'))sessionStorage.setItem('navigationEvents',JSON.stringify(events));
  if(e.type==='keydown' && e.key==='Enter' && location.search==='?key-nav') {sessionStorage.setItem('navigationEvents',JSON.stringify(events));location.href='/?arrived';}
  if(e.type==='keyup' && location.search==='?release-dialog') {history.replaceState({},'',location.pathname);alert('Release pause');}
  });if(location.search==='?text-selection')document.getElementById('typing').value='abcd';</script>`);
@@ -32,6 +35,31 @@ async function events(id){const target=(await(await fetch(new URL('/json/list',e
 async function waitFor(test){const deadline=Date.now()+5000;while(!await test()){assert.ok(Date.now()<deadline,'Input event timeout');await new Promise(resolve=>setTimeout(resolve,10));}}
 async function textState(id){const target=(await(await fetch(new URL('/json/list',endpoint))).json()).find(target=>target.id===id);return withConnection(target.webSocketDebuggerUrl,async send=>(await send('Runtime.evaluate',{expression:"({events:JSON.parse(document.querySelector('output').textContent),value:document.getElementById('typing').value,other:document.getElementById('other').value,visibility:document.visibilityState})",returnByValue:true})).result.value);}
 try{
+ for(const Session of [WorkerJavaScriptSession,PersistentJavaScriptSession])for(const mode of ['redirect','normal','shift-redirect','shift-name','navigation']){
+  const current=new Session({native});let originalOpen;const acknowledgements=[];
+  try{
+   if(mode==='navigation'){originalOpen=current.browserInputs.open;current.browserInputs.open=async(...args)=>{const connection=await originalOpen(...args),send=connection.send;connection.send=async(method,params,...rest)=>{const result=await send(method,params,...rest);if(method==='Input.dispatchKeyEvent')acknowledgements.push(params);return result;};return connection;};}
+   const id=await setup(mode==='redirect'?'?text-redirect':mode==='navigation'?'?key-nav':mode.startsWith('shift-')?'?key-'+mode:'','keytarget',current),baseline=await textState(id);
+   await run(`var ax=await keytarget.getAXState({emit:false});var field=ax.split('\\n').find(line=>line.includes(' textbox \"Typing\"')).match(/^\\[([^\\]]+)\\]/)[1];nodeRepl.write(JSON.stringify(true));`,current);
+   const result=await current.run(`await keytarget.pressKey(field,${JSON.stringify(mode==='navigation'?'shift+Return':mode==='redirect'?'a':'shift+a')});`);
+   if(mode==='navigation')await run(`await keytarget.playwright.waitForURL(${JSON.stringify(url+'?arrived')});nodeRepl.write(JSON.stringify(true));`,current);
+   const final=await textState(id);
+   const refused=!['normal','navigation'].includes(mode),down=final.events.filter(e=>e.type==='keydown'),up=final.events.filter(e=>e.type==='keyup');
+   assert.equal(result.isError,refused,JSON.stringify({content:result.content,final}));
+   if(refused)assert.match(result.content.at(-1).text,/focus|changed/i);
+   assert.equal(final.value,mode==='normal'?'A':'');assert.equal(final.other,'');
+   assert.deepEqual(down.map(e=>e.key),mode==='normal'?['Shift','A']:mode==='navigation'?['Shift','Enter']:mode.startsWith('shift-')?['Shift']:[]);
+   const expectedUp=down.map(e=>e.key).reverse();
+   if(mode==='navigation'){
+    assert.deepEqual(acknowledgements.filter(e=>e.type!=='keyUp').map(e=>e.key),down.map(e=>e.key));
+    assert.deepEqual(acknowledgements.filter(e=>e.type==='keyUp').map(e=>e.key),expectedUp);
+    assert.deepEqual(up.map(e=>e.key),expectedUp.filter(key=>up.some(e=>e.key===key)));
+   }else assert.deepEqual(up.map(e=>e.key),expectedUp);
+   assert.ok(final.events.every(e=>e.trusted));
+   assert.equal(final.visibility,baseline.visibility);assert.equal(current.browserInputs.leases.size,0);assert.equal(current.browserFocusLeases.entries.size,0);
+   console.log(`${Session.name} PASS ${mode} indexed key target, native focus, no unintended primary down and balanced release`);
+  }finally{if(originalOpen)current.browserInputs.open=originalOpen;await current.close();}
+ }
  for(const Session of [WorkerJavaScriptSession,PersistentJavaScriptSession])for(const mode of ['redirect','normal','current','selection','reply','turn','reset','timeout','close',...(Session===WorkerJavaScriptSession?['exit']:[]),'focus-failure']){
   const current=new Session({native});let competitor,originalRelease;
   try{

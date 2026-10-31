@@ -96,6 +96,7 @@ test("pressKey validates duration and releases after an admitted navigation with
  const calls=[],owner={},endpoint='http://held-key-test/';let navigated=false,failed=true;
  const input=new BrowserInputs(()=>endpoint,async()=>({async send(method,args){
    if(method==='Page.getFrameTree') return {frameTree:{frame:{loaderId:navigated?'new':'old'}}};
+   if(method==='Accessibility.getPartialAXTree')return {nodes:[{backendDOMNodeId:7,role:{value:'textbox'},name:{value:'Typing'},properties:[{name:'focused',value:{value:true}}]}]};
    if(method==='DOM.focus') calls.push('focus');
    if(method==='Input.dispatchKeyEvent') {
      calls.push(args.type+':'+args.key);
@@ -105,7 +106,7 @@ test("pressKey validates duration and releases after an admitted navigation with
    return {};
  },close(){}}),()=>0,{async acquire(){return 1;},async release(){calls.push('focus-off');}});
  input.supported=async()=>{};input.target=async()=>({webSocketDebuggerUrl:'page'});
- await assert.rejects(input.request(owner,{action:'key',targetId:'tab',backendNodeId:7,key:'shift+Return',options:{durationMs:1},geometry:{loaderId:'old'}}),/Key release outage/);
+ await assert.rejects(input.request(owner,{action:'key',targetId:'tab',element:{backendNodeId:7,role:'textbox',name:'Typing'},key:'shift+Return',options:{durationMs:1},geometry:{loaderId:'old'}}),/Key release outage/);
  assert.equal(input.leases.size,1);
  assert.throws(()=>input.request({}, {action:'check'}),/already owns/);
  failed=false;await input.cleanup(owner);
@@ -152,29 +153,31 @@ test('AX click preparation owns scrolling and cancellation before any press',asy
 });
 
 
-test('text input binds native AX focus and retains failed cleanup without replay',async()=>{
- for(const mode of ['normal','redirect','navigation','cancel','focus-failure']) {
-  const endpoint='http://text-'+mode+'/',owner={},calls=[];let focused=false,failed=mode==='focus-failure';
+test('keyboard input binds native AX focus and retains failed cleanup without replay',async()=>{
+ for(const action of ['text','key'])for(const mode of ['normal','redirect','navigation','cancel','focus-failure',...(action==='key'?['mid-redirect']:[])]) {
+  const endpoint='http://'+action+'-'+mode+'/',owner={},calls=[];let focused=false,redirected=false,failed=mode==='focus-failure';
   const input=new BrowserInputs(()=>endpoint,async()=>({close(){},async send(method,args){
    calls.push({method,args});
    if(method==='Page.getFrameTree')return {frameTree:{frame:{loaderId:mode==='navigation'&&focused?'new':'old'}}};
-   if(method==='Accessibility.getPartialAXTree')return {nodes:[{backendDOMNodeId:7,role:{value:'textbox'},name:{value:'Typing'},properties:[{name:'focused',value:{value:focused&&mode!=='redirect'}}]}]};
+   if(method==='Accessibility.getPartialAXTree')return {nodes:[{backendDOMNodeId:7,role:{value:'textbox'},name:{value:'Typing'},properties:[{name:'focused',value:{value:focused&&mode!=='redirect'&&!redirected}}]}]};
    if(method==='DOM.focus'){focused=true;if(mode==='cancel')input.cancel(owner);}
+   if(method==='Input.dispatchKeyEvent'&&args.type==='rawKeyDown'&&args.key==='Shift'&&mode==='mid-redirect')redirected=true;
    return {};
   }}),()=>0,{async acquire(){return 5;},async release(){if(failed)throw Error('Focus release outage');}});
   input.supported=async()=>{};input.target=async()=>({webSocketDebuggerUrl:'page'});
   for(const text of [null,1,{}])assert.throws(()=>input.request(owner,{action:'text',text}),/requires text/);
-  assert.throws(()=>input.request(owner,{action:'text',text:'x',backendNodeId:7}),/AX identity/);
-  const args={action:'text',targetId:'tab',text:'中😀',element:{backendNodeId:7,role:'textbox',name:'Typing'},geometry:{loaderId:'old'}};
+  assert.throws(()=>input.request(owner,{action,text:'x',key:'a',backendNodeId:7}),/AX identity/);
+  const args={action,targetId:'tab',text:'中😀',key:'shift+a',element:{backendNodeId:7,role:'textbox',name:'Typing'},geometry:{loaderId:'old'}};
   const work=input.request(owner,args);
-  if(mode==='normal')await work;else await assert.rejects(work,mode==='redirect'?/lost focus/:mode==='navigation'?/document changed/:mode==='cancel'?/canceled/:/Focus release outage/);
+  if(mode==='normal')await work;else await assert.rejects(work,mode.includes('redirect')?/lost focus/:mode==='navigation'?/document changed/:mode==='cancel'?/canceled/:/Focus release outage/);
   if(mode==='focus-failure'){
    assert.equal(input.leases.size,1);assert.throws(()=>input.request({},{action:'check'}),/already owns/);
    failed=false;await input.cleanup(owner);
   }
-  assert.deepEqual(calls.filter(call=>call.method==='Input.insertText').map(call=>call.args.text),mode==='normal'||mode==='focus-failure'?['中😀']:[]);
-  assert.equal(calls.filter(call=>call.method==='DOM.focus').length,1);
-  assert.equal(calls.some(call=>call.method==='Input.dispatchMouseEvent'||call.method==='Input.dispatchKeyEvent'),false);
+  const complete=mode==='normal'||mode==='focus-failure',down=calls.filter(call=>call.method==='Input.dispatchKeyEvent'&&['rawKeyDown','keyDown'].includes(call.args.type)).map(call=>call.args.key),up=calls.filter(call=>call.method==='Input.dispatchKeyEvent'&&call.args.type==='keyUp').map(call=>call.args.key);
+  assert.deepEqual(calls.filter(call=>call.method==='Input.insertText').map(call=>call.args.text),action==='text'&&complete?['中😀']:[]);
+  assert.deepEqual(down,action==='key'?(complete?['Shift','A']:mode==='mid-redirect'?['Shift']:[]):[]);assert.deepEqual(up,[...down].reverse());
+  assert.equal(calls.filter(call=>call.method==='DOM.focus').length,1);assert.equal(calls.some(call=>call.method==='Input.dispatchMouseEvent'),false);
   assert.equal(input.leases.size,0);assert.equal(browserPointerLeases.has(endpoint),false);
  }
 });

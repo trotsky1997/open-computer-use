@@ -365,8 +365,9 @@ ownership and never replay accepted text. Text input requires native insertion
 and AX identity capabilities only when requested.
 
 Raw tab pressKey shares BrowserInputs ownership even without an explicit duration.
-The host focuses validated backend-node IDs after acquiring the origin lease,
-checks the loader before each new down, holds the whole chord and releases in
+The client transfers the observed AX role/name/backend node and loader. Under
+the origin lease, the host validates and focuses that target, then checks its
+identity/native focused state and loader before each new down, holds the whole chord and releases in
 reverse. Key-triggered scroll/navigation is allowed after the last down; key-up
 cleanup does not depend on the original geometry or loader.
 

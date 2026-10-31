@@ -8,8 +8,10 @@ await tab.getAXState();
 
 The raw CDP tab pressKey wrapper accepts durationMs, including for modifier-only
 keys. All pressKey calls use host ownership, even when duration is omitted.
-The optional element index is resolved against fresh AX identity, then focused
-after the host acquires the input lease; null uses the current focus. The entire
+The optional element index carries its observed backend ID, role/name and
+loader. The host validates that AX identity, focuses the target under the input
+lease, then rechecks identity and native focused=true before every new down.
+Null uses the current focus. The entire
 chord stays down for the duration, with one primary down and no synthesized
 auto-repeat. Keys release in reverse order. Navigation or scroll admitted by
 the primary key can complete before release; document changes before another
@@ -201,3 +203,29 @@ Native AX focus checks and insertion remain separate CDP commands. Concurrent
 focus/handler changes after the check, additional editor/IME providers and
 headful/Windows require further work. DOM focus is not restored to its old
 editable element; the virtual page focus lease is restored.
+
+
+## Indexed key target focus
+
+Indexed pressKey and typeText share the same client metadata/loader binding and
+host native AX focus checker. The manager accepts the observed element identity;
+a bare backend ID is rejected. Before each modifier or primary down, a changed
+role/name or redirected focus aborts remaining downs. Already held modifiers
+release in reverse order. A last admitted primary down may scroll or navigate;
+releases continue without requiring the old node/document. No new key down is
+replayed during failed-cleanup retry. Null still means the current focus.
+
+Ten added live cases across both JS hosts cover initial focus redirection,
+normal Shift+A, focus redirection or AX rename during Shift-down, and a
+zero-duration indexed Shift+Enter navigation. The first four cases assert actual
+receiver events/values, including absence of an unintended primary down and
+balanced releases. Navigation records native acknowledgements for exactly the
+expected down/up sequence and verifies the destination and cleanup. Its old/new
+document logs can omit key-up events while the navigation is changing the
+receiver; those logs alone cannot prove DOM delivery across that interval.
+The fixture retains native received key-up entries and requires their order to
+match the acknowledged release order.
+
+A pre-change control on each platform typed into the second input after the
+requested field's focus handler redirected focus. Atomic focus/key dispatch and
+broader widget/headful/platform focus behavior remain open.

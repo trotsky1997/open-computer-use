@@ -603,7 +603,7 @@ Tab input: click(elementIndex, {mouseButton?, clickCount?, key?, durationMs?}), 
 pressKey(elementIndexOrNull, key, {durationMs?}), paste(elementIndexOrNull, text, {format:"text"|"html"}),
 and scroll(elementIndex, direction, pages). Read fresh AX state after actions.
 typeText uses host input ownership and virtual focus. An AX target is revalidated and focused under the lease, then its native AX focused state is checked before insertText; null uses the current focus. Cancellation stops later stages; accepted text is never replayed and may complete after cancellation.
-Every click uses host input ownership and virtual focus, including calls without options, button aliases and multi-clicks. AX clicks revalidate and scroll their observed node under this ownership, then resolve its point in a browser isolated world. Main-document geometry is required. AX identity and the original point hit are rechecked after pointer movement before every down; changes abort without retargeting. pressKey owns actual modifier/primary down and reverse up events, supports modifier-only keys and holds the chord for durationMs without synthesizing repeat. An element index focuses its validated target under the input lease; null uses the current focus. Key-induced navigation/scroll can complete before release. Held click keys/chords stay down across the click sequence; durationMs holds each press (finite, non-negative). Uses host-owned trusted CDP events and virtual focus. Ordinary keys type at the current focus before the click. Managed pointer actions block other raw input/locator actions until release; reset/timeout/close releases held state, and cleanup failure retains ownership for retry. Dialogs can be answered in later calls. Releases may finish already admitted effects.
+Every click uses host input ownership and virtual focus, including calls without options, button aliases and multi-clicks. AX clicks revalidate and scroll their observed node under this ownership, then resolve its point in a browser isolated world. Main-document geometry is required. AX identity and the original point hit are rechecked after pointer movement before every down; changes abort without retargeting. pressKey owns actual modifier/primary down and reverse up events, supports modifier-only keys and holds the chord for durationMs without synthesizing repeat. An element index carries AX identity and the observed loader under the input lease; the host focuses and rechecks that identity and native focused state before every new key down; null uses the current focus. Key-induced navigation/scroll can complete before release. Held click keys/chords stay down across the click sequence; durationMs holds each press (finite, non-negative). Uses host-owned trusted CDP events and virtual focus. Ordinary keys type at the current focus before the click. Managed pointer actions block other raw input/locator actions until release; reset/timeout/close releases held state, and cleanup failure retains ownership for retry. Dialogs can be answered in later calls. Releases may finish already admitted effects.
 Screenshot-only reads invalidate element indices. Navigation invalidates all indices.
 setValue(elementIndex, value) replaces editable text; selectText(elementIndex, text, {prefix?,suffix?,selectionType?}) selects exact text or positions the cursor.
 click and scroll also accept screenshot pixel pairs. drag(fromPixelPair, toPixelPair) performs a host-owned pointer drag with managed cancellation and focus restoration. Scroll/content effects during motion are allowed; navigation or a changed coordinate viewport stops remaining movement. Capture a new screenshot after input; changed document or viewport geometry invalidates coordinates. Pinch zoom is unsupported.
@@ -744,6 +744,19 @@ export function createBrowserApi(activeOutput, environment = process.env, {focus
       try { return await operation(send); }
       finally { capture = undefined; }
     }));
+    function keyboardInput(index,args) {
+      return input(async send => {
+        const observedLoaderId=documentId;
+        let elementTarget;
+        if(index!==null) {
+          const backendNodeId=await element(send,index),node=elements.get(String(index));
+          elementTarget={backendNodeId,role:node.role?.value,name:node.name?.value};
+        }
+        const current=await geometry(send);
+        if(elementTarget && current.loaderId!==observedLoaderId)throw new Error("Page navigated; read AX state again");
+        return requestInput({...args,targetId:target.id,element:elementTarget,geometry:current});
+      });
+    }
     async function geometry(send) {
       const frame = (await send("Page.getFrameTree")).frameTree.frame;
       const metrics = await send("Page.getLayoutMetrics");
@@ -903,17 +916,7 @@ export function createBrowserApi(activeOutput, environment = process.env, {focus
       },
       async typeText(index, text) {
         if (typeof text !== "string") throw new Error("typeText requires text");
-        await input(async send => {
-          const observedLoaderId=documentId;
-          let elementTarget;
-          if(index!==null) {
-            const backendNodeId=await element(send,index),node=elements.get(String(index));
-            elementTarget={backendNodeId,role:node.role?.value,name:node.name?.value};
-          }
-          const current=await geometry(send);
-          if(elementTarget && current.loaderId!==observedLoaderId)throw new Error("Page navigated; read AX state again");
-          return requestInput({action:"text",targetId:target.id,text,element:elementTarget,geometry:current});
-        });
+        await keyboardInput(index,{action:"text",text});
       },
       async paste(index, text, options = {}) {
         if (!options || typeof options !== "object" || Array.isArray(options) || Object.keys(options).some(key => key !== "format") || !["text","html"].includes(options.format ?? "text")) throw new Error("paste format must be text or html");
@@ -926,10 +929,7 @@ export function createBrowserApi(activeOutput, environment = process.env, {focus
       },
       async pressKey(index,key,options={}) {
         validatePressKey(key,options);
-        await input(async send=>{
-          const backendNodeId=index===null ? undefined : await element(send,index);
-          return requestInput({action:"key",targetId:target.id,key,options,backendNodeId,geometry:await geometry(send)});
-        });
+        await keyboardInput(index,{action:"key",key,options});
       },
       async scroll(index, direction, pages = 1) {
         const vectors = {up:[0,-1],down:[0,1],left:[-1,0],right:[1,0],u:[0,-1],d:[0,1],l:[-1,0],r:[1,0]};

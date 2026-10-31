@@ -2362,3 +2362,43 @@ its host AX focus revalidation remains a separate open parity item.
 The client also freezes the observed AX loader and rejects a document change
 while preparing the text request geometry. Final full Node and generic browser
 checks pass on both platforms with this binding in place.
+
+
+## Indexed key AX focus revalidation
+
+The pre-change disposable Chrome control on macOS and arm64 Linux recorded the
+requested key in a second field after the indexed field's focus handler moved
+focus. Indexed pressKey now shares typeText's observed AX metadata and loader
+binding. One client helper prepares both requests. The host checks identity and
+native focused=true before every modifier/primary down, retaining existing
+release and cleanup behavior. Bare backend-node requests are rejected. The
+focused-element helper serves both text and keys; no alternate input path,
+dependency, compatibility fallback or CI was added.
+
+The held-input controller adds 10 cases across both hosts: initial focus redirect,
+normal Shift+A, Shift-induced focus redirect or name change, and zero-duration
+indexed Shift+Enter navigation. Received values/events prove wrong-field
+insertion refusal and no unintended primary down after a modifier. Existing
+native keyboard unit checks now cover both text/keys, cancellation, failed
+focus cleanup without replay and focus changes between chord stages. The
+navigation release-outage unit keeps its targeted-node behavior.
+
+Zero-duration navigation produced incomplete receiver key-up logs. The live
+case keeps that timing and asserts actual native CDP acknowledgements for the
+exact down/up sequence plus the destination and ownership/focus cleanup; any
+received DOM up events must retain the release order. This proves native release
+acceptance, with DOM delivery during receiver replacement still unproven. The
+existing navigation fixture now retains received up events in its same tab
+storage, without treating missing entries as delivery proof or adding a hold.
+
+This supersedes the indexed-key host focus gap recorded above. Atomic target
+fencing and broader widget/headful/platform focus coverage remain open.
+
+
+Validation: macOS Node 26 passes 172/172 tests; arm64 Linux Node 24 passes
+171 with one macOS-only virtual-display skip. Chrome 158 on both platforms
+passes the 10 indexed-key cases, 21 text cases, existing held-input suite,
+53 pointer cases and generic browser controller. Source-removed standalone,
+installed Persistent/Worker and installed MCP launcher browser flows pass.
+Linux retains CDPScreenshotNewSurface. Headful/Windows, broader widget focus,
+atomic dispatch and DOM key-up delivery during navigation remain unverified.
