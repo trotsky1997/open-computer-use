@@ -120,12 +120,31 @@ preparation. The resolved point and geometry are checked before pressing.
 
 Reset and Worker exit during preparation stop later stages, restore focus and
 release ownership without pressing. An already accepted scroll can remain after
-cancellation. Point resolution retains the existing page-world bounding-box and
-hit-test implementation; isolated/native geometry and coordination with external
-CDP clients remain open. Temporary resolved-node handles are released.
+cancellation. Point resolution uses a browser isolated world for its bounding-box and
+hit-test calls, fencing page-world prototype and instance overrides. It requires
+the resolved node to belong to the main document; child-frame transforms, native
+geometry and coordination with external CDP clients remain open. Temporary resolved-node handles are released.
 
-The pointer controller now runs 35 cases per macOS/Linux platform. Five added
+The pointer controller now runs 39 cases per macOS/Linux platform. Five added
 cases use a real offscreen button and pause the host after native scrolling to
 check competing-input rejection, successful completion and reset/Worker-exit
 cancellation before any down. The installed-runtime smoke also clicks an AX
 textbox and verifies typing into its resulting focus after source removal.
+
+
+## Isolated AX point geometry
+
+BrowserInputs creates an isolated world using the verified main frame ID and
+resolves the native backend node into that execution context. The fixed point
+resolver runs there with DOM getters/methods independent of page-world JavaScript.
+Missing isolated-world capability or an invalid context stops the click; there
+is no page-world fallback. Existing lease, viewport and cancellation guards stay
+in place. The temporary resolved-node object is released before input.
+
+Four added real-browser cases overwrite both prototype and instance geometry,
+hit-test and containment methods. An uncovered target still receives the trusted
+click at its actual point; an overlay causes refusal without a down. The same
+fixture under the previous implementation delivered a trusted down to its decoy.
+Installed-runtime flows also use a page whose geometry/hit-test methods throw.
+This verifies isolation from those overrides; arbitrary DOM/layout changes and
+external clients can still race between measurement and input.

@@ -2244,3 +2244,41 @@ platform passes all 35 pointer cases, generic browser/held-input controllers and
 source-removed installer/standalone/Worker/Persistent/MCP browser flows. Linux
 fixtures retain the documented CDPScreenshotNewSurface flag. Windows/headful
 and page-world geometry isolation are not verified by these runs.
+
+
+## Isolated AX point resolution
+
+A real Chrome control on macOS and arm64 Linux reproduced page-world geometry
+spoofing: the observed AX button caused a trusted down at the decoy's position.
+The pointer fixture overwrites prototype/instance bounding-box, hit-test and
+containment methods, preserving real receiver events as the assertion source.
+
+BrowserInputs now creates a native isolated world for the main frame, validates
+its context ID and resolves the backend node into that context. The fixed point
+resolver checks document ownership and uses that world's DOM methods. Required
+native support is checked before preparation; missing/invalid world identity
+fails without a page-world fallback or press. Existing lease/scroll/geometry/
+cancellation guards and resolved-object release are preserved. No dependency,
+parallel input implementation, compatibility fallback or CI was added.
+
+The existing controller adds four hostile-page cases across both JS hosts: the
+uncovered target receives the actual trusted click, and a real overlay refuses
+input despite forged page-world hit-test results. The source-removed installed
+browser flow now runs with throwing page-world geometry/hit-test methods.
+The existing unit test checks context routing and refusal of a missing context.
+
+This supersedes the page-world point-resolution limitation recorded above.
+Child-frame transforms, fully native geometry, arbitrary DOM/layout movement
+between measurement and press, external-client/other-action coordination and
+broader headful/platform coverage remain open.
+
+
+Validation: macOS Node 26 passes 171/171 tests; arm64 Linux Node 24 passes
+170 with the one macOS-only virtual-display skip. Chrome 158 on each platform
+passes all 39 pointer cases, including the four hostile-page cases; generic
+browser and held-input controllers pass. Standalone, installed Persistent/Worker
+sessions and installed MCP launcher browser flows pass after source removal with
+throwing page-world methods. The initial generic regression caught a changed
+error-message assertion; the final message preserves its covered/visibility
+meaning and includes the main-document requirement, and both regressions pass.
+Linux fixtures retain CDPScreenshotNewSurface. Windows/headful remain untested.

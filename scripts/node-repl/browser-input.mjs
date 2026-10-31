@@ -69,8 +69,8 @@ export class BrowserInputs {
     const protocol=await this.json(endpoint,"/json/protocol");
     const required={Input:["dispatchKeyEvent","dispatchMouseEvent","cancelDragging"],Page:["enable","getFrameTree","getLayoutMetrics","handleJavaScriptDialog"],Emulation:["setFocusEmulationEnabled"]};
     if(keyboard) required.DOM=["focus"];
-    if(element) {required.DOM=["scrollIntoViewIfNeeded","resolveNode"];required.Accessibility=["getPartialAXTree"];required.Runtime=["callFunctionOn","releaseObject"];}
-    if(!Object.entries(required).every(([domain,names])=>names.every(name=>protocol.domains?.find(item=>item.domain===domain)?.commands?.some(command=>command.name===name)))) throw new Error("Managed inputs require CDP input, cancellation, dialog and focus support");
+    if(element) {required.Page.push("createIsolatedWorld");required.DOM=["scrollIntoViewIfNeeded","resolveNode"];required.Accessibility=["getPartialAXTree"];required.Runtime=["callFunctionOn","releaseObject"];}
+    if(!Object.entries(required).every(([domain,names])=>names.every(name=>protocol.domains?.find(item=>item.domain===domain)?.commands?.some(command=>command.name===name)))) throw new Error("Managed inputs require CDP input, cancellation, dialog, focus and requested AX isolation support");
   }
   check(record) {if(record.canceled) throw new Error("Browser input canceled");}
   async idle(record) {
@@ -104,15 +104,17 @@ export class BrowserInputs {
     if(!node || node.role?.value!==element.role || node.name?.value!==element.name)throw new Error("Element changed; read AX state again");
     await this.guard(record);
     await send("DOM.scrollIntoViewIfNeeded",{backendNodeId:element.backendNodeId});
-    const loaderId=(await send("Page.getFrameTree")).frameTree.frame.loaderId;
+    const frame=(await send("Page.getFrameTree")).frameTree.frame,loaderId=frame.loaderId;
     const metrics=await send("Page.getLayoutMetrics"),viewportRevision=await this.revision();
     this.check(record);
     if(loaderId!==record.geometry.loaderId || viewportRevision!==record.geometry.viewportRevision || !['clientWidth','clientHeight','scale','zoom','offsetX','offsetY'].every(key=>metrics.cssVisualViewport[key]===record.geometry.viewport[key]))throw new Error("Browser pointer document or viewport changed during preparation");
     record.geometry={loaderId,viewport:metrics.cssVisualViewport,contentSize:metrics.cssContentSize,viewportRevision};
-    const {object}=await send("DOM.resolveNode",{backendNodeId:element.backendNodeId});
+    const {executionContextId}=await send("Page.createIsolatedWorld",{frameId:frame.id,worldName:"ocu-pointer"});
+    if(!Number.isInteger(executionContextId) || executionContextId<=0)throw new Error("Browser pointer isolated world unavailable");
+    const {object}=await send("DOM.resolveNode",{backendNodeId:element.backendNodeId,executionContextId});
     try {
-      // shortcut: page-world geometry is patchable; use isolated/native geometry for hostile-page guarantees.
       const result=await send("Runtime.callFunctionOn",{objectId:object.objectId,returnByValue:true,functionDeclaration:`function() {
+        if(this.ownerDocument!==document)throw new Error("Element outside the main document");
         const r=this.getBoundingClientRect();
         const x=Math.max(0,r.left)+(Math.min(innerWidth,r.right)-Math.max(0,r.left))/2;
         const y=Math.max(0,r.top)+(Math.min(innerHeight,r.bottom)-Math.max(0,r.top))/2;
@@ -120,7 +122,7 @@ export class BrowserInputs {
         if(!this.isConnected || r.width<=0 || r.height<=0 || !(hit===this || this.contains(hit)))throw new Error("Element is covered or not visible");
         return {x,y};
       }`});
-      if(result.exceptionDetails)throw new Error("Element is covered or not visible; read state again");
+      if(result.exceptionDetails)throw new Error("Element is covered or not visible in the main document; read state again");
       const {x,y}=result.result.value ?? {};
       if(![x,y].every(Number.isFinite) || x<0 || y<0 || x>=record.geometry.viewport.clientWidth || y>=record.geometry.viewport.clientHeight)throw new Error("Invalid browser input position");
       record.position={x,y};

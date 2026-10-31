@@ -115,17 +115,18 @@ test("pressKey validates duration and releases after an admitted navigation with
 
 
 test('AX click preparation owns scrolling and cancellation before any press',async()=>{
- for(const mode of ['normal','cancel','changed','navigation']) {
+ for(const mode of ['normal','cancel','changed','navigation','world-missing']) {
   const endpoint='http://prepare-'+mode+'/',owner={},calls=[];let scrolled=false,ready,release;
   const gate=new Promise(resolve=>{release=resolve;}),started=new Promise(resolve=>{ready=resolve;});
   const geometry={loaderId:'old',viewport:{clientWidth:320,clientHeight:240,pageY:0},contentSize:{width:320,height:2000},viewportRevision:0};
   const input=new BrowserInputs(()=>endpoint,async()=>({close(){},async send(method,args){
    calls.push({method,args});
-   if(method==='Page.getFrameTree')return {frameTree:{frame:{loaderId:mode==='navigation'&&scrolled?'new':'old'}}};
+   if(method==='Page.getFrameTree')return {frameTree:{frame:{id:'root',loaderId:mode==='navigation'&&scrolled?'new':'old'}}};
    if(method==='Page.getLayoutMetrics')return {cssVisualViewport:{...geometry.viewport,pageY:scrolled?800:0},cssContentSize:geometry.contentSize};
    if(method==='Accessibility.getPartialAXTree')return {nodes:[{backendDOMNodeId:9,role:{value:'button'},name:{value:mode==='changed'?'Changed':'Target'}}]};
    if(method==='DOM.scrollIntoViewIfNeeded'){scrolled=true;ready();await gate;}
-   if(method==='DOM.resolveNode')return {object:{objectId:'node'}};
+   if(method==='Page.createIsolatedWorld'){assert.deepEqual(args,{frameId:'root',worldName:'ocu-pointer'});return mode==='world-missing'?{}:{executionContextId:17};}
+   if(method==='DOM.resolveNode'){assert.equal(args.executionContextId,17);return {object:{objectId:'node'}};}
    if(method==='Runtime.callFunctionOn')return {result:{value:{x:20,y:30}}};
    return {};
   }}),()=>0);
@@ -139,7 +140,7 @@ test('AX click preparation owns scrolling and cancellation before any press',asy
    assert.throws(()=>input.request({},{action:'check'}),/already owns/);
    if(mode==='cancel')input.cancel(owner);
    release();
-   if(mode==='normal')await work;else await assert.rejects(work,mode==='cancel'?/canceled/:/document|viewport/);
+   if(mode==='normal')await work;else await assert.rejects(work,mode==='cancel'?/canceled/:mode==='world-missing'?/isolated world/:/document|viewport/);
   }
   assert.equal(calls.filter(call=>call.args?.type==='mousePressed').length,mode==='normal'?1:0);
   assert.equal(calls.filter(call=>call.method==='DOM.scrollIntoViewIfNeeded').length,mode==='changed'?0:1);

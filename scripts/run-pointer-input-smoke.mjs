@@ -5,7 +5,9 @@ import {WorkerJavaScriptSession,PersistentJavaScriptSession} from './node-repl/o
 import {withConnection} from './node-repl/browser-cdp.mjs';
 const endpoint=process.env.OPEN_COMPUTER_USE_CDP_URL;if(!endpoint)throw Error('Set OPEN_COMPUTER_USE_CDP_URL to disposable Chrome');
 const server=createServer((req,res)=>{
- res.setHeader('Content-Type','text/html');res.end(`<title>Owned pointer fixture</title><style>body{margin:0;height:2000px}#surface{border:0;position:fixed;left:20px;top:50px;width:320px;height:140px;background:lightblue}output{position:fixed;top:240px;left:0}</style><button id="surface">Pointer surface</button><output></output><script>
+ res.setHeader('Content-Type','text/html');res.end(`<title>Owned pointer fixture</title><style>body{margin:0;height:2000px}#surface{border:0;position:fixed;left:20px;top:50px;width:320px;height:140px;background:lightblue}output{position:fixed;top:240px;left:0}</style><button id="surface">Pointer surface</button><div id="decoy" style="position:fixed;left:370px;top:50px;width:200px;height:140px">Decoy</div><output></output><script>
+ if(['?patched','?covered'].includes(location.search)){const surface=document.querySelector('#surface'),rect=document.querySelector('#decoy').getBoundingClientRect();if(location.search==='?covered'){const cover=document.createElement('div');cover.id='cover';cover.style='position:fixed;left:20px;top:50px;width:320px;height:140px;background:red;z-index:10';document.body.append(cover);}surface.getBoundingClientRect=Element.prototype.getBoundingClientRect=()=>rect;document.elementFromPoint=Document.prototype.elementFromPoint=()=>surface;surface.contains=Node.prototype.contains=()=>true;}
+
  if(location.search==='?offscreen'){document.querySelector('#surface').style.position='absolute';document.querySelector('#surface').style.top='1500px';}const events=[];let held=false;for(const type of ['mousedown','mousemove','mouseup','click','contextmenu','keydown','keyup'])document.addEventListener(type,e=>{if(type==='mousedown')held=true;if(type==='mouseup')held=false;events.push({type,x:e.clientX,y:e.clientY,buttons:e.buttons,button:e.button,detail:e.detail,scrollY,trusted:e.isTrusted,target:e.target.id,visibility:document.visibilityState});document.querySelector('output').textContent=JSON.stringify(events);if(type==='contextmenu')e.preventDefault();if(type==='mousedown'&&location.search==='?effects'){document.body.style.height='4000px';scrollTo(0,400);}if(type==='mousemove'&&held&&e.buttons===1)document.body.style.height='2400px';if(held&&((type==='mousemove'&&e.buttons===1&&location.search==='?modal-drag')||(type==='mousedown'&&location.search==='?modal-click'))){history.replaceState({},'',location.pathname);prompt('Pointer pause');}});globalThis.readFixture=()=>({events,held,visibility:document.visibilityState,width:visualViewport.width,height:document.body.scrollHeight,scrollY});
  </script>`);
 });
@@ -21,6 +23,19 @@ async function setup(session,route=''){
  await run(session,`var from=[${50*scale},${100*scale}],to=[${240*scale},${100*scale}];var ax=await tab.getAXState({emit:false});var index=ax.split('\\n').find(line=>line.includes(' button \"Pointer surface\"')).match(/^\\[([^\\]]+)\\]/)[1];nodeRepl.write(JSON.stringify(true));`);return {id,baseline};
 }
 try{
+ for(const Session of [WorkerJavaScriptSession,PersistentJavaScriptSession])for(const mode of ['patched','covered']){
+  const session=new Session({native});
+  try{
+   const {id,baseline}=await setup(session,'?'+mode),result=await session.run('await tab.click(index);',30000);
+   assert.equal(result.isError,mode==='covered',JSON.stringify(result.content));
+   if(mode==='covered')assert.match(result.content.at(-1).text,/covered|visible/);
+   const final=await state(id),down=final.events.filter(event=>event.type==='mousedown'),clicks=final.events.filter(event=>event.type==='click');
+   assert.equal(down.length,mode==='patched'?1:0);assert.ok(down.every(event=>event.target==='surface'&&event.trusted),JSON.stringify(down));
+   assert.equal(clicks.length,mode==='patched'?1:0);assert.ok(clicks.every(event=>event.target==='surface'&&event.trusted),JSON.stringify(clicks));
+   assert.equal(final.visibility,baseline.visibility);assert.equal(session.browserInputs.leases.size,0);assert.equal(session.browserFocusLeases.entries.size,0);
+   console.log(`${Session.name} PASS ${mode} AX geometry, native receiver target, no page-world spoofing`);
+  }finally{await session.close();}
+ }
  for(const Session of [WorkerJavaScriptSession,PersistentJavaScriptSession])for(const action of ['click','drag'])for(const mode of ['normal',...(action==='click'?['multi','right']:[]),'turn','reset','timeout','close',...(Session===WorkerJavaScriptSession?['exit']:[]),'release-failure']){
   const session=new Session({native});let other,otherId,originalOpen,currentId;
   try{
