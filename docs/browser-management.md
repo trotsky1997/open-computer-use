@@ -54,7 +54,7 @@ restart, including after PID disappearance. No automatic replay, TTL or unlock i
 used. Upgrade all participating hosts and reload the extension (protocol 5).
 
 This protocol covers cooperating same-machine hosts for one OS user. Raw CDP,
-physical users, other machines/filesystem namespaces, managed-browser visibility
+physical users, other machines/filesystem namespaces, external browser visibility
 and arbitrary concurrent page-driven layout changes remain outside it. The final
 fingerprint check narrows external races; it cannot make a Chrome API call atomic
 with unrelated native/browser actors.
@@ -113,3 +113,7 @@ gate lifetime, including delayed async continuations.
 ```sh
 OCU_TEST_CHROME_EXECUTABLE=/absolute/path/to/chrome node scripts/run-browser-cross-host-claims-smoke.mjs
 ```
+
+Managed headful visibility now participates in the same layout gate through the
+managed runtime, with all-window-page claims, native layout revalidation and
+turn-owned completion fencing. See [managed presentation](managed-browser.md#headful-presentation).

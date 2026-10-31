@@ -2884,3 +2884,33 @@ user-tab fixture now ends its ownership turn before the next session claims it.
 The browser-only package build continues to include the updated runtime/extension.
 Raw clients, physical/page-driven races, cross-machine and visibility coordination,
 Windows and native crash takeover remain open. Upgrade/reload older extensions.
+
+
+## Managed visibility shares ownership and completion fencing
+
+Routed managed visibility writes through the shared layout coordinator. All native
+window-bearing page targets must be claimable, and target/window/bounds identity
+is rechecked before mutating. Empty show claims its new blank page under the gate;
+empty hide and internal private-profile startup minimization retain their existing
+behavior. Managed tab creation's implicit visibility calls share these checks.
+
+BrowserRuntime tracks queued/active writes per turn resource owner. Preparation
+cancels before dispatch, accepted native work drains through timeout/reset/close,
+and unknown completion stops the JS owner and keeps the gate. Reset cleanup can
+recover only after the original browser process proof confirms exit. Native CDP
+rejections and pre-dispatch failures remain inspectable/retryable. Added runtime
+cancel/settlement to both core JS session cleanup paths.
+
+The owned Linux source/installed fixture checks same-host and independent-process
+alias claims, unchanged native map/cache on rejection, observation without claims,
+layout revalidation, actual minimization followed by delayed acknowledgement,
+blocked cross-host creation during JS timeout, stopped JS after lost reply, and
+browser-close/reset/new-instance recovery for both hosts. The fault fixture sends
+real native window commands before withholding the host completion signal.
+Existing native GTK clipboard, cookies, hidden/background/visible/empty-window,
+real MCP and host/guardian cleanup remain passing. macOS/Linux browser management,
+dialog/clipboard and installation regressions pass. Node: macOS 204/204; Linux
+203/204 with one macOS-only skip. No dependency, public configuration or CI changes.
+
+Physical desktop/macOS headful, Windows, raw/physical/page-driven actors, external
+visibility, cross-machine coordination and native crash takeover remain open.

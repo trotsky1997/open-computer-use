@@ -66,7 +66,7 @@ async function hostRequest(services,owner,tabOwner,method,params,timeoutMs) {
   let result;
   if(method.startsWith('browser/')&&method!=='browser/tabs'&&typeof params?.targetId==='string'&&!['stop','end','cancel','release'].includes(params.action))await services.browserTabs.request(tabOwner,{action:'claim',targetId:params.targetId});
   if (method === "browser/runtime") {
-    result=await services.browserRuntime.request(params);
+    result=await services.browserRuntime.request(params,{owner,coordinate:operation=>services.browserTabs.manage(tabOwner,operation)});
   } else if (method === "browser/focus") {
     if (params?.action === "acquire") result = await services.browserFocusLeases.acquire(owner, params.targetId);
     else if (params?.action === "release") result = await services.browserFocusLeases.release(owner, params.lease);
@@ -109,7 +109,7 @@ async function hostRequest(services,owner,tabOwner,method,params,timeoutMs) {
 async function releaseResources(services,owner,stopped=Promise.resolve()) {
   services.browserWebMcp.cancel(owner);
   services.browserContent.cancel(owner);
-  services.browserChrome.cancel(owner);
+  services.browserChrome.cancel(owner);services.browserRuntime.cancel(owner);
   services.browserEvaluator.cancel(owner);
   services.browserAssets.cancel(owner);
   services.browserCdp.cancel(owner);
@@ -119,7 +119,7 @@ async function releaseResources(services,owner,stopped=Promise.resolve()) {
   await stopped;await nativeStopped;
   await services.browserDialogs.cleanup(owner);
   await services.browserDrops.cleanup(owner);await services.browserInputs.cleanup(owner);
-  const cleaned=await Promise.allSettled([services.browserWebMcp.cleanup(owner),services.browserContent.cleanup(owner),services.browserChrome.cleanup(owner),services.browserEvaluator.cleanup(owner),services.browserAssets.cleanup(owner),services.browserCdp.cleanup(owner),services.browserFocusLeases.cleanup(owner),services.browserDownloads.cleanup(owner),services.browserLogs.cleanup(owner),services.browserClipboard.cleanup(owner),services.browserViewport.cleanup(owner)]);
+  const cleaned=await Promise.allSettled([services.browserWebMcp.cleanup(owner),services.browserContent.cleanup(owner),services.browserChrome.cleanup(owner),services.browserRuntime.cleanup(owner),services.browserEvaluator.cleanup(owner),services.browserAssets.cleanup(owner),services.browserCdp.cleanup(owner),services.browserFocusLeases.cleanup(owner),services.browserDownloads.cleanup(owner),services.browserLogs.cleanup(owner),services.browserClipboard.cleanup(owner),services.browserViewport.cleanup(owner)]);
   const failed=cleaned.find(result=>result.status==='rejected');if(failed) throw failed.reason;
   BROWSER_FAILURE_HANDLERS.delete(owner);
 }
@@ -1067,7 +1067,7 @@ export class WorkerJavaScriptSession {
         const result=await hostRequest(this,owner,this,message.method,message.params,message.timeoutMs);
         if (this.worker === worker && !this.invalidatedWorkers.has(worker)) worker.postMessage({ type: "native_response", id: message.id, result });
       } catch (error) {
-        if (error?.browserCleanupFailed && ["browser/focus","browser/download","browser/dialog","browser/clipboard","browser/viewport","browser/drop","browser/input"].includes(message.method)) {
+        if (error?.browserCleanupFailed && ["browser/runtime","browser/focus","browser/download","browser/dialog","browser/clipboard","browser/viewport","browser/drop","browser/input"].includes(message.method)) {
           await this.#workerFailed(worker,error);
           return;
         }

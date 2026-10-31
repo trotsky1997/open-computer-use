@@ -33,3 +33,5 @@ WebMCP 发现已覆盖配置浏览器中的未绑定 HTTP(S) 页面及后续创�
 标签页租约已扩展到同机同 OS 用户的独立宿主进程，endpoint 别名共享浏览器实例命名空间。原子发布、匹配代次释放、创建 nonce 和 opener 后代保护已接入；宿主崩溃后继续占有，等待后续原生动作确认恢复。macOS/Linux 双会话的独立进程与安装后夹具通过接管、原页面内容、popup、handoff、竞争和 SIGKILL/reset 验证；Node 为 macOS 197/197、Linux 196/197（一个平台专属跳过）。npm browser-only 制品和双份模块包含检查通过。未占有的已有/空闲子页会跟随外部 opener 保持拦截；跨机器、全局管理、原始客户端、物理用户接管、Windows 和原生崩溃恢复仍待补齐。
 
 原生管理写入已接入同机布局屏障、受影响窗口租约和写入前布局指纹复核；跨进程外部租约冲突不会留下部分新租约或写审计。建页、接管与显式/清理关闭经过屏障，已占用页的观察与输入可继续。macOS/Linux 双会话源码和安装入口通过 tab/group/window 拒绝、独立后台窗口/书签、原生写入超时确认及 SIGKILL/reset 新建页拦截；组织流程、worker 重启/空闲、弹窗、剪贴板、会话选择和 Linux 安装后的 headful/MCP 回归通过。Node 为 macOS 200/200、Linux 199/200（一个平台专属跳过）。扩展协议升级为 5；未知原生完成仍需浏览器重启恢复，visibility、原始/物理/page-driven 协调、跨机器和 Windows 仍待补齐。
+
+托管 headful visibility 已接入同机布局屏障和全窗口页面租约，写入前复核 target/window/bounds；队列准备可取消，已发动作等待确认，未知完成会停止 JS 并持续拦截到原浏览器进程退出。Linux 隔离 Xvfb/Openbox 双会话源码与安装入口通过跨宿主/同宿主拒绝、原生映射/缓存保持、布局变化拒绝、实际最小化后的延迟确认、超时期间建页拦截和丢失回执后的退出/重置/新实例恢复。原有 GTK 剪贴板、cookies、空窗、MCP 和生命周期回归通过；macOS/Linux Node 为 204/204、203/204（一个平台专属跳过）。物理桌面/macOS headful、Windows、外部/原始/物理 actor、跨机器及原生崩溃接管继续待补。

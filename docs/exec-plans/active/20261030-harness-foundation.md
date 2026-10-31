@@ -2211,3 +2211,45 @@ The layout gate covers cooperating current hosts for one same-machine OS user.
 Raw/physical/page-driven actors, other machines, managed-browser visibility,
 Windows evidence and native crash-settlement takeover remain open. The full
 parity goal stays active.
+
+## Managed visibility ownership arbitration
+
+Bring managed headful visibility into the shared layout coordinator. Authorize
+all native window-bearing page targets and recheck layout before a mutation;
+claim the blank page created when showing an empty browser. Preserve startup
+minimization, no-op empty hide, hidden/background creation and state retention.
+Track visibility writes by turn resource owner: cancel queued preparation before
+write, drain accepted writes across reset/timeout/close, and fence unknown native
+completion until browser exit/recovery. Cover same-host and independent-host
+claims, original native map state, delayed acknowledgements, and installed/MCP
+flows in the owned Linux Xvfb/Openbox fixture. Physical desktop/macOS headful and
+Windows remain separate validation gaps in the complete parity goal.
+
+Implemented runtime mutation coordination through BrowserTabs.manage. Window-page
+identities and bounds are enumerated, the entire scope is authorized, and a fresh
+layout is compared before mutation. Empty show authorizes its new blank page under
+the same gate. Startup minimization and read-only visibility remain independent
+of turn-owned mutation resources. Implicit managed creation changes participate.
+
+Runtime owner queues cancel preparation before dispatch and drain once accepted.
+Lost completion marks browser cleanup failed, stops the JS session and retains
+the layout gate; cleanup requires the original process proof to confirm browser
+exit. Definitive CDP rejection and pre-dispatch errors allow inspection/retry.
+The core source/Worker resource cleanup paths now cancel/settle runtime work.
+
+Linux Xvfb/Openbox Chrome 158 source and source-removed installed flows pass in
+both session types: same-host and independent alias-endpoint claims leave native
+window mapping/cache unchanged on refusal; reads remain available; a raw layout
+change fails before write; actual native minimization with held host completion
+survives JS timeout while another host cannot create a page; acknowledgement
+releases the gate; lost acknowledgement stops further JS and remains fenced until
+owned browser close/reset/fresh-instance recovery. Existing cookie/clipboard,
+background/default/visible creation, empty-window, real MCP and guardian/host exit
+checks pass. macOS/Linux organization/dialog/clipboard regressions and headless
+installation checks also pass. Node: macOS 204/204, Linux 203/204 (one macOS-only
+skip). Four focused runtime checks cover ownership controls, queued cancellation,
+accepted drain, native rejection and lost-ack proof-based cleanup.
+
+Physical desktop/macOS headful, Windows, raw/physical/page-driven actors, external
+browser visibility and cross-machine/native crash takeover remain open. The full
+parity goal stays active.

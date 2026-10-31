@@ -76,6 +76,23 @@ and JS resets. Accepted operations serialize at the host and shutdown waits for
 them. Native errors can leave a partial window change: inspect get() and the
 windows before retrying. External CDP browser windows are untouched.
 
+Visibility mutations now pass the shared browser-instance layout gate. They
+claim every native window-bearing page, then re-read target/window IDs and bounds
+before sending a native mutation. A foreign session/host claim or a changed layout
+fails before window/cache changes. Empty show claims its new blank page under the
+same gate; empty hide remains a no-op. get() is an observation and does not claim.
+Implicit visibility changes during managed tab creation use the same checks.
+
+Each turn resource owner tracks its queued/active visibility work. Canceled
+preparation sends no window mutation; once native work starts, timeout/reset/close
+waits for acknowledgement. Definitive CDP rejection can leave partial changes for
+inspection. Unknown native completion retains the layout gate and stops that JS
+session, including its existing handles. Close/restart the owned browser/host
+before resetting; confirmed process exit retires the old uncertainty and a fresh
+browser instance gets a new namespace. No TTL or automatic write replay is used.
+Startup minimization remains internal to the new private profile. Raw/physical
+actors and external/unmanaged browser visibility remain outside this protocol.
+
 This exposes windows for viewing/manual interaction, while the host still owns
 the browser and profile lifetime. User-takeover arbitration and durable delivery
 beyond host exit remain open. Native clipboard/paste use the process virtual clipboard in headless mode and
@@ -138,3 +155,14 @@ shutdown. Source/Worker and installed/MCP Linux checks cover repeated empty-wind
 show/hide, explicit background and omitted visibility creation, ordinary visible
 creation, cookies on a fresh HTTP request and retained clipboard data in the same
 PID/profile. Showing an empty browser opens exactly one blank tab.
+
+Owned Linux source and source-removed installed visibility checks also cover
+same-host and independent alias-endpoint claims with unchanged native map/cache,
+read-only visibility during foreign ownership, injected layout changes before
+write, delayed native acknowledgement through JS timeout, blocked cross-host page
+creation until settlement, stopped sessions after lost acknowledgement, and
+confirmed-browser-exit/reset/new-instance recovery. Both JS session types run the
+same receiver checks alongside GTK clipboard, cookies, empty-window and MCP flows.
+The delayed/lost-ack fixture executes real window commands before withholding the
+host completion signal. Physical desktop/macOS headful and Windows remain
+unverified.

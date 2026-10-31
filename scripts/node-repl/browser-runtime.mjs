@@ -8,7 +8,7 @@ import {browserExitProof} from './browser-process.mjs';
 const gone=pid=>{try{process.kill(pid,0);return false;}catch(error){return error.code==='ESRCH';}};
 
 export class BrowserRuntime {
- constructor(environment=process.env){this.environment=environment;this.epoch=0;}
+ constructor(environment=process.env){this.environment=environment;this.epoch=0;this.owners=new Map();this.closedOwners=new WeakSet();}
  async ensure(){
   const env=this.environment,current=this.current,epoch=this.epoch;
   if(env.OPEN_COMPUTER_USE_CDP_URL&&env.OPEN_COMPUTER_USE_CDP_URL!==current?.endpoint){browserEndpoint(env);return {endpoint:env.OPEN_COMPUTER_USE_CDP_URL,managed:false};}
@@ -71,41 +71,75 @@ export class BrowserRuntime {
   this.beforeExit=()=>{void this.close().catch(error=>{console.error(error.message);process.exitCode=1;});};process.once('beforeExit',this.beforeExit);
   return record.ready;
  }
- request(args={}){
+ request(args={},control){
   if(!args||typeof args!=='object'||Array.isArray(args)||Object.keys(args).some(key=>!['action','visible'].includes(key)))throw Error('Invalid browser runtime request');
   if(!Object.keys(args).length)return this.ensure();
   if(!['getVisibility','setVisibility'].includes(args.action)||(args.action==='getVisibility'&&Object.hasOwn(args,'visible'))||(args.action==='setVisibility'&&typeof args.visible!=='boolean'))throw Error('Invalid browser visibility request');
-  return this.visibility(args);
+  if(args.action==='getVisibility')return this.visibility(args);
+  if(!control?.owner||typeof control.owner!=='object'||typeof control.coordinate!=='function')throw Error('Visibility mutations require an owned shared coordinator');
+  if(this.closedOwners.has(control.owner))throw Error('Browser runtime turn ended');
+  let state=this.owners.get(control.owner);
+  if(!state){state={pending:new Set(),canceled:false};this.owners.set(control.owner,state);}
+  const work=this.visibility(args,state,control.coordinate);state.pending.add(work);work.finally(()=>state.pending.delete(work)).catch(()=>{});return work;
  }
- async visibility(args){
-  const state=await this.ensure(),record=this.current;
-  if(!state.managed||state.headless)throw Error('Visibility requires a managed headful browser');
+ async visibility(args,state,coordinate){
+  const ensured=await this.ensure(),record=this.current;
+  if(!ensured.managed||ensured.headless)throw Error('Visibility requires a managed headful browser');
   const work=(record.visibilityPending??Promise.resolve()).catch(()=>{}).then(async()=>{
-   if(this.current!==record||record.closing||this.environment.OPEN_COMPUTER_USE_CDP_URL!==record.endpoint)throw Error('Managed browser visibility configuration changed');
-   return this.windowVisibility(record,args);
+   let dispatched=false;const check=()=>{
+    if(dispatched)return;
+    if(state?.canceled)throw Error('Browser runtime turn ended before visibility dispatch');
+    if(this.current!==record||record.closing||this.environment.OPEN_COMPUTER_USE_CDP_URL!==record.endpoint)throw Error('Managed browser visibility configuration changed');
+   };
+   check();if(!state)return this.windowVisibility(record,args);
+   return coordinate(async claim=>{
+    check();
+    try{return await this.windowVisibility(record,args,false,async ids=>{check();await claim(ids);check();},()=>{check();dispatched=true;});}
+    catch(error){if(dispatched&&!error.cdpError){state.uncertain={error,record};error.managementUnconfirmed=true;error.browserCleanupFailed=true;}throw error;}
+   });
   });record.visibilityPending=work;return work;
  }
- async windowVisibility(record,args,requireWindow=false){
+ cancel(owner){this.closedOwners.add(owner);const state=this.owners.get(owner);if(state)state.canceled=true;}
+ async cleanup(owner){
+  this.cancel(owner);const state=this.owners.get(owner);if(!state)return;
+  await Promise.allSettled([...state.pending]);
+  if(state.uncertain&&!state.uncertain.record.proof?.browserGone())throw Object.assign(Error('Managed browser visibility completion remains unconfirmed; restart the owned browser before reset'),{browserCleanupFailed:true});
+  this.owners.delete(owner);
+ }
+ async windowVisibility(record,args,requireWindow=false,authorize,dispatch=()=>{}){
    return withConnection(record.socket,async send=>{
-    const {targetInfos}=await send('Target.getTargets',{filter:[{type:'page'}]}),windows=new Map();
-    for(const target of targetInfos){
-     try{const {windowId,bounds}=await send('Browser.getWindowForTarget',{targetId:target.targetId});if(!windows.has(windowId))windows.set(windowId,bounds);}
-     catch(error){if(!error.cdpError)throw error;if(error.message==='No browser window found')continue;const {targetInfos:live}=await send('Target.getTargets',{filter:[{type:'page'}]});if(live.some(info=>info.targetId===target.targetId))throw error;}
+    const layout=async()=>{
+     const {targetInfos}=await send('Target.getTargets',{filter:[{type:'page'}]}),windows=new Map(),targets=[];
+     for(const target of targetInfos){
+      try{const {windowId,bounds}=await send('Browser.getWindowForTarget',{targetId:target.targetId});windows.set(windowId,bounds);targets.push([target.targetId,windowId]);}
+      catch(error){if(!error.cdpError)throw error;if(error.message==='No browser window found')continue;const {targetInfos:live}=await send('Target.getTargets',{filter:[{type:'page'}]});if(live.some(info=>info.targetId===target.targetId))throw error;}
+     }
+     targets.sort(([a],[b])=>a.localeCompare(b));
+     const signature=JSON.stringify([targets,[...windows].sort(([a],[b])=>a-b).map(([id,bounds])=>[id,bounds.windowState,bounds.left,bounds.top,bounds.width,bounds.height])]);
+     return {windows,targets:targets.map(([id])=>id),signature};
+    };
+    let snapshot=await layout(),windows=snapshot.windows;
+    if(args.action==='getVisibility')return [...windows.values()].some(bounds=>bounds.windowState!=='minimized');
+    if(authorize){
+     await authorize(snapshot.targets);const current=await layout();
+     if(current.signature!==snapshot.signature)throw Error('Managed browser layout changed before visibility dispatch; inspect fresh state');
+     windows=current.windows;
     }
     for(const id of record.hiddenWindows.keys())if(!windows.has(id))record.hiddenWindows.delete(id);
-    if(args.action==='getVisibility')return [...windows.values()].some(bounds=>bounds.windowState!=='minimized');
     if(!windows.size){
      if(requireWindow)throw Error('No managed browser windows available; waiting for startup');
      if(!args.visible)return;
-     const {targetId}=await send('Target.createTarget',{url:'about:blank',newWindow:true,background:false});
+     dispatch();const {targetId}=await send('Target.createTarget',{url:'about:blank',newWindow:true,background:false});
+     if(authorize)await authorize([targetId]);
      const {windowId,bounds}=await send('Browser.getWindowForTarget',{targetId});windows.set(windowId,bounds);
     }
+    const mutate=async(method,params)=>{dispatch();return send(method,params);};
     for(const [windowId,bounds] of windows){
-     if(!args.visible){if(bounds.windowState!=='minimized'){record.hiddenWindows.set(windowId,bounds);await send('Browser.setWindowBounds',{windowId,bounds:{windowState:'minimized'}});}}
+     if(!args.visible){if(bounds.windowState!=='minimized'){dispatch();record.hiddenWindows.set(windowId,bounds);await send('Browser.setWindowBounds',{windowId,bounds:{windowState:'minimized'}});}}
      else if(bounds.windowState==='minimized'){
       const previous=record.hiddenWindows.get(windowId);
-      await send('Browser.setWindowBounds',{windowId,bounds:{windowState:'normal'}});
-      if(previous){const {windowState,...rectangle}=previous;await send('Browser.setWindowBounds',{windowId,bounds:rectangle});if(windowState!=='normal')await send('Browser.setWindowBounds',{windowId,bounds:{windowState}});}
+      await mutate('Browser.setWindowBounds',{windowId,bounds:{windowState:'normal'}});
+      if(previous){const {windowState,...rectangle}=previous;await mutate('Browser.setWindowBounds',{windowId,bounds:rectangle});if(windowState!=='normal')await mutate('Browser.setWindowBounds',{windowId,bounds:{windowState}});}
       record.hiddenWindows.delete(windowId);
      }else record.hiddenWindows.delete(windowId);
      const deadline=Date.now()+5000;

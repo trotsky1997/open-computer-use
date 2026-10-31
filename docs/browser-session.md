@@ -77,8 +77,8 @@ browser work may still run. There is no TTL or PID-based reassignment. Browser
 restart creates a new namespace; old temporary records can remain until OS temp
 cleanup. Native crash settlement and takeover recovery remain open.
 
-Different machines/filesystem namespaces, raw CDP clients, managed-browser
-visibility changes and physical user takeover remain outside this
+Different machines/filesystem namespaces, raw CDP clients, external visibility changes
+and physical user takeover remain outside this
 coordinator. Shared lease checks are verified on macOS/Linux; Windows remains
 unverified. These limits remain part of the full parity work.
 
@@ -184,3 +184,8 @@ layout gate, including fingerprint revalidation before audit/dispatch. See
 New claims, native creation and explicit/cleanup closure wait on active layout
 transactions; owned tab observations/input remain usable. Unconfirmed management
 completion keeps the gate through reset/crash until browser restart.
+
+Managed visibility writes also use the layout gate and claim all native
+window-bearing pages before revalidating the layout. Unknown native completion
+stops the calling session and retains fencing until owned-browser exit/recovery.
+See [managed presentation](managed-browser.md#headful-presentation).

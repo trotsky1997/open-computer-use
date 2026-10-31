@@ -686,7 +686,7 @@ completion evidence and close after settlement; failed disconnect retains the
 owner. Headful data belongs to the system/display clipboard and may outlive the
 host. See [clipboard and paste](browser-cdp.md#browser-clipboard-and-native-paste).
 
-BrowserTabs also coordinates host-local user claims. Native MV3 protocol 4 joins
+BrowserTabs also coordinates host-local user claims. Native MV3 protocol 5 joins
 Chrome tab/provider identities, last-access timestamps and group names for
 browser.user.openTabs. Listing is passive; binding and tab-scoped broker requests
 claim in the stable session-owner table. Claimed originals release open at turn
@@ -694,7 +694,7 @@ end/reset, marked originals remain controlled across the idle boundary, and
 created tabs/popups retain their lifecycle. First-seen native targets protect
 preexisting and idle-handoff user pages from retroactive adoption, while snapshot
 seeding resolves native descendant ordering before classifying originals. Failed
-close retains ownership until confirmation. Cross-host/raw-client, browser-wide
+close retains ownership until confirmation. Cross-machine/raw-client and raw browser
 operation arbitration and physical takeover remain open.
 
 The tab coordinator now backs its stable session owners with atomic private
@@ -706,7 +706,7 @@ leases. Missing popup leases check the nearest claimed opener; existing direct
 child leases form their own ownership boundary. Malformed records and foreign
 private-directory ownership fail closed. No dead-PID/TTL reclamation is used;
 accepted native work can outlive a host. Fresh browser identity starts a new
-namespace. Raw clients, cross-machine filesystems, browser-wide management and
+namespace. Raw clients, cross-machine filesystems, external visibility and
 physical takeover remain outside this protocol, and stale temporary records can
 outlive a closed browser until OS cleanup.
 
@@ -726,4 +726,20 @@ creation has no tab scope. The native extension queue continues to serialize aud
 and actual Chrome calls. Pre-dispatch cancellation writes nothing; accepted native
 work drains before gate release. Lost completion retains the gate and requires
 browser-instance recovery. Raw/physical/page-driven actors, other machines and
-managed-browser visibility are still outside the protocol.
+external browser visibility are still outside the protocol.
+
+Managed visibility now enters BrowserTabs.manage through the runtime broker.
+BrowserRuntime validates the managed identity, queues per browser, and tracks
+visibility writes by resource owner. Native window enumeration authorizes all
+window-bearing page targets and rechecks target/window/bounds identity before
+mutating; showing an empty browser authorizes its new blank page under that gate.
+Initial private-profile minimization stays internal to startup.
+
+Resource cleanup cancels queued preparation and drains accepted visibility work.
+Unknown completion marks browser cleanup failed, stops the JS owner and leaves
+the layout gate intact. The original process proof must confirm browser exit
+before owner cleanup can recover; fresh managed startup gets a new namespace.
+Read-only visibility, definitive native rejections and pre-dispatch failures do
+not retain uncertainty. Existing source/Worker cleanup paths include runtime
+cancellation/settlement. Raw/physical/external-browser visibility, cross-machine
+coordination and broader platform evidence remain open.

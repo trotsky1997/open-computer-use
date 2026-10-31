@@ -9,7 +9,8 @@ import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {pathToFileURL,fileURLToPath} from 'node:url';
 import {withConnection} from './node-repl/browser-cdp.mjs';
-const runtime=await import(process.argv[2]?pathToFileURL(path.join(process.argv[2],'scripts/open-computer-use-repl.mjs')).href:'./node-repl/open-computer-use-repl.mjs');
+const runtimeURL=process.argv[2]?pathToFileURL(path.join(process.argv[2],'scripts/open-computer-use-repl.mjs')).href:new URL('./node-repl/open-computer-use-repl.mjs',import.meta.url).href;
+const runtime=await import(runtimeURL);
 if(process.platform!=='linux')throw Error('This owned native-window fixture requires Linux');
 const binary=process.env.OCU_TEST_CHROME_EXECUTABLE;if(!binary)throw Error('Set OCU_TEST_CHROME_EXECUTABLE');
 const scratch=await mkdtemp(path.join(tmpdir(),'ocu-visibility-')),saved={...process.env};let display,wm,server;
@@ -17,6 +18,13 @@ const execute=promisify(execFile),pause=()=>new Promise(resolve=>setTimeout(reso
 async function until(check,label){const deadline=Date.now()+15000;for(;;){if(await check())return;assert.ok(Date.now()<deadline,label);await pause();}}
 async function run(session,code){const result=await session.run(code,30000);assert.equal(result.isError,false,result.content.at(-1)?.text);return JSON.parse(result.content.at(-1).text);}
 async function stop(child){if(child?.pid&&child.exitCode===null&&child.signalCode===null){const exited=once(child,'exit');child.kill('SIGTERM');const timer=setTimeout(()=>child.kill('SIGKILL'),3000);try{await exited;}finally{clearTimeout(timer);}}}
+function foreignHost(Session,endpoint,code){
+ const source=`const runtime=await import(${JSON.stringify(runtimeURL)});const session=new runtime[${JSON.stringify(Session.name)}]({native:{async request(){throw Error('Native unused');}}});const released=new Promise(resolve=>process.on('message',resolve));try{const result=await session.run(${JSON.stringify(code)},30000);process.send({type:'result',result});await released;}finally{await session.close();process.disconnect();}`;
+ const alias=new URL(endpoint);alias.hostname='localhost';const child=spawn(process.execPath,['--input-type=module','-e',source],{env:{...process.env,OPEN_COMPUTER_USE_CDP_URL:alias.href},stdio:['ignore','ignore','pipe','ipc']});let log='',resolve,reject;
+ const result=new Promise((yes,no)=>{resolve=yes;reject=no;});result.catch(()=>{});child.stderr.on('data',value=>{log+=value;});
+ child.on('message',message=>{if(message.type==='result')resolve(message.result);});const exited=once(child,'exit');exited.catch(()=>{});child.once('exit',()=>reject(Error('Foreign host exited: '+log)));child.once('error',reject);
+ return {child,result,async close(){if(child.connected)child.send({type:'release'});await exited;}};
+}
 const gtk="import gi,json,sys;gi.require_version('Gtk','3.0');from gi.repository import Gtk,Gdk;Gtk.init([]);clipboard=Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD);";
 async function nativeText(){return JSON.parse((await execute('/usr/bin/python3',['-c',gtk+'print(json.dumps(clipboard.wait_for_text()))'])).stdout);}
 async function seedClipboard(text){const child=spawn('/usr/bin/python3',['-u','-c',gtk+"clipboard.set_text(sys.argv[1],-1);print('ready',flush=True);Gtk.main()",text],{stdio:['ignore','pipe','inherit']});let ready=false;child.stdout.on('data',()=>{ready=true;});await until(()=>ready,'Native fixture clipboard owner did not start');return child;}
@@ -59,7 +67,6 @@ try{
    const bridges=[...session.browserClipboard.owners.values()].flatMap(state=>[...state.bridges.values()]);assert.equal(bridges.length,1);assert.ok(bridges[0].connection);
    const visibleTabs=await run(session,"var management=await browser.capabilities.get('management');nodeRepl.write(JSON.stringify(await management.tabs.query({}))); ");assert.equal(visibleTabs.some(tab=>tab.url===bridges[0].url),false,'Clipboard helper appeared in the native tab strip');
 
-   const runtimeURL=process.argv[2]?pathToFileURL(path.join(process.argv[2],'scripts/open-computer-use-repl.mjs')).href:new URL('./node-repl/open-computer-use-repl.mjs',import.meta.url).href;
    const rejected=await execute(process.execPath,['--input-type=module','-e',`const runtime=await import(${JSON.stringify(runtimeURL)});const session=new runtime.WorkerJavaScriptSession({native:{async request(){throw Error('Native unused');}}});try{const result=await session.run(${JSON.stringify("var tab=await cua.createBrowserTab('cdp',"+JSON.stringify(url)+",{visible:false});await tab.clipboard.writeText('Rejected external write');")});console.log(JSON.stringify({failed:result.isError,error:result.content.at(-1)?.text}));}finally{await session.close();}`],{env:{...process.env,OPEN_COMPUTER_USE_CDP_URL:owned.endpoint}});
    const refusal=JSON.parse(rejected.stdout);assert.equal(refusal.failed,true);assert.match(refusal.error,/host-owned headful/);assert.equal(await nativeText(),'Headful clipboard 你好 🙂');
 
@@ -75,8 +82,28 @@ try{
    await run(session,"await tab.clipboard.writeText('Clipboard retained across reset');nodeRepl.write(JSON.stringify(true));");
 
    await until(async()=>{const windows=await nativeWindows(owned.pid);return windows.some(window=>window.visible);},'Presentation did not map a native window');
-   await withConnection(owned.socket,send=>send('Target.createTarget',{url:url+'second',newWindow:true}));
+   const second=await withConnection(owned.socket,send=>send('Target.createTarget',{url:url+'second',newWindow:true}));
    await until(async()=>(await nativeWindows(owned.pid)).length===2,'Second native window missing');
+   const before=(await nativeWindows(owned.pid)).sort((a,b)=>a.id.localeCompare(b.id));const cached=[...owned.hiddenWindows];
+   const foreign=foreignHost(Session,owned.endpoint,`var tab=await cua.getTab(${JSON.stringify(second.targetId)});nodeRepl.write(tab.id);`);
+   try{
+    const result=await foreign.result;assert.equal(result.isError,false,result.content.at(-1)?.text);
+    for(const visible of [false,true]){const denied=await session.run(`await visibility.set(${visible});`);assert.equal(denied.isError,true);assert.match(denied.content.at(-1).text,/another session or host/);}
+    assert.deepEqual((await nativeWindows(owned.pid)).sort((a,b)=>a.id.localeCompare(b.id)),before);assert.deepEqual([...owned.hiddenWindows],cached);
+   }finally{await foreign.close();await stop(foreign.child);}
+   const other=new Session({native:{async request(){throw Error('Native unused');}}});
+   try{
+    assert.equal(await run(other,`var browser=await cua.getBrowser({id:'cdp'});var visibility=await browser.capabilities.get('visibility');var tab=await cua.getTab(${JSON.stringify(second.targetId)});nodeRepl.write(JSON.stringify(await visibility.get()));`),true);
+    const denied=await other.run('await visibility.set(false);');assert.equal(denied.isError,true);assert.match(denied.content.at(-1).text,/another session/);
+    assert.deepEqual((await nativeWindows(owned.pid)).sort((a,b)=>a.id.localeCompare(b.id)),before);
+   }finally{await other.close();}
+   const planningBackend=session.browserRuntime.windowVisibility;let changed;
+   session.browserRuntime.windowVisibility=(record,args,required,claim,dispatch)=>planningBackend.call(session.browserRuntime,record,args,required,async ids=>{await claim(ids);changed=await withConnection(owned.socket,send=>send('Target.createTarget',{url:url+'layout-change',newWindow:true,background:true}));},dispatch);
+   try{
+    const failed=await session.run('await visibility.set(false);');assert.equal(failed.isError,true);assert.match(failed.content.at(-1).text,/layout changed/);assert.deepEqual([...owned.hiddenWindows],cached);
+   }finally{session.browserRuntime.windowVisibility=planningBackend;if(changed)await withConnection(owned.socket,send=>send('Target.closeTarget',{targetId:changed.targetId}));}
+   await until(async()=>(await nativeWindows(owned.pid)).length===2,'Layout-change fixture window remained');
+   assert.deepEqual((await nativeWindows(owned.pid)).sort((a,b)=>a.id.localeCompare(b.id)),before);
    await run(session,'await visibility.set(false);nodeRepl.write(JSON.stringify(await visibility.get()));');
    await until(async()=>{const windows=await nativeWindows(owned.pid);return windows.length===2&&windows.every(window=>!window.visible);},'Hide did not minimize both owned windows');
    assert.equal(await run(session,"var rejected=false;try{await visibility.set('true');}catch{rejected=true;}nodeRepl.write(JSON.stringify(rejected));"),true);
@@ -112,7 +139,24 @@ try{
    const presented=await run(session,`var reopened=await cua.createBrowserTab('cdp',${JSON.stringify(url+'reopened')},{visible:true});await reopened.markHandoff();nodeRepl.write(JSON.stringify(await visibility.get()));`);assert.equal(presented,true);assert.equal(session.browserRuntime.current,owned);
    assert.match(await run(session,"nodeRepl.write(JSON.stringify(await reopened.playwright.locator('output').innerText()));"),/window_retained=1/);
    assert.equal(await run(session,'nodeRepl.write(JSON.stringify(await reopened.clipboard.readText()));'),'Clipboard retained across reset');
-   console.log(`${Session.name} PASS owned headful startup, native multi-window presentation/hide, native input/text/HTML/PNG clipboard/paste with GTK interop, reset/turn state, empty-window reopening and retained session cookies`);
+   const backend=session.browserRuntime.windowVisibility;let finish,applied=false,timed,waiting;
+   session.browserRuntime.windowVisibility=async(...args)=>{const value=await backend.apply(session.browserRuntime,args);if(args[1].action==='setVisibility'&&args[1].visible===false){applied=true;await new Promise(resolve=>{finish=resolve;});}return value;};
+   try{
+    let completed=false;timed=session.run('await visibility.set(false);',300).then(result=>{completed=true;return result;});timed.catch(()=>{});
+    await until(()=>applied,'Visibility dispatch did not apply');await until(async()=>(await nativeWindows(owned.pid)).every(window=>!window.visible),'Accepted visibility write did not minimize');
+    waiting=foreignHost(Session,owned.endpoint,`var tab=await cua.createBrowserTab('cdp',${JSON.stringify(url+'waiting')},{visible:false});nodeRepl.write(tab.id);`);let created=false;waiting.result.then(()=>{created=true;}).catch(()=>{});
+    await new Promise(resolve=>setTimeout(resolve,700));assert.equal(completed,false);assert.equal(created,false);
+    finish();const canceled=await timed;assert.equal(canceled.isError,true);assert.match(canceled.content.at(-1).text,/timed out/);assert.equal((await waiting.result).isError,false);
+   }finally{finish?.();session.browserRuntime.windowVisibility=backend;await timed?.catch(()=>{});if(waiting){await waiting.close();await stop(waiting.child);}}
+   await session.reset();assert.equal(await run(session,"var browser=await cua.getBrowser({id:'cdp'});var visibility=await browser.capabilities.get('visibility');await visibility.set(true);nodeRepl.write(JSON.stringify(await visibility.get()));"),true);
+   session.browserRuntime.windowVisibility=async(...args)=>{const value=await backend.apply(session.browserRuntime,args);if(args[1].action==='setVisibility')throw Error('Injected visibility acknowledgement loss');return value;};
+   try{
+    const lost=await session.run('await visibility.set(false);');assert.equal(lost.isError,true);assert.match(lost.content.at(-1).text,/acknowledgement loss/);assert.equal((await session.run('nodeRepl.write(42)')).isError,true);
+    await assert.rejects(session.reset(),/visibility completion remains unconfirmed/);assert.equal(owned.proof.browserGone(),false);
+   }finally{session.browserRuntime.windowVisibility=backend;}
+   await session.browserRuntime.close();assert.equal(owned.proof.browserGone(),true);await session.reset();
+   assert.equal(await run(session,"var browser=await cua.getBrowser({id:'cdp'});var visibility=await browser.capabilities.get('visibility');nodeRepl.write(JSON.stringify(await visibility.get()));"),false);assert.notEqual(session.browserRuntime.current.socket,owned.socket);
+   console.log(`${Session.name} PASS owned headful startup, native multi-window presentation/hide, native input/text/HTML/PNG clipboard/paste with GTK interop, reset/turn state, empty-window reopening, retained session cookies, cross-host visibility claims, stale-layout refusal, timeout drain and lost-ack browser recovery`);
   }finally{try{await session.close();}finally{try{if(Session===runtime.WorkerJavaScriptSession&&owned){owned.child.kill('SIGKILL');await owned.closed;}await session.browserRuntime.close();}finally{await stop(clipboardOwner);}}}
   await assert.rejects(access(owned.profile),/ENOENT/);
  }
