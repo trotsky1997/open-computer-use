@@ -68,3 +68,16 @@ Linux 恢复目标的六次 trial 检查约需 17s，恢复测试显式使用 30
 3s/100ms，产品默认仍为 10s。独立旧版本也在同一 Linux iframe 夹具触发默认超时，
 该延迟与完整 Linux MIME/frame 覆盖继续待补；原始导航、物理/headful drop 和
 Windows 仍待验证。
+
+
+原始 goto/reload/history 已由宿主持有原生连接和导航记录，弹窗等待暂停活动预算，
+响应后恢复剩余时间；支持 timeoutMs，默认 10s，零值仍可被 JS/turn/reset/close
+取消。原生 errorText 在观察动作内回传，beforeunload 的显式取消保持原有语义。
+取消等待 stopLoading、原命令回执和渲染屏障；失败保留所有权并拦截复用，允许重置
+重试或确认原浏览器退出后恢复。复用绑定的动作会恢复主动归属，原进程退出也会
+回收保存的弹窗状态。macOS/Linux 双会话源码及当前代码安装入口通过延迟弹窗、
+历史/重载、延迟原生失败、实际停止后的延迟确认、失败保留重试、无限动作取消、
+跨 turn 异步弹窗、关闭目标及带弹窗退出后的新实例恢复。原有弹窗/popup/发现和
+Linux 安装后的隔离 headful/MCP 回归通过；Node 为 211/211、210/211（一个平台
+专属跳过），npm build/pack 内容匹配源码。其他原始 CDP、导航等待、未识别/远端
+断线恢复、Linux trial 延迟、物理/headful 导航与 Windows 继续待补。

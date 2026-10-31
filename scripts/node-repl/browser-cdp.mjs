@@ -4,6 +4,7 @@ import {BrowserContent} from './browser-content.mjs';
 import {MANAGEMENT_METHODS,MANAGEMENT_DOCUMENTATION,validateManagement} from "./chrome-browser-extension/policy.mjs";
 import {BrowserChrome} from "./browser-chrome.mjs";
 import {BrowserEvaluator} from "./browser-evaluate.mjs";
+import {validateTimeoutOptions} from "./browser-evaluate-dom.mjs";
 import {BrowserAssets,ASSETS_DOCUMENTATION} from "./browser-assets.mjs";
 import {BrowserDebugger,CDP_DOCUMENTATION,cdpCommand,cdpOptions} from "./browser-debugger.mjs";
 import {browserExitProof} from "./browser-process.mjs";
@@ -13,7 +14,7 @@ import { BrowserDownloads } from "./browser-downloads.mjs";
 import { BrowserClipboard } from "./browser-clipboard.mjs";
 import {BrowserDrops} from "./browser-drop.mjs";
 import { BrowserViewport, VIEWPORT_DOCUMENTATION } from "./browser-viewport.mjs";
-import { createPlaywrightApi, waitForBrowserEventReady } from "./browser-playwright.mjs";
+import { createPlaywrightApi, waitForBrowserEventReady, withBrowserActionBudget } from "./browser-playwright.mjs";
 import { format } from "node:util";
 
 export function screenshotPoint(point, image) {
@@ -281,8 +282,9 @@ export class BrowserConsoleLogs {
 }
 
 export class BrowserDialogs {
-  constructor(endpoint = () => browserEndpoint(process.env)?.href) {
+  constructor(endpoint = () => browserEndpoint(process.env)?.href, open = openConnection) {
     this.endpoint = endpoint;
+    this.open = open;
     this.targets = new Map();
     this.owners = new Map();
     this.closedOwners = new WeakSet();
@@ -304,7 +306,7 @@ export class BrowserDialogs {
         if (!response.ok) throw new Error(`Browser discovery failed: HTTP ${response.status}`);
         const {webSocketDebuggerUrl} = await response.json();
         browser.browserId=new URL(webSocketDebuggerUrl).pathname;
-        browser.connection = await openConnection(webSocketDebuggerUrl,event => {
+        browser.connection = await this.open(webSocketDebuggerUrl,event => {
           if (browser.closed) return;
           if (event.sessionId) {
             const entry = this.targets.get(`${endpoint}|${browser.sessions.get(event.sessionId)}`);
@@ -356,6 +358,87 @@ export class BrowserDialogs {
     for(const resolve of watch.changes)resolve(state);watch.changes.clear();
   }
   finished(watch) {watch.done=true;this.changed(watch);watch.finish();}
+  closedDialog(entry) {
+    const dialog=entry.dialog;entry.dialog=undefined;
+    for(const watch of dialog?.watches??[]){watch.dialogs.delete(dialog.id);this.changed(watch);}
+  }
+  async navigate(owner,args) {
+    if(Object.keys(args).some(key=>!["action","id","targetId","method","params","options"].includes(key)))throw new Error("Invalid navigation request");
+    const watch=this.waiters.get(args.id);
+    if(!watch || watch.owner!==owner || watch.entry.targetId!==args.targetId || this.closedOwners.has(owner))throw new Error("Unknown browser navigation watcher");
+    validateTimeoutOptions(args.options===undefined?{}:args.options);
+    const params=args.params===undefined?{}:args.params;
+    if(!params || typeof params!=="object" || Array.isArray(params))throw new Error("Invalid navigation parameters");
+    if(args.method==="Page.navigate") {
+      if(Object.keys(params).some(key=>key!=="url") || typeof params.url!=="string" || !["http:","https:","about:"].includes(new URL(params.url).protocol))throw new Error("Unsupported navigation URL protocol");
+    }else if(args.method==="Page.reload") {
+      if(Object.keys(params).length)throw new Error("Invalid reload parameters");
+    }else if(args.method==="Page.navigateToHistoryEntry") {
+      if(Object.keys(params).some(key=>key!=="entryId") || !Number.isSafeInteger(params.entryId) || params.entryId<0)throw new Error("Invalid navigation history entry");
+    }else throw new Error("Unsupported navigation method");
+    const entry=this.entry(owner,args.targetId);
+    entry.navigations??=new Set();
+    if(entry.navigations.size)throw new Error("A native navigation is already active or requires cleanup");
+    const record={owner,entry,browser:this.browsers.get(entry.endpoint),abort:new AbortController()};
+    entry.navigations.add(record);
+    record.work=(async()=>{
+      try {
+        const response=await fetch(new URL("/json/list",entry.endpoint),{signal:AbortSignal.timeout(TIMEOUT),redirect:"error"});
+        if(!response.ok)throw new Error(`Browser discovery failed: HTTP ${response.status}`);
+        const targets=await response.json();
+        if(!Array.isArray(targets))throw new Error("Invalid browser target list");
+        const target=targets.find(target=>target.type==="page" && target.id===entry.targetId);
+        if(!target)throw new Error("Navigation tab closed or unavailable");
+        (record.signal??record.abort.signal).throwIfAborted();
+        record.connection=await this.open(target.webSocketDebuggerUrl);
+        (record.signal??record.abort.signal).throwIfAborted();
+        record.dispatched=true;
+        try{const result=await record.connection.send(args.method,params,0);record.confirmed=true;return result;}
+        catch(error){record.confirmed=error.cdpError===true;throw error;}
+      }finally{if(!record.dispatched)record.connection?.close();}
+    })();
+    record.work.catch(()=>{});
+    let signal;
+    try {
+      return await withBrowserActionBudget(async options=>{
+        signal=record.signal=options.signal;signal.throwIfAborted();
+        let abort;
+        const canceled=new Promise((_,reject)=>{abort=()=>reject(signal.reason);signal.addEventListener("abort",abort,{once:true});});
+        try {
+          const result=await Promise.race([record.work,canceled]);signal.throwIfAborted();
+          const canceledUnload=watch.dialog?.type==="beforeunload" && watch.dialog.consumed && result?.errorText==="net::ERR_ABORTED";
+          if(result?.errorText && !canceledUnload)throw new Error(result.errorText);
+          return result;
+        }finally{signal.removeEventListener("abort",abort);}
+      },{timeout:args.options?.timeoutMs??TIMEOUT,signal:record.abort.signal},after=>this.request(owner,{action:"changes",id:watch.id,after}));
+    }finally{
+      if(record.dispatched && (signal?.aborted || !record.confirmed))await this.cancelNavigation(record);
+      record.connection?.close();entry.navigations.delete(record);
+    }
+  }
+  cancelNavigation(record) {
+    record.abort.abort(new Error("Browser navigation canceled"));
+    if(record.stopping)return record.stopping;
+    record.stopping=(async()=>{
+      if(!record.dispatched || record.browser?.exitProof?.browserGone()) {
+        record.connection?.close();
+      }else {
+        const connection=record.browser?.connection??record.connection;
+        let gone=false;
+        try{await connection.send("Target.getTargetInfo",{targetId:record.entry.targetId});}
+        catch(error){if(error.cdpError && /No target with given id|No target found/i.test(error.message))gone=true;else throw error;}
+        if(!gone) {
+          await record.connection.send("Page.stopLoading");
+          let timer;
+          try{await Promise.race([record.work.catch(()=>{}),new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error("Navigation receipt remained pending after stopLoading")),TIMEOUT);})]);}
+          finally{clearTimeout(timer);}
+          await record.connection.send("Page.getFrameTree");
+        }
+      }
+      record.connection?.close();record.entry.navigations.delete(record);
+    })().catch(error=>{record.failed=true;record.stopping=undefined;throw Object.assign(new Error("Native navigation cleanup is unconfirmed; retry reset or confirm the original browser has exited",{cause:error}),{browserCleanupFailed:true});});
+    return record.stopping;
+  }
   event(entry, event) {
     if (entry.closed) return;
     if (event.method.startsWith("Page.")) entry.captureReady?.();
@@ -379,10 +462,7 @@ export class BrowserDialogs {
         waiting.opened = true;waiting.dialogs.add(entry.dialog.id);this.changed(waiting);
         waiting.resolve({opened:true});
       }
-    } else if (event.method === "Page.javascriptDialogClosed") {
-      const dialog=entry.dialog;entry.dialog=undefined;
-      for(const watch of dialog?.watches??[]){watch.dialogs.delete(dialog.id);this.changed(watch);}
-    }
+    } else if (event.method === "Page.javascriptDialogClosed") this.closedDialog(entry);
   }
   claim(entry, owner, passive = false) {
     if (passive && !entry.owners.has(owner)) entry.passiveOwners?.add(owner);
@@ -407,7 +487,7 @@ export class BrowserDialogs {
           if (!response.ok) throw new Error(`Browser discovery failed: HTTP ${response.status}`);
           const target = (await response.json()).find(item => item.type === "page" && item.id === targetId);
           if (!target) throw new Error("Tab closed or no longer available");
-          connection = await openConnection(target.webSocketDebuggerUrl,event => {if (entry.connection === connection) this.event(entry,event);}, () => { if (!entry.closed && entry.connection === connection) entry.error = new Error("Browser dialog connection closed; bind the tab again"); });
+          connection = await this.open(target.webSocketDebuggerUrl,event => {if (entry.connection === connection) this.event(entry,event);}, () => { if (!entry.closed && entry.connection === connection) entry.error = new Error("Browser dialog connection closed; bind the tab again"); });
         }
         entry.connection = connection;
         if (entry.closed) { connection.close(); throw new Error("Browser dialog session closed"); }
@@ -427,6 +507,7 @@ export class BrowserDialogs {
     const entry = this.targets.get(`${this.endpoint()}|${targetId}`);
     if (!entry || !entry.owners.has(owner) || entry.closed) throw new Error("Browser dialog capture unavailable; bind the tab again");
     if (entry.error) throw entry.error;
+    if([...entry.navigations??[]].some(record=>record.failed))throw Object.assign(new Error("Native navigation cleanup is unconfirmed; retry reset"),{browserCleanupFailed:true});
     return entry;
   }
   async request(owner, args) {
@@ -438,6 +519,7 @@ export class BrowserDialogs {
     if (args?.action === "observe") return this.observe(owner);
     if (args?.action === "start") return this.start(owner,args.targetId);
     if (args?.action === "stop") return this.stop(owner,args.targetId);
+    if (args?.action === "navigate") return this.navigate(owner,args);
     if (["wait","changes","end"].includes(args?.action)) {
       const watch = this.waiters.get(args.id);
       if (!watch || watch.owner !== owner) throw new Error("Unknown browser action watcher");
@@ -478,8 +560,10 @@ export class BrowserDialogs {
       return;
     }
     if (args.action === "watch") {
+      if(entry.navigations?.size)throw new Error("A native navigation is already active or requires cleanup");
       if (entry.dialog) throw new Error("Resolve the active JavaScript dialog with getJsDialog() first");
       if ([...entry.watches].some(watch => !watch.opened || watch.owner !== owner)) throw new Error("A browser input action is already active for this tab");
+      entry.passiveOwners?.delete(owner);
       const watch = {id:++this.nextId,owner,entry,opened:false,revision:0,dialogs:new Set(),changes:new Set()};
       watch.waiting = new Promise(resolve => {watch.resolve=resolve;});
       watch.finished = new Promise(resolve => {watch.finish=resolve;});
@@ -519,6 +603,7 @@ export class BrowserDialogs {
     const entries = [...(this.owners.get(owner) ?? [])].filter(entry => entry.targetId === targetId);
     for (const entry of entries) {
       if (!entry.passiveOwners?.has(owner)) await entry.ready.catch(() => {});
+      if(this.browsers.get(entry.endpoint)?.exitProof?.browserGone())this.closedDialog(entry);
       const deadline = Date.now() + TIMEOUT;
       try {
         while (entry.dialog && (entry.dialog.owner === owner || (!entry.dialog.owner && entry.owners.size === 1 && !entry.passiveOwners?.has(owner)))) {
@@ -539,7 +624,7 @@ export class BrowserDialogs {
                 gone = !target;
                 if (target) {
                   let connection;
-                  connection = await openConnection(target.webSocketDebuggerUrl,event=>{if (entry.connection === connection) this.event(entry,event);},()=>{
+                  connection = await this.open(target.webSocketDebuggerUrl,event=>{if (entry.connection === connection) this.event(entry,event);},()=>{
                     if (!entry.closed && entry.connection === connection) entry.error = new Error("Browser dialog recovery connection closed");
                   });
                   const previous = entry.connection;
@@ -573,6 +658,7 @@ export class BrowserDialogs {
           }
         }
       } finally { if (entry.cleanupOwner === owner) delete entry.cleanupOwner; }
+      await Promise.all([...(entry.navigations??[])].filter(record=>record.owner===owner).map(record=>this.cancelNavigation(record)));
       if (!this.closedOwners.has(owner)) await Promise.all([...entry.watches].filter(watch => watch.owner === owner).map(watch => watch.finished));
       for (const watch of entry.watches) if (watch.owner === owner) {
         watch.resolve({opened:false});
@@ -627,7 +713,7 @@ export async function withConnection(url, operation) {
 const DOCUMENTATION = `## CDP browser
 Use cua.listTabs(), cua.getTab(id or {url}), and cua.createBrowserTab("cdp", url, {visible?,sessionName?}). browser.tabs exposes list/get/new/selected; new() creates a background blank tab. browser.nameSession(name) labels this logical host session across turns and JS resets. It appears in browser inventory metadata and context output. browser.user.openTabs() lists claimable user tabs with native providerTabId, lastOpened and optional tabGroup; it does not claim them. browser.user.claimTab(id or listing record), getTab and tabs.selected acquire an exclusive same-machine claim. Original user tabs are released open on turn/reset unless marked; created tabs/popups retain their lifecycle. Stale records and competing sessions fail before tab interaction. Independent hosts for one OS user share leases by browser instance; endpoint aliases share ownership. Unclaimed descendants of a foreign claimed opener are also fenced. Crashed hosts keep claims until browser restart; native crash settlement, cross-machine/raw-CDP and physical takeover remain open. Managed visibility changes use the same layout gate and require all window-page claims; unknown native completion stops the session until owned-browser recovery. Native management writes claim affected-window tabs and use a same-machine layout gate with fingerprint revalidation; unknown native completion retains this gate until browser restart. Native user metadata, selected-tab identity and management require the bundled Chrome browser extension, loaded by the user in that CDP browser. A transient hidden bootstrap tab wakes its service worker and closes before requests; turn/reset/close disconnects the worker after accepted writes drain. Selected lookup leaves native tab activation unchanged and remains accurate under focus emulation. This is the CDP provider with an extension browser bridge; full extension transport remains open.
 Tab bindings expose getAXState(), getScreenshot(), getAXStateAndScreenshot(), screenshot(),
-title(), url(), goto(url), back(), forward(), reload(), close(), markDeliverable() and markHandoff().
+title(), url(), goto(url,{timeoutMs?}), back({timeoutMs?}), forward({timeoutMs?}), reload({timeoutMs?}), close(), markDeliverable() and markHandoff(). Raw navigation commands use a host-owned native connection and default 10s active-time budget, paused across known owned dialogs. timeoutMs:0 disables the command deadline while reset/close/turn timeout still cancels. Cancellation waits for stopLoading, the original receipt and a renderer barrier; failed cleanup keeps ownership and stops reuse until reset retries or the original browser exit is confirmed. Native errorText is reported even after a dialog response. A dismissed beforeunload cancels navigation. Command acknowledgement does not wait for page load; inspect state or use navigation waits.
 Created tabs/popups are ephemeral at turn end unless marked. Latest mark wins; both marks clear when the next turn begins, so mark again as needed. User tabs stay open. js_reset retains tab ownership. Session close keeps marked survivors. Observations emit by default;
 pass {emit:false} to suppress output. AX state uses browser accessibility node IDs.
 Tab input: click(elementIndex, {mouseButton?, clickCount?, key?, durationMs?}), typeText(elementIndexOrNull, text),
@@ -718,7 +804,8 @@ export function createBrowserApi(activeOutput, environment = process.env, {runti
     const opened = requestDialog({action:"wait",id});
     const changes=after=>requestDialog({action:'changes',id,after},0);
     let failure;
-    const work = Promise.resolve().then(() => operation(opened,changes)).catch(error=>{
+    const navigate=(method,params,options)=>requestDialog({action:"navigate",id,targetId,method,params,options},0);
+    const work = Promise.resolve().then(() => operation(opened,changes,navigate)).catch(error=>{
       failure=String(error?.message ?? error).slice(0,16_384);
       throw error;
     }).finally(() => requestDialog({action:"end",id,error:failure}));
@@ -780,15 +867,23 @@ export function createBrowserApi(activeOutput, environment = process.env, {runti
   function bind(target) {
     let elements = new Map(), documentId, capture;
     const invalidate = () => { elements.clear(); documentId = undefined; capture = undefined; };
-    const operate = async operation => {
+    const ready = async () => {
       const current = (await targets()).find(item => item.id === target.id);
       if (!current) throw new Error("Tab closed or no longer available");
       await checkDialog(target.id);
       await requestViewport({action:"sync",targetId:target.id});
+      return current;
+    };
+    const operate = async operation => {
+      const current=await ready();
       try { return await withConnection(current.webSocketDebuggerUrl, operation); }
       catch (error) { invalidate(); throw error; }
     };
     const command = (method, params) => operate(send => send(method, params));
+    const navigation=(method,params,options={})=>{
+      validateTimeoutOptions(options);
+      return withDialogAction(target.id,async(_opened,_changes,navigate)=>{await ready();return navigate(method,params,options);});
+    };
     const input = operation => withDialogAction(target.id, () => operate(async send => {
       await requestInput({action:"check"});
       await waitForBrowserEventReady(endpoint().href, target.id);
@@ -1007,28 +1102,29 @@ export function createBrowserApi(activeOutput, environment = process.env, {runti
           if (result.exceptionDetails) throw new Error("Scroll target unavailable; read state again");
         });
       },
-      async goto(url) {
+      async goto(url,options={}) {
+        validateTimeoutOptions(options);
         invalidate();
         const parsed = new URL(url);
         if (!["http:", "https:", "about:"].includes(parsed.protocol)) throw new Error("Unsupported navigation URL protocol");
-        const result = await withDialogAction(target.id, () => command("Page.navigate", { url: parsed.href }));
-        if (result?.errorText) throw new Error(result.errorText);
+        await navigation("Page.navigate",{url:parsed.href},options);
       },
-      async back() { await traverse(-1); },
-      async forward() { await traverse(1); },
-      async reload() { invalidate(); await withDialogAction(target.id, () => command("Page.reload")); },
+      async back(options={}) { await traverse(-1,options); },
+      async forward(options={}) { await traverse(1,options); },
+      async reload(options={}) { validateTimeoutOptions(options);invalidate();await navigation("Page.reload",{},options); },
       async close() {
         await requestTab({action:"close",targetId:target.id});
         await requestDialog({action:"stop",targetId:target.id});
         await requestLogs({action:"stop",targetId:target.id});
       },
     });
-    async function traverse(offset) {
+    async function traverse(offset,options) {
+      validateTimeoutOptions(options);
       invalidate();
       const history = await command("Page.getNavigationHistory");
       const entry = history.entries[history.currentIndex + offset];
       if (!entry) throw new Error("No navigation history entry in that direction");
-      await withDialogAction(target.id, () => command("Page.navigateToHistoryEntry", { entryId: entry.id }));
+      await navigation("Page.navigateToHistoryEntry",{entryId:entry.id},options);
     }
   }
   async function prepare(target) {

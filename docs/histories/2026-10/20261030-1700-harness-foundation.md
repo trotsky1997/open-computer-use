@@ -2996,3 +2996,35 @@ allows 30s while expiry assertions retain 3s/100ms and the product default remai
 same default-10s failure. Broader Linux actionability latency and full MIME/frame
 coverage remain open, alongside raw navigation/wait deadlines, physical/headful
 drop and Windows. Focused deadline checks do not establish that broader matrix.
+
+
+## Raw navigation owns its native deadline and cleanup
+
+Moved goto/reload/history dispatch into the host dialog watcher's scope, with a
+separate native CDP connection and per-tab navigation records. Added timeoutMs
+options with a default 10s active budget and zero-unlimited mode; known owned
+dialogs pause remaining time. The original reproduction failed after an 11s
+beforeunload wait. Native errorText now propagates through the watched action
+and final dialog response, preserving explicit beforeunload cancellation.
+
+Cancellation waits for Page.stopLoading acknowledgement, original command receipt
+and renderer progress. Failed cleanup retains ownership and stops owner reuse;
+reset retries after dismissing owned dialogs. Confirmed target closure or
+original-browser exit retires native records without replay. A proven browser
+exit also clears saved dialogs before cleanup. Reused binding preparation keeps
+claims, viewport synchronization and tool discovery; admitted watches promote
+passive observation so asynchronous dialogs get owner cleanup across turns.
+
+Owned Chrome 158 macOS/Linux both JS hosts pass source and current-runtime
+installed controllers after source relocation: delayed goto/history/reload,
+deferred native error, stalled HTTP deadline, actual native stop with held
+acknowledgement, lost-stop retention/retry, admitted unlimited reset/JS timeout,
+retained-turn asynchronous dialog cleanup, target closure and original browser
+exit with/without a modal followed by fresh-browser recovery. Existing native
+dialog/popup/discovery and Linux installed headful/MCP regressions pass. Node:
+macOS 211/211; Linux 210/211, one platform-only skip. Browser-only build/pack
+checks both production copies. No dependency, release or CI changes.
+
+Other raw CDP/developer-capability and navigation-wait deadlines, unidentified or
+remote transport recovery, Linux actionability latency, physical/headful raw
+navigation and Windows remain unverified.

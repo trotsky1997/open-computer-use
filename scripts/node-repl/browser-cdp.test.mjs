@@ -150,6 +150,7 @@ test('dialog observer cleanup skips native detachment only for a confirmed dead 
  for(const dead of [false,true]){
   const owner={},endpoint='http://dialog-exit/',dialogs=new BrowserDialogs(()=>endpoint);let commands=0,closed=0;
   dialogs.browsers.set(endpoint,{owners:new Set([owner]),pending:new Set(),ready:Promise.resolve(),exitProof:{browserGone:()=>dead},connection:{async send(){commands++;throw Error('Detach reply lost');},close(){closed++;}}});
+  if(dead){const entry={key:endpoint+'|owned',endpoint,targetId:'owned',owners:new Set([owner]),watches:new Set(),ready:Promise.resolve(),dialog:{id:1,owner,type:'alert'},connection:{async send(){commands++;throw Error('Must not contact a replacement browser');},close(){}}};dialogs.targets.set(entry.key,entry);dialogs.owners.set(owner,new Set([entry]));}
   if(dead)await dialogs.cleanup(owner);else await assert.rejects(dialogs.cleanup(owner),/reply lost/);
   assert.equal(commands,dead?0:1);assert.equal(closed,1);assert.equal(dialogs.browsers.size,0);
  }

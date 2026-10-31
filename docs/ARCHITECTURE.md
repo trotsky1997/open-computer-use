@@ -311,8 +311,22 @@ known owned dialogs and resume after each close, using the pinned Playwright
 public AbortSignal. Watcher termination aborts pending work even with timeout=0;
 normal completion settles outstanding polls. IPC lifecycle polls have no request
 deadline, so agent think time does not consume an RPC timeout. Native cleanup
-acknowledgement remains required. Raw CDP/navigation-wait deadlines and
-cross-process observer initialization remain separate work.
+acknowledgement remains required. Raw non-navigation CDP and navigation-wait
+deadlines, plus capture of dialogs predating a different host observer, remain
+separate work.
+Raw goto/reload/history dispatch runs inside the dialog host's watcher, using a
+separate native CDP connection. The command has no transport expiry while its
+active-time budget runs. Native errorText is checked inside the watched operation,
+including after a response; a consumed beforeunload with ERR_ABORTED preserves
+explicit cancellation semantics. Per-entry navigation records stop new input
+while cancellation drains. Cancellation waits for Page.stopLoading, the original
+receipt and Page.getFrameTree; failed acknowledgement retains the record and
+stops owner reuse. Reset dismisses owned dialogs before draining navigation.
+Target closure acknowledged by the original connection, or verified original
+browser-process exit, permits retirement. Unknown live-browser completion stays
+fenced. Admitted actions clear passive status on reused bindings, and confirmed
+browser death clears saved dialog identities without touching replacement state.
+
 New tabs install observers at about:blank before navigating to their requested URL.
 
 BrowserClipboard owns empty loopback control pages, private-origin permissions

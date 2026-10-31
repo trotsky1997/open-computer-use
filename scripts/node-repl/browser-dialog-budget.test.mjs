@@ -7,7 +7,8 @@ const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 test('dialog lifecycle changes are owner-bound and settle on action end',async()=>{
  const endpoint='http://dialog-budget/',owner={},dialogs=new BrowserDialogs(()=>endpoint);
  const entry={key:endpoint+'|one',endpoint,targetId:'one',owners:new Set([owner]),watches:new Set(),dialogWaiters:new Set(),ready:Promise.resolve(),connection:{close(){}}};dialogs.targets.set(entry.key,entry);
- const id=await dialogs.request(owner,{action:'watch',targetId:'one'});
+ entry.passiveOwners=new Set([owner]);
+ const id=await dialogs.request(owner,{action:'watch',targetId:'one'});assert.equal(entry.passiveOwners.has(owner),false);
  assert.deepEqual(await dialogs.request(owner,{action:'changes',id,after:-1}),{revision:0,active:false,done:false});
  await assert.rejects(dialogs.request({},{action:'changes',id,after:-1}),/Unknown browser action/);
  await assert.rejects(dialogs.request(owner,{action:'changes',id,after:2}),/Invalid browser action revision/);
@@ -48,4 +49,14 @@ test('active-time budget cancels native work without a dialog watcher',async()=>
  },{timeout:20}),/Timeout 20ms/);
  const caller=new AbortController();caller.abort(Error('Already canceled'));
  await assert.rejects(withBrowserActionBudget(({signal})=>signal.throwIfAborted(),{timeout:0,signal:caller.signal}),/Already canceled/);
+});
+
+
+test('raw navigation validates its owner, target, command and timeout before dispatch',async()=>{
+ const endpoint='http://navigation-validation/',owner={},dialogs=new BrowserDialogs(()=>endpoint);
+ const entry={key:endpoint+'|one',endpoint,targetId:'one',owners:new Set([owner]),watches:new Set(),dialogWaiters:new Set(),ready:Promise.resolve(),connection:{send(){throw Error('Unexpected dispatch');},close(){}}};dialogs.targets.set(entry.key,entry);
+ const id=await dialogs.request(owner,{action:'watch',targetId:'one'}),args={action:'navigate',id,targetId:'one',method:'Page.navigate',params:{url:'https://example.com/'}};
+ await assert.rejects(dialogs.request({},args),/Unknown browser navigation/);
+ for(const invalid of [{targetId:'other'},{options:null},{params:null},{method:'Runtime.evaluate'},{params:{url:'file:///tmp/owned'}},{params:{url:'https://example.com/',frameId:'foreign'}},{options:{timeoutMs:-1}},{options:{unknown:1}},{method:'Page.reload',params:{ignoreCache:true}},{method:'Page.navigateToHistoryEntry',params:{entryId:-1}},{extra:true}])await assert.rejects(dialogs.request(owner,{...args,...invalid}));
+ assert.equal(entry.navigations,undefined);await dialogs.request(owner,{action:'end',id});await dialogs.cleanup(owner);
 });

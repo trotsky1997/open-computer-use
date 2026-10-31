@@ -120,6 +120,12 @@ if(process.argv[2]==='codex-plugin-config') { (await import('node:fs')).chmodSyn
   await new Promise((resolve,reject)=>{drops.once('error',reject);drops.once('exit',code=>code===0?resolve():reject(Error(dropOutput)));});
   for(const line of dropOutput.split('\n').filter(line=>line.includes('PASS')))console.log(line);
   console.log('PASS installed native drop active-time deadlines after source checkout removal');
+  const navigation=spawn(process.execPath,[path.join(source,'scripts/run-navigation-budget-smoke.mjs'),installed],{env:{...env,OCU_TEST_CHROME_EXECUTABLE:path.resolve(chrome)},stdio:['ignore','pipe','pipe']});let navigationOutput='';
+  navigation.stdout.on('data',chunk=>{navigationOutput+=chunk;});navigation.stderr.on('data',chunk=>{navigationOutput+=chunk;});
+  await new Promise((resolve,reject)=>{navigation.once('error',reject);navigation.once('exit',code=>code===0?resolve():reject(Error(navigationOutput)));});
+  for(const line of navigationOutput.split('\n').filter(line=>line.includes('PASS')))console.log(line);
+  console.log('PASS installed host-owned raw navigation deadlines after source checkout removal');
+
 
 
 

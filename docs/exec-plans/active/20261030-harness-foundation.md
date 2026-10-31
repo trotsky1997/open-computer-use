@@ -2353,3 +2353,38 @@ goto opening a beforeunload dialog, waiting 11s, then dismissing reports
 Page.navigate's deferred errorText check also sits outside its dialog callback;
 that distinct outcome still needs a native reproduction. The complete harness
 parity goal stays active.
+
+
+## Host-owned raw navigation deadlines
+
+The owned Chrome reproduction in both JS hosts reported CDP Page.navigate timeout
+when a beforeunload dialog waited 11s. Goto/reload/history commands now dispatch
+inside the host dialog watcher through a separate native connection. Their 10s
+or explicit timeoutMs budget pauses for known owned dialogs, while timeoutMs=0
+retains JS/turn/reset/close cancellation. Host validation restricts owner/watcher,
+target, methods, parameters and timeout options before dispatch.
+
+Native errorText is checked inside the watched action, including errors after a
+dialog response; explicit beforeunload cancellation preserves ERR_ABORTED
+semantics. Cancellation waits for stopLoading acknowledgement, original receipt
+and renderer progress before releasing the per-tab record. Missing completion
+retains ownership and stops reuse. Reset dismisses owned dialogs first; retries
+and confirmed target/original-browser exit recover without native replay.
+Reused bindings keep claim/viewport/tool discovery checks. Admitted actions
+promote passive observation, and confirmed original-browser death clears saved
+dialog state, including a pending beforeunload, before native cleanup retires.
+
+Chrome 158 macOS/Linux both JS hosts pass source and current-runtime installed
+controllers after source relocation: >10s beforeunload, delayed history/reload,
+controlled deferred native error, stalled HTTP deadline, actual stop with held
+receipt, failed stop retention/retry, admitted timeout=0 reset and JS timeout,
+retained-turn asynchronous dialog cleanup, target-close retirement, original
+browser exit with/without a modal and new-browser recovery. Existing native
+dialog/popup/discovery regressions pass; full Linux installed headful/MCP flows
+also pass. Node: macOS 211/211; Linux 210/211, one macOS-only skip. Browser-only
+build/pack checks the changed production module against both runtime copies.
+
+Other raw CDP/developer-capability and navigation-wait deadlines, unidentified or
+remote lost-transport retirement, sole-callback takeover, Linux trial latency,
+physical/headful navigation and Windows remain open. The full parity goal stays
+active.
