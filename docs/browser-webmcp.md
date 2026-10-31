@@ -219,11 +219,14 @@ for retry; a focused check withholds that callback to verify the fence.
 ## Confirmed local browser exit
 
 A loopback browser can supply local exit evidence through its native command
-line and process snapshot. The host matches its explicit profile's
-DevToolsActivePort port/browser route, verifies that the reported browser PID
-owns that exact listening socket, and matches its loaded executable with the
-native command line. This requires an absolute executable/profile, available
-native command-line metadata and macOS/Linux lsof. Missing or mismatched evidence
+line and process snapshot. The host verifies an existing absolute profile, the
+reported browser PID's actual listening socket and its loaded executable.
+Automatic-port launches also match the profile's DevToolsActivePort port/browser
+route. A single declared fixed debugging port instead requires the matching local
+WebSocket peer/port and supports a missing or stale instance file. Invalid or
+conflicting declarations and listener/executable mismatches remain unverified.
+This requires an absolute executable/profile, available native command-line
+metadata (Chromium --enable-automation) and macOS/Linux lsof. Missing or mismatched evidence
 leaves cancellation unconfirmed. The helper sends only process-status probes.
 
 After connection loss, WebMCP waits within its existing cancellation bound for

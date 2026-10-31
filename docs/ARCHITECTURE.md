@@ -387,8 +387,13 @@ a replacement browser. Cleanup removes private control metadata and skips native
 permission/target/focus commands for that dead process. Managed paste transfers
 the same proof to its input and focus leases, allowing reset after process death.
 A live or unidentified browser retains the completion fence; a changed browser
-route alone never clears it. Local identity requires the explicit profile,
-matching DevToolsActivePort route, actual listener PID and executable. The two
+route alone never clears it. Local identity requires an existing explicit profile,
+actual listener PID and loaded executable. Automatically selected ports also
+require a matching DevToolsActivePort route. A single declared nonzero debugging
+port can instead bind the local WebSocket peer/port to that listener, supporting
+fixed-port launches with a missing or stale instance file. Invalid/conflicting
+port declarations, foreign peers and listener/executable mismatches stay
+unverified. The two
 lsof queries each have a five-second bound after observed one-second timeouts.
 
 Ordinary clicks, drags, pressKey and text insertion also retain the verified
@@ -573,8 +578,11 @@ CLI readiness and npm copy lists include the host module. See [WebMCP](browser-w
 
 
 Local browser exit identity is shared by tab ownership and WebMCP. Native
-command-line/process metadata, the matching DevToolsActivePort instance, socket
-owner PID and loaded executable establish a local snapshot. Tab cleanup may
+command-line/process metadata, socket owner PID and loaded executable establish
+a local snapshot. Automatic ports require the matching DevToolsActivePort
+instance; declared fixed ports require the matching local WebSocket address and
+port. Both modes require an existing explicit profile and command-line access
+(Chromium --enable-automation). Tab cleanup may
 retire metadata after its browser PID exits; accepted WebMCP calls require every
 captured process to exit. Socket loss keeps cancellation unconfirmed while those
 processes live. Endpoint reuse with an unresolved different browser route is

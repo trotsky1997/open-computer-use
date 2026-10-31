@@ -1,11 +1,8 @@
 // Launches and kills only disposable Chrome processes owned by this controller.
 import assert from 'node:assert/strict';
-import {spawn} from 'node:child_process';
-import {once} from 'node:events';
-import {mkdtemp,readFile,rm} from 'node:fs/promises';
 import {createServer} from 'node:http';
-import {tmpdir} from 'node:os';
 import path from 'node:path';
+import {startOwnedChrome} from './tests/owned-chrome.mjs';
 import {WorkerJavaScriptSession,PersistentJavaScriptSession} from './node-repl/open-computer-use-repl.mjs';
 const configuredExecutable=process.env.OCU_TEST_CHROME_EXECUTABLE;if(!configuredExecutable)throw Error('Set OCU_TEST_CHROME_EXECUTABLE to Chrome 158+');const executable=path.resolve(configuredExecutable);
 const savedEndpoint=process.env.OPEN_COMPUTER_USE_CDP_URL;
@@ -13,14 +10,7 @@ const server=createServer((req,res)=>{res.setHeader('Content-Type','text/html');
 await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));const url=`http://127.0.0.1:${server.address().port}/`;
 const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 async function until(check,label){const deadline=Date.now()+5000;while(!await check()){assert.ok(Date.now()<deadline,label);await delay(20);}}
-async function start(){
- const profile=await mkdtemp(path.join(tmpdir(),'ocu-browser-exit-'));
- const child=spawn(executable,['--headless=new','--enable-automation','--no-first-run','--no-default-browser-check','--disable-background-networking','--disable-component-update','--disable-sync','--enable-features=WebMCP','--remote-debugging-address=127.0.0.1','--remote-debugging-port=0',`--user-data-dir=${profile}`,...(process.platform==='darwin'?['--use-mock-keychain']:process.platform==='linux'?['--no-sandbox']:[]),'about:blank'],{stdio:['ignore','ignore','inherit']});
- const exited=once(child,'exit');let port;
- try{await until(async()=>{if(child.exitCode!==null||child.signalCode!==null)throw Error('Owned Chrome exited during startup');try{port=(await readFile(path.join(profile,'DevToolsActivePort'),'utf8')).split('\n')[0];return !!port;}catch{return false;}},'Owned Chrome startup timed out');}
- catch(error){child.kill('SIGKILL');await exited;await rm(profile,{recursive:true,force:true,maxRetries:5,retryDelay:100});throw error;}
- return {child,exited,endpoint:`http://127.0.0.1:${port}`,async close(){if(child.exitCode===null&&child.signalCode===null)child.kill('SIGKILL');await exited;await rm(profile,{recursive:true,force:true,maxRetries:5,retryDelay:100});}};
-}
+const start=port=>startOwnedChrome(executable,port,process.argv.includes('--fixed-port'));
 async function run(session,code,timeout=10000){const result=await session.run(code,timeout);assert.equal(result.isError,false,result.content.at(-1)?.text);return JSON.parse(result.content.at(-1).text);}
 function listing(text){const prefix='WebMCP tools available in this document:\n',start=text.indexOf(prefix),end=text.indexOf('\nCall tools.call',start);return JSON.parse(text.slice(start+prefix.length,end));}
 try{

@@ -2606,3 +2606,46 @@ an owned test Chromium 158+ executable. The controller owns and removes every
 profile/browser it starts. No diagnostic hooks or global rejection suppression
 are shipped. Native platform app code, headful/Windows and unidentified browser
 exit recovery are outside this verification.
+
+
+## Fixed debugging-port process identity and recovery
+
+Local browser identity now supports a single declared nonzero debugging port
+without requiring DevToolsActivePort. The endpoint and WebSocket must be local,
+the declared and effective ports must match, the profile must be an existing
+absolute directory, and native process metadata must match the actual TCP
+listener PID and loaded executable. A stale instance file does not override a
+verified fixed-port listener. Automatic-port launches retain their instance-file
+port/route checks. Invalid/duplicate declarations, foreign peers, wrong ports,
+listener PIDs and executables stay unverified. Command-line access still requires
+Chromium --enable-automation; remote/forwarded/unidentified identity remains open.
+
+The original helper returned no proof for a fixed-port launch without an instance
+file; the expanded native-listener check reproduces that failure before the fix.
+It now checks both paths, stale-file handling, invalid peers/flags and actual
+listener ownership, then verifies captured process exit. No runtime retry or
+input replay is added.
+
+The three browser/input/clipboard exit controllers reuse
+`scripts/tests/owned-chrome.mjs` and accept `--fixed-port`. The launcher reserves
+a disposable port, obtains the debugger address from its own child stderr, and
+checks the HTTP/WebSocket identity and native browser PID against that child
+before any UI interaction. Fixed mode asserts the instance file is absent;
+automatic mode waits for the announced file/route. Every profile and browser is
+owned by the fixture and removed after use. The shared launcher also replaces
+three repeated startup implementations.
+
+Validation: macOS Node 26 passes 181/181 checks; Linux arm64 Node 24 passes
+180 with one macOS-only skip. Chrome 158 on each platform passes 16 input-exit,
+eight clipboard-exit and ten DOM-read/WebMCP-exit cases with declared fixed ports,
+and the same 34 cases with automatic initial ports. Both JS hosts verify offline
+and replacement-browser reset, retained live-transport uncertainty, fresh native
+input/clipboard/tool recovery and native process identity. Source-removed
+installed Persistent/Worker and MCP browser flows pass on both systems.
+Linux keeps CDPScreenshotNewSurface enabled. Run any of the three exit controllers
+with OCU_TEST_CHROME_EXECUTABLE set to an owned test Chromium executable and add
+`--fixed-port` for the new mode.
+
+The broad parity goal remains active. Host-process crash recovery, destroyed
+completion contexts in a surviving browser, remote/unidentified identity,
+headful/Windows and remaining transport/claim/atomic-dispatch coverage stay open.
