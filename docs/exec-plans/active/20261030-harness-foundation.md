@@ -513,3 +513,26 @@ and hard interruption or withdrawn XTest support can prevent release confirmatio
 Real window managers, concurrent users, compositor/Wayland/background input,
 complex clipping, drag and long-press/chord behavior remain unverified/open.
 The full harness goal remains active. See [Linux click input](../../linux-click-input.md).
+
+## Linux native-operation cancellation
+
+Propagate MCP/CLI signal cancellation into every one-shot runtime operation,
+terminate/reap active children cooperatively with a bounded forced-kill fallback,
+and prevent new work after cancellation. Protect short input press/release groups
+so cooperative cancellation completes releases before returning. Send operation
+JSON through stdin to avoid leaving user payloads in temporary request files.
+Use Linux parent-death signals with a stable creating OS thread for owned runtime
+children; explicitly launched applications retain their independent lifetime.
+Verified gated real GTK input cancellation on reset/close in both REPLs, CLI
+termination and parent death, plus input release behavior. Hard-kill cleanup
+and already accepted remote effects remain explicit limits under the full goal.
+
+See [Linux native cancellation](../../linux-native-cancellation.md). The full
+harness goal remains active.
+
+Validation passed: 145 Node checks; 67 Python checks (53 runtime, 11 X11,
+3 clipboard); 45 Linux Go top-level checks plus 10 subchecks; both REPL modes
+for cancellation and all six existing GTK controllers; CLI SIGTERM/SIGKILL
+lifecycle probes. Owned processes and private VM work files were cleaned up.
+No dependency or CI added. macOS/Windows and physical/Wayland cancellation remain
+unverified; the full harness goal stays active.

@@ -730,5 +730,37 @@ class IndexedTextTests(unittest.TestCase):
                 runtime.insert_text(node, "wrong", node=node)
         self.assertEqual(node.text, "hello")
 
+class CancellationTests(unittest.TestCase):
+    def test_key_chord_releases_before_cancellation_escapes(self):
+        import native_cancel as cancel
+        runtime = load_runtime()
+        runtime.Atspi.ModifierType = types.SimpleNamespace(CONTROL=2)
+        runtime.Atspi.KeySynthType = types.SimpleNamespace(LOCKMODIFIERS="lock", SYM="sym", UNLOCKMODIFIERS="unlock")
+        events = []
+        def send(_code, _text, kind):
+            events.append(kind)
+            if kind == "lock":
+                cancel.handle_signal(None, None)
+        runtime.Atspi.generate_keyboard_event = send
+        with mock.patch.object(cancel, "_requested", False), mock.patch.object(runtime, "keyval", return_value=65):
+            with self.assertRaises(cancel.OperationCancelled):
+                runtime.send_key("Ctrl+a")
+        self.assertEqual(events, ["lock", "sym", "unlock"])
+
+    def test_drag_releases_at_last_position_after_cancellation(self):
+        import native_cancel as cancel
+        runtime = load_runtime()
+        events = []
+        def send(x, y, kind):
+            events.append((x, y, kind))
+            if kind == "abs" and len(events) > 2:
+                cancel.handle_signal(None, None)
+        runtime.Atspi.generate_mouse_event = send
+        with mock.patch.object(cancel, "_requested", False):
+            with self.assertRaises(cancel.OperationCancelled):
+                runtime.send_drag(0, 0, 120, 120)
+        self.assertEqual(events, [(0, 0, "abs"), (0, 0, "b1p"), (10, 10, "abs"), (10, 10, "b1r")])
+
+
 if __name__ == "__main__":
     unittest.main()

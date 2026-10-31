@@ -14,7 +14,7 @@ func snapshotKey(app string) string {
 	return strings.ToLower(strings.TrimSpace(app))
 }
 
-func windowTool(name string, args map[string]any) toolCallResult {
+func (s *service) windowTool(name string, args map[string]any) toolCallResult {
 	request := linuxRequest{Tool: name}
 	if name == "bind_window" {
 		value, ok := args["window_id"].(float64)
@@ -28,7 +28,7 @@ func windowTool(name string, args map[string]any) toolCallResult {
 			return textResult("Unknown window option: "+key, true)
 		}
 	}
-	response, err := runPython(request)
+	response, err := s.runPython(request)
 	if err != nil {
 		return textResult(err.Error(), true)
 	}

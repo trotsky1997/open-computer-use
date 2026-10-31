@@ -157,5 +157,25 @@ class ImageTests(unittest.TestCase):
         self.assertEqual(client.lib.XFreeModifiermap.call_count, 2)
 
 
+class CancellationTests(unittest.TestCase):
+    client = ImageTests.client
+    def test_cancel_during_press_releases_and_stops_remaining_clicks(self):
+        import native_cancel as cancel
+        client = self.client()
+        client.verify_frame = mock.Mock(return_value=2)
+        client.pointer = mock.Mock(side_effect=[(1, 0, 0, 0), (2, 1, 0, 0), (2, 1, 0, 0)])
+        xtest = mock.Mock()
+        def button(_display, _code, down, _delay):
+            if down:
+                cancel.handle_signal(None, None)
+            return 1
+        xtest.XTestFakeButtonEvent.side_effect = button
+        with mock.patch.object(cancel, "_requested", False), mock.patch.object(capture.C, 'CDLL', return_value=xtest):
+            with self.assertRaises(cancel.OperationCancelled):
+                client.click(42, (0, 0, 2, 1), (1, 0), 'left', 3)
+        self.assertEqual(xtest.XTestFakeButtonEvent.call_args_list, [mock.call(1, 1, 1, 0), mock.call(1, 1, 0, 0)])
+        client.lib.XSync.assert_called()
+
+
 if __name__ == '__main__':
     unittest.main()

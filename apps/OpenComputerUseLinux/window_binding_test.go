@@ -15,11 +15,11 @@ func TestWindowSnapshotCachesStaySeparateAndCaseSensitive(t *testing.T) {
 
 func TestWindowArgumentsFailBeforeBridge(t *testing.T) {
 	for _, args := range []map[string]any{nil, {"window_id": true}, {"window_id": 0.0}, {"window_id": 1.5}, {"window_id": 9007199254740992.0}, {"window_id": 1.0, "guess": true}} {
-		if !windowTool("bind_window", args).IsError {
+		if !newService().windowTool("bind_window", args).IsError {
 			t.Fatalf("invalid window arguments admitted: %#v", args)
 		}
 	}
-	if !windowTool("list_windows", map[string]any{"guess": true}).IsError {
+	if !newService().windowTool("list_windows", map[string]any{"guess": true}).IsError {
 		t.Fatal("unknown listing options admitted")
 	}
 }

@@ -38,6 +38,9 @@ var linuxRuntimeScript string
 //go:embed x11_capture.py
 var x11CaptureScript string
 
+//go:embed native_cancel.py
+var nativeCancelScript string
+
 const serverInstructions = "Computer Use tools let you interact with Linux desktop apps by performing UI actions.\n\nUse launch_app only for an explicitly requested application start; it accepts one literal executable name/path without arguments. The started application outlives this native session. Verify its readiness with get_app_state.\n\nBegin by calling `get_app_state` every turn you want to use Computer Use to get the latest state before acting. The available tools are list_windows, bind_window, launch_app, list_apps, get_app_state, click, perform_secondary_action, scroll, drag, type_text, type_characters, select_text, paste, press_key, and set_value.\n\nPrefer element-targeted interactions over coordinate clicks when an index for the targeted element is available. Linux actions use AT-SPI2 semantic actions and editable text APIs first. Coordinate mouse and key synthesis are best-effort fallbacks and are not a universal Wayland background input model."
 
 type toolDefinition struct {
@@ -204,6 +207,7 @@ type linuxResponse struct {
 }
 
 type service struct {
+	operationContext context.Context
 	clipboardMu      sync.Mutex
 	clipboardStopped bool
 	clipboardClosing *clipboardPeer
@@ -212,13 +216,16 @@ type service struct {
 }
 
 func newService() *service {
-	return &service{snapshots: map[string]*appSnapshot{}}
+	return &service{operationContext: context.Background(), snapshots: map[string]*appSnapshot{}}
 }
 
 func (s *service) callTool(name string, args map[string]any) toolCallResult {
+	if s.operationContext.Err() != nil {
+		return textResult("Native session cancelled; inspect before retrying", true)
+	}
 	switch name {
 	case "list_windows", "bind_window":
-		return windowTool(name, args)
+		return s.windowTool(name, args)
 	case "launch_app":
 		return launchApplication(args)
 	case "list_apps":
@@ -384,7 +391,7 @@ func (s *service) callTool(name string, args map[string]any) toolCallResult {
 }
 
 func (s *service) listApps() toolCallResult {
-	response, err := runPython(linuxRequest{Tool: "list_apps"})
+	response, err := s.runPython(linuxRequest{Tool: "list_apps"})
 	if err != nil {
 		return textResult(err.Error(), true)
 	}
@@ -552,7 +559,7 @@ func (s *service) typeCharacters(app, text string) toolCallResult {
 	if s.currentSnapshot(app) == nil {
 		return textResult("Run get_app_state before type_characters", true)
 	}
-	response, err := runPython(linuxRequest{Tool: "type_characters", App: app, Text: text, SkipReadBack: true})
+	response, err := s.runPython(linuxRequest{Tool: "type_characters", App: app, Text: text, SkipReadBack: true})
 	if err != nil {
 		return textResult(err.Error(), true)
 	}
@@ -630,7 +637,7 @@ func (s *service) setValue(app, elementIndex, value string) toolCallResult {
 func (s *service) actionResult(app string, request linuxRequest) toolCallResult {
 	if !actionReadBackEnabled() {
 		request.SkipReadBack = true
-		response, err := runPython(request)
+		response, err := s.runPython(request)
 		if err != nil {
 			return textResult(err.Error(), true)
 		}
@@ -662,7 +669,7 @@ func (s *service) currentSnapshot(app string) *appSnapshot {
 }
 
 func (s *service) refreshSnapshot(app string, request linuxRequest) (*appSnapshot, toolCallResult) {
-	response, err := runPython(request)
+	response, err := s.runPython(request)
 	if err != nil {
 		return nil, textResult(err.Error(), true)
 	}
@@ -726,11 +733,17 @@ func lookupElement(snapshot *appSnapshot, elementIndex string) (*elementRecord, 
 	return nil, fmt.Errorf("unknown element_index %q", elementIndex)
 }
 
-func runPython(request linuxRequest) (*linuxResponse, error) {
+func (s *service) runPython(request linuxRequest) (*linuxResponse, error) {
 	if runtime.GOOS != "linux" {
 		return nil, errors.New("Linux Computer Use runtime requires python3 on Linux")
 	}
 
+	if s.operationContext.Err() != nil {
+		return nil, errors.New("Native operation cancelled before startup")
+	}
+	// Pdeathsig tracks the creating Linux thread; keep it alive until the child is reaped.
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
 	tempDir, err := os.MkdirTemp("", "open-computer-use-linux-*")
 	if err != nil {
 		return nil, err
@@ -738,31 +751,36 @@ func runPython(request linuxRequest) (*linuxResponse, error) {
 	defer os.RemoveAll(tempDir)
 
 	scriptPath := filepath.Join(tempDir, "runtime.py")
-	operationPath := filepath.Join(tempDir, "operation.json")
 	if err := os.WriteFile(scriptPath, []byte(linuxRuntimeScript), 0o600); err != nil {
 		return nil, err
 	}
 	if err := os.WriteFile(filepath.Join(tempDir, "x11_capture.py"), []byte(x11CaptureScript), 0o600); err != nil {
 		return nil, err
 	}
+	if err := os.WriteFile(filepath.Join(tempDir, "native_cancel.py"), []byte(nativeCancelScript), 0o600); err != nil {
+		return nil, err
+	}
 	operationData, err := json.Marshal(request)
 	if err != nil {
 		return nil, err
 	}
-	if err := os.WriteFile(operationPath, operationData, 0o600); err != nil {
-		return nil, err
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(s.operationContext, 30*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "python3", scriptPath, operationPath)
+	cmd := exec.CommandContext(ctx, "python3", scriptPath, "-")
+	prepareRuntimeProcess(cmd)
+	cmd.Stdin = bytes.NewReader(operationData)
+	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
+	cmd.WaitDelay = 500 * time.Millisecond
 	cmd.Env = linuxRuntimeEnvironment(os.Environ())
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	output, err := cmd.Output()
-	if ctx.Err() == context.DeadlineExceeded {
-		return nil, errors.New("Linux runtime timed out after 30s")
+	if ctx.Err() != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return nil, errors.New("Linux runtime timed out after 30s; inspect before retrying")
+		}
+		return nil, errors.New("Linux runtime cancelled; operation may be partial; inspect before retrying")
 	}
 	if err != nil {
 		text := strings.TrimSpace(stderr.String())
@@ -1590,6 +1608,14 @@ func runCLI(args []string, stdout io.Writer) error {
 		return nil
 	}
 
+	if args[0] == "mcp" {
+		return runMCP(os.Stdin, stdout)
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	svc := newService()
+	svc.operationContext = ctx
+	defer svc.closeClipboard()
 	switch args[0] {
 	case "-h", "--help", "help":
 		topic := ""
@@ -1601,8 +1627,6 @@ func runCLI(args []string, stdout io.Writer) error {
 	case "-v", "--version", "version":
 		fmt.Fprintln(stdout, version)
 		return nil
-	case "mcp":
-		return runMCP(os.Stdin, stdout)
 	case "doctor":
 		if len(args) > 1 && args[1] == "--json" {
 			return errors.New("doctor --json permission diagnostics are only supported on macOS")
@@ -1610,7 +1634,7 @@ func runCLI(args []string, stdout io.Writer) error {
 		fmt.Fprintln(stdout, "Linux runtime: AT-SPI2 and GDK run against the signed-in desktop user's accessibility session. When Codex starts without XDG_RUNTIME_DIR, DBUS_SESSION_BUS_ADDRESS, or display variables, open-computer-use tries to discover the same user's session from /run/user/<uid> and desktop processes.")
 		return nil
 	case "list-apps":
-		result := newService().callTool("list_apps", map[string]any{})
+		result := svc.callTool("list_apps", map[string]any{})
 		if result.IsError {
 			return errors.New(result.Content[0].Text)
 		}
@@ -1636,14 +1660,14 @@ func runCLI(args []string, stdout io.Writer) error {
 		if maxTreeDepth != nil {
 			toolArgs["max_tree_depth"] = *maxTreeDepth
 		}
-		result := newService().callTool("get_app_state", toolArgs)
+		result := svc.callTool("get_app_state", toolArgs)
 		if result.IsError {
 			return errors.New(result.Content[0].Text)
 		}
 		fmt.Fprintln(stdout, result.Content[0].Text)
 		return nil
 	case "call":
-		output, hasError, err := runCallCommand(args[1:], newService())
+		output, hasError, err := runCallCommand(args[1:], svc)
 		if err != nil {
 			return err
 		}
@@ -1924,6 +1948,7 @@ func runMCP(stdin io.Reader, stdout io.Writer) error {
 	defer svc.closeClipboard()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	svc.operationContext = ctx
 	finished := make(chan struct{})
 	defer close(finished)
 	go func() {

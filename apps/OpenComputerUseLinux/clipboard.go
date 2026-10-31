@@ -92,7 +92,7 @@ func (s *service) startClipboard() (*clipboardPeer, error) {
 	if err != nil {
 		return nil, err
 	}
-	for name, script := range map[string]string{"runtime.py": linuxRuntimeScript, "clipboard.py": clipboardScript} {
+	for name, script := range map[string]string{"runtime.py": linuxRuntimeScript, "clipboard.py": clipboardScript, "native_cancel.py": nativeCancelScript} {
 		if err = os.WriteFile(filepath.Join(dir, name), []byte(script), 0o600); err != nil {
 			_ = os.RemoveAll(dir)
 			return nil, err

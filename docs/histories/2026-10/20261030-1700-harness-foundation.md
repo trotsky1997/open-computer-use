@@ -1183,3 +1183,28 @@ and hard interruption or withdrawn XTest support can prevent release confirmatio
 Real window managers, concurrent users, compositor/Wayland/background input,
 complex clipping, drag and long-press/chord behavior remain unverified/open.
 The full harness goal remains active. See [Linux click input](../../linux-click-input.md).
+
+
+## Linux native-operation cancellation
+
+Propagated MCP/CLI signal contexts to one-shot Python runtime calls, with SIGTERM,
+500 ms forced-kill fallback and child reaping. Linux parent-death SIGTERM is tied
+to a locked creating OS thread. Explicitly launched apps keep their independent
+lifetime. Operation JSON now uses stdin instead of temporary payload files.
+Python cancellation bypasses ordinary fallback handlers; short key/pointer groups
+finish releases, multi-click stops before another pair, and drag cleanup releases
+at its last attempted position. Clipboard source bundles include the new module.
+
+Source and Worker GTK checks verify gated input cancellation on reset/close,
+no delayed edit, surviving launched app, and fresh successful input after reset.
+CLI SIGTERM and parent SIGKILL checks verify stopped children and stdin payloads;
+Go checks cooperative and SIGTERM-ignoring child reaping. Hard interruption cannot
+confirm release or roll back accepted UI effects and may leave source files.
+See [native cancellation](../../linux-native-cancellation.md).
+
+Validation passed: 145 Node checks; 67 Python checks (53 runtime, 11 X11,
+3 clipboard); 45 Linux Go top-level checks plus 10 subchecks; both REPL modes
+for cancellation and all six existing GTK controllers; CLI SIGTERM/SIGKILL
+lifecycle probes. Owned processes and private VM work files were cleaned up.
+No dependency or CI added. macOS/Windows and physical/Wayland cancellation remain
+unverified; the full harness goal stays active.

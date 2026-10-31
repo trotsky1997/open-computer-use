@@ -12,6 +12,8 @@ import warnings
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
+from native_cancel import OperationCancelled, check_cancelled, defer_cancellation, install_handlers
+
 import gi
 
 gi.require_version("Atspi", "2.0")
@@ -702,15 +704,26 @@ def screen_point(window_bounds, element=None, x=None, y=None):
 
 
 def send_drag(from_x, from_y, to_x, to_y):
+    check_cancelled()
     Atspi.generate_mouse_event(int(round(from_x)), int(round(from_y)), "abs")
-    Atspi.generate_mouse_event(int(round(from_x)), int(round(from_y)), "b1p")
-    steps = 12
-    for step in range(1, steps + 1):
-        x = from_x + ((to_x - from_x) * step / steps)
-        y = from_y + ((to_y - from_y) * step / steps)
-        Atspi.generate_mouse_event(int(round(x)), int(round(y)), "abs")
-        time.sleep(0.02)
-    Atspi.generate_mouse_event(int(round(to_x)), int(round(to_y)), "b1r")
+    attempted = False
+    x, y = from_x, from_y
+    try:
+        with defer_cancellation():
+            check_cancelled()
+            attempted = True
+            Atspi.generate_mouse_event(int(round(from_x)), int(round(from_y)), "b1p")
+        steps = 12
+        for step in range(1, steps + 1):
+            check_cancelled()
+            x = from_x + ((to_x - from_x) * step / steps)
+            y = from_y + ((to_y - from_y) * step / steps)
+            Atspi.generate_mouse_event(int(round(x)), int(round(y)), "abs")
+            time.sleep(0.02)
+    finally:
+        if attempted:
+            with defer_cancellation():
+                Atspi.generate_mouse_event(int(round(x)), int(round(y)), "b1r")
 
 
 KEY_ALIASES = {
@@ -778,22 +791,18 @@ def send_key(key):
             raise RuntimeError("Unsupported modifier: " + modifier)
         mask |= 1 << int(getattr(Atspi.ModifierType, name))
     normalized = KEY_ALIASES.get(main.lower(), main)
-    if mask:
-        Atspi.generate_keyboard_event(mask, None, Atspi.KeySynthType.LOCKMODIFIERS)
-    try:
-        if len(normalized) == 1 and not mask:
-            Atspi.generate_keyboard_event(0, normalized, Atspi.KeySynthType.STRING)
-        else:
-            # SYM takes a keysym. PRESS, RELEASE, and PRESSRELEASE take a
-            # hardware keycode, so passing a keysym there sends another key.
-            Atspi.generate_keyboard_event(
-                keyval(normalized), None, Atspi.KeySynthType.SYM
-            )
-    finally:
-        if mask:
-            Atspi.generate_keyboard_event(
-                mask, None, Atspi.KeySynthType.UNLOCKMODIFIERS
-            )
+    with defer_cancellation():
+        check_cancelled()
+        try:
+            if mask:
+                Atspi.generate_keyboard_event(mask, None, Atspi.KeySynthType.LOCKMODIFIERS)
+            if len(normalized) == 1 and not mask:
+                Atspi.generate_keyboard_event(0, normalized, Atspi.KeySynthType.STRING)
+            else:
+                Atspi.generate_keyboard_event(keyval(normalized), None, Atspi.KeySynthType.SYM)
+        finally:
+            if mask:
+                Atspi.generate_keyboard_event(mask, None, Atspi.KeySynthType.UNLOCKMODIFIERS)
 
 
 def send_characters(text, verify_focus):
@@ -1083,8 +1092,12 @@ def main():
         raise RuntimeError("runtime.py requires an operation JSON path")
     require_desktop_session()
     Atspi.init()
-    with open(sys.argv[1], "r", encoding="utf-8") as file:
-        operation = json.load(file)
+    if sys.argv[1] == "-":
+        operation = json.load(sys.stdin)
+    else:
+        with open(sys.argv[1], "r", encoding="utf-8") as file:
+            operation = json.load(file)
+    check_cancelled()
     try:
         response = perform_operation(operation)
     except Exception as exc:
@@ -1093,7 +1106,10 @@ def main():
 
 
 if __name__ == "__main__":
+    install_handlers()
     try:
         main()
+    except OperationCancelled:
+        print(json.dumps({"ok": False, "error": "Native operation cancelled; inspect before retrying"}), flush=True)
     except Exception:
         print(json.dumps({"ok": False, "error": traceback.format_exc()}))

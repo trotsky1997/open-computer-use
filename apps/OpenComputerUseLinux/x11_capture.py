@@ -6,6 +6,7 @@ import os
 import re
 import time
 import zlib
+from native_cancel import check_cancelled, defer_cancellation
 
 
 class Attributes(C.Structure):
@@ -305,13 +306,15 @@ class X11:
             raise RuntimeError("Pointer target changed before click; inspect before retrying")
         code = {"left": 1, "middle": 2, "right": 3}[button]
         for _ in range(count):
-            try:
-                if not xtest.XTestFakeButtonEvent(self.display, code, 1, 0):
-                    raise RuntimeError("Button press failed; inspect before retrying")
-            finally:
-                if not xtest.XTestFakeButtonEvent(self.display, code, 0, 0):
-                    raise RuntimeError("Button release failed; inspect pointer state before retrying")
-        self.lib.XSync(self.display, 0)
+            with defer_cancellation():
+                check_cancelled()
+                try:
+                    if not xtest.XTestFakeButtonEvent(self.display, code, 1, 0):
+                        raise RuntimeError("Button press failed; inspect before retrying")
+                finally:
+                    if not xtest.XTestFakeButtonEvent(self.display, code, 0, 0):
+                        raise RuntimeError("Button release failed; inspect pointer state before retrying")
+                self.lib.XSync(self.display, 0)
         child, actual_x, actual_y, state = self.pointer()
         self.require_neutral(state)
         if self.error:
