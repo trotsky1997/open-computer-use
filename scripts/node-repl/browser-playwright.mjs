@@ -15,9 +15,9 @@ export function createPlaywrightApi(endpoint, targetId, invalidate, focusLease, 
   const reads = ["count", "innerText", "textContent", "allTextContents", "getAttribute", "inputValue", "isVisible", "isEnabled", "isChecked", "waitFor", "ariaSnapshot"];
   const actions = ["click", "dblclick", "fill", "press", "check", "uncheck", "setChecked", "selectOption", "hover", "scrollIntoViewIfNeeded", "pressSequentially", "type", "drop"];
   async function invoke(path, method, args) {
-    if (checkDialog) await checkDialog(actions.includes(method));
-    if (withAction && actions.includes(method)) return withAction((_opened,changes) => perform(path,method,args,changes));
-    return perform(path,method,args);
+    const observer=["expectNavigation","waitForURL","waitForLoadState"].includes(method);
+    const run=async(_opened,changes)=>{if(checkDialog)await checkDialog(actions.includes(method));return perform(path,method,args,changes);};
+    return withAction && (actions.includes(method)||observer)?withAction(run,{observer}):run();
   }
   async function perform(path, method, args, dialogChanges) {
     const {chromium} = await import("playwright-core");
@@ -56,6 +56,7 @@ export function createPlaywrightApi(endpoint, targetId, invalidate, focusLease, 
         return locator;
       };
       const locator = resolve(path);
+      const wait=(promise,budget)=>promise.catch(error=>{budget.signal.throwIfAborted();throw error;});
       if (actions.includes(method)) {
         await waitForBrowserEventReady(endpoint(), targetId);
         // Background CDP tabs need virtual focus for Playwright's frame-based stability check.
@@ -121,24 +122,26 @@ export function createPlaywrightApi(endpoint, targetId, invalidate, focusLease, 
           });
         }
         if (method === "expectNavigation") {
-          const [action, options] = args;
-          const timeout = options.timeoutMs ?? 10_000;
-          const deadline = Date.now() + timeout;
-          const remaining = () => timeout === 0 ? 0 : Math.max(1, deadline - Date.now());
-          const navigation = page.waitForEvent("framenavigated", {predicate:frame => frame === page.mainFrame(), timeout});
-          // Action failure closes the watcher connection; consume its rejection too.
-          navigation.catch(() => {});
+          const [action,options]=args;
           try {
-            const value = await action();
-            await navigation;
-            if (options.url !== undefined) await page.waitForURL(options.url, {waitUntil:options.waitUntil ?? "load", timeout:remaining()});
-            else await page.waitForLoadState(options.waitUntil ?? "load", {timeout:remaining()});
-            return value;
-          } finally { invalidate(); }
+            return await withBrowserActionBudget(async budget=>{
+              const navigation=wait(page.waitForEvent("framenavigated",{predicate:frame=>frame===page.mainFrame(),...budget}),budget);navigation.catch(()=>{});
+              if(dialogChanges && (await dialogChanges(-1)).done)throw new Error("Browser action watcher ended");
+              budget.signal.throwIfAborted();
+              const value=await action();await navigation;
+              if(options.url!==undefined)await wait(page.waitForURL(options.url,{waitUntil:options.waitUntil??"load",...budget}),budget);
+              else await wait(page.waitForLoadState(options.waitUntil??"load",budget),budget);
+              return value;
+            },{timeout:options.timeoutMs??10_000},dialogChanges);
+          }finally{invalidate();}
         }
-        if (method === "waitForLoadState") {
-          const options = args[0];
-          return await page.waitForLoadState(options.state ?? "load", {timeout:options.timeoutMs ?? 10_000});
+        if(method==="waitForURL"){
+          const [url,options]=args;
+          return await withBrowserActionBudget(budget=>wait(page.waitForURL(url,{waitUntil:options.waitUntil??"load",...budget}),budget),{timeout:options.timeoutMs??10_000},dialogChanges);
+        }
+        if(method==="waitForLoadState"){
+          const options=args[0];
+          return await withBrowserActionBudget(budget=>wait(page.waitForLoadState(options.state??"load",budget),budget),{timeout:options.timeoutMs??10_000},dialogChanges);
         }
         if (method === "domSnapshot") {
           const snapshots = [];

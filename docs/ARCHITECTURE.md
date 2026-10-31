@@ -311,9 +311,13 @@ known owned dialogs and resume after each close, using the pinned Playwright
 public AbortSignal. Watcher termination aborts pending work even with timeout=0;
 normal completion settles outstanding polls. IPC lifecycle polls have no request
 deadline, so agent think time does not consume an RPC timeout. Native cleanup
-acknowledgement remains required. Raw non-navigation CDP and navigation-wait
-deadlines, plus capture of dialogs predating a different host observer, remain
-separate work.
+acknowledgement remains required. Navigation waits use observer watches that coexist with same-owner inputs.
+AsyncLocalStorage binds callback child watches to owner-validated parents,
+propagating dialog revisions across targets. Outer waits yield for dialogs while
+child work remains awaited; admitted children drain before scope end, and late
+scoped input/wait admission is refused. Event/URL/load waits share an active-time
+budget; callback failures remain intact. Raw non-navigation CDP deadlines and
+capture of dialogs predating a different host observer remain separate work.
 Raw goto/reload/history dispatch runs inside the dialog host's watcher, using a
 separate native CDP connection. The command has no transport expiry while its
 active-time budget runs. Native errorText is checked inside the watched operation,

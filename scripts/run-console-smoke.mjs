@@ -23,7 +23,7 @@ async function run(source, timeout = 30_000, target = session) {
 }
 let targetId;
 try {
-  targetId = await run(`var tab=await cua.createBrowserTab("cdp",${JSON.stringify(url)},{visible:false}); nodeRepl.write(JSON.stringify(tab.id));`);
+  targetId = await run(`var tab=await cua.createBrowserTab("cdp",${JSON.stringify(url)},{visible:false}); await tab.markHandoff(); nodeRepl.write(JSON.stringify(tab.id));`);
   assert.deepEqual(await run('nodeRepl.write(JSON.stringify(await tab.dev.logs()));'),[]);
   const logs = await run('await tab.playwright.getByRole("button",{name:"Log",exact:true}).click(); nodeRepl.write(JSON.stringify(await tab.dev.logs()));');
   assert.deepEqual(logs.map(log => log.level),["debug","info","log","warn","error","log"]);
@@ -35,8 +35,8 @@ try {
   assert.equal(warnings.length,1);
   assert.equal(warnings[0].level,"warn");
   assert.equal(await run('var again=await cua.getTab(tab.id); nodeRepl.write(JSON.stringify((await again.dev.logs()).length));'),6);
-  assert.deepEqual(await run(`var isolated=await cua.getTab(${JSON.stringify(targetId)}); nodeRepl.write(JSON.stringify(await isolated.dev.logs()));`,30_000,other),[]);
-  const otherOwner = other.worker;
+  assert.deepEqual(await run(`var isolated=await cua.createBrowserTab("cdp",${JSON.stringify(url)},{visible:false}); nodeRepl.write(JSON.stringify(await isolated.dev.logs()));`,30_000,other),[]);
+  const otherOwner = other.resourceOwners.get(other.worker);
   await other.close();
   assert.equal(other.browserLogs.owners.has(otherOwner),false);
   const afterNavigation = await run('await tab.playwright.expectNavigation(()=>tab.playwright.getByRole("link",{name:"Next"}).click()); nodeRepl.write(JSON.stringify(await tab.dev.logs()));');
@@ -48,12 +48,12 @@ try {
   assert.equal(bounded.at(-1).message.length,16_384);
   assert.equal((await run('nodeRepl.write(JSON.stringify(await tab.dev.logs()));')).length,100);
   assert.deepEqual(await run('nodeRepl.write(JSON.stringify(await tab.dev.logs({limit:0})));'),[]);
-  const owner = session.worker;
+  const owner = session.resourceOwners.get(session.worker);
   await session.reset();
   assert.equal(session.browserLogs.owners.has(owner),false);
   await assert.rejects(session.browserLogs.start(owner,targetId),/session closed/);
   await run(`var tab=await cua.getTab(${JSON.stringify(targetId)}); nodeRepl.write(JSON.stringify(true));`);
-  const timedOutOwner = session.worker;
+  const timedOutOwner = session.resourceOwners.get(session.worker);
   const timedOut = await session.run('while(true){}',150);
   assert.equal(timedOut.isError,true);
   assert.match(timedOut.content.at(-1).text,/timed out/);
@@ -62,7 +62,7 @@ try {
   await fetch(new URL(`/json/close/${targetId}`,endpoint));
   const closed = await session.run('await tab.dev.logs();');
   assert.equal(closed.isError,true);
-  assert.match(closed.content.at(-1).text,/connection (closed|failed)/i);
+  assert.match(closed.content.at(-1).text,/Tab closed or no longer available/);
   targetId = undefined;
 
   let release;

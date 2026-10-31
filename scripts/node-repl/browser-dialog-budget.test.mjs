@@ -60,3 +60,24 @@ test('raw navigation validates its owner, target, command and timeout before dis
  for(const invalid of [{targetId:'other'},{options:null},{params:null},{method:'Runtime.evaluate'},{params:{url:'file:///tmp/owned'}},{params:{url:'https://example.com/',frameId:'foreign'}},{options:{timeoutMs:-1}},{options:{unknown:1}},{method:'Page.reload',params:{ignoreCache:true}},{method:'Page.navigateToHistoryEntry',params:{entryId:-1}},{extra:true}])await assert.rejects(dialogs.request(owner,{...args,...invalid}));
  assert.equal(entry.navigations,undefined);await dialogs.request(owner,{action:'end',id});await dialogs.cleanup(owner);
 });
+
+test('observer watchers preserve input exclusion and propagate owner-bound child dialogs',async()=>{
+ const endpoint='http://navigation-observer/',owner={},foreign={},dialogs=new BrowserDialogs(()=>endpoint);
+ const make=targetId=>({key:endpoint+'|'+targetId,endpoint,targetId,owners:new Set([owner,foreign]),watches:new Set(),dialogWaiters:new Set(),ready:Promise.resolve(),connection:{close(){}}});
+ const first=make('first'),second=make('second');dialogs.targets.set(first.key,first);dialogs.targets.set(second.key,second);
+ const root=await dialogs.request(owner,{action:'watch',targetId:'first',observer:true});
+ await assert.rejects(dialogs.request(owner,{action:'watch',targetId:'first',observer:'yes'}),/Invalid browser observer/);
+ await assert.rejects(dialogs.request(foreign,{action:'watch',targetId:'second',parentId:root}),/Unknown parent/);
+ const input=await dialogs.request(owner,{action:'watch',targetId:'first',parentId:root});
+ await assert.rejects(dialogs.request(owner,{action:'watch',targetId:'first'}),/input action is already active/);
+ const observer=await dialogs.request(owner,{action:'watch',targetId:'first',observer:true});
+ const child=await dialogs.request(owner,{action:'watch',targetId:'second',parentId:root});
+ dialogs.event(second,{method:'Page.javascriptDialogOpening',params:{type:'prompt'}});
+ assert.equal((await dialogs.request(owner,{action:'wait',id:root})).opened,true);
+ assert.equal((await dialogs.request(owner,{action:'changes',id:root,after:-1})).active,true);assert.equal(second.dialog.owner,owner);
+ dialogs.event(second,{method:'Page.javascriptDialogClosed',params:{}});assert.equal((await dialogs.request(owner,{action:'changes',id:root,after:-1})).active,false);
+ for(const id of [child,observer,input,root])await dialogs.request(owner,{action:'end',id});
+ await assert.rejects(dialogs.request(owner,{action:'watch',targetId:'second',parentId:root}),/Unknown parent/);
+ await dialogs.cleanup(owner);
+ await assert.rejects(dialogs.request(owner,{action:"watch",targetId:"first",observer:true}),/session closed/);
+});

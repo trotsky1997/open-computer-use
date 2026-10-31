@@ -125,6 +125,12 @@ if(process.argv[2]==='codex-plugin-config') { (await import('node:fs')).chmodSyn
   await new Promise((resolve,reject)=>{navigation.once('error',reject);navigation.once('exit',code=>code===0?resolve():reject(Error(navigationOutput)));});
   for(const line of navigationOutput.split('\n').filter(line=>line.includes('PASS')))console.log(line);
   console.log('PASS installed host-owned raw navigation deadlines after source checkout removal');
+  const waits=spawn(process.execPath,[path.join(source,'scripts/run-navigation-wait-smoke.mjs'),installed],{env:{...env,OCU_TEST_CHROME_EXECUTABLE:path.resolve(chrome)},stdio:['ignore','pipe','pipe']});let waitOutput='';
+  waits.stdout.on('data',chunk=>{waitOutput+=chunk;});waits.stderr.on('data',chunk=>{waitOutput+=chunk;});
+  await new Promise((resolve,reject)=>{waits.once('error',reject);waits.once('exit',code=>code===0?resolve():reject(Error(waitOutput)));});
+  for(const line of waitOutput.split('\n').filter(line=>line.includes('PASS')))console.log(line);
+  console.log('PASS installed dialog-aware navigation waits after source checkout removal');
+
 
 
 

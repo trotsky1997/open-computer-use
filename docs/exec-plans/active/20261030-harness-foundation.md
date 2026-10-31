@@ -2388,3 +2388,20 @@ Other raw CDP/developer-capability and navigation-wait deadlines, unidentified o
 remote lost-transport retirement, sole-callback takeover, Linux trial latency,
 physical/headful navigation and Windows remain open. The full parity goal stays
 active.
+
+
+## Dialog-aware navigation waits
+
+Implemented observer watches and owner-bound callback child scopes for
+expectNavigation, waitForURL and waitForLoadState. Root waits yield owned dialogs;
+children remain awaited and propagate same/cross-target dialog revisions.
+Independent wait-then-input remains supported with input exclusion. Frame/URL/load
+waits share active-time budgets and public AbortSignals. Admitted callback work
+drains before scope end; late scoped input/waits are refused. Callback failure
+priority and timeout=0 beyond the RPC default are covered.
+
+Current-runtime source and source-relocated installation verification covers both
+hosts on macOS/Linux. Node: 212/212 macOS, 211/212 Linux with one platform-only
+skip. Broader provider races, asynchronous cross-target dialogs after the child
+watch ends, other raw CDP deadlines, Windows and physical desktop proof remain
+open; full harness parity stays active.

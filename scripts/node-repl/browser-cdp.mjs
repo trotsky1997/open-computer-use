@@ -1,3 +1,4 @@
+import {AsyncLocalStorage} from 'node:async_hooks';
 import {BrowserWebMcp,WEBMCP_DOCUMENTATION,webMcpInput,webMcpDescription} from './browser-webmcp.mjs';
 import {normalizeHistoryOptions} from './chrome-browser-extension/history.mjs';
 import {BrowserContent} from './browser-content.mjs';
@@ -453,6 +454,7 @@ export class BrowserDialogs {
         watches.push(...parent.watches);
         opener = parent.openerId;
       }
+      for(const watch of [...watches])for(let parent=watch.parent;parent && !parent.done;parent=parent.parent)if(!watches.includes(parent))watches.push(parent);
       const watch = watches.at(-1);
       entry.dialog = {id:++this.nextId,type:event.params.type,owner:watch?.owner ?? entry.cleanupOwner,consumed:false,watches};
       if (entry.dialog.owner) this.claim(entry,entry.dialog.owner);
@@ -560,11 +562,15 @@ export class BrowserDialogs {
       return;
     }
     if (args.action === "watch") {
-      if(entry.navigations?.size)throw new Error("A native navigation is already active or requires cleanup");
+      if(this.closedOwners.has(owner))throw new Error("Browser dialog session closed");
+      if(args.observer!==undefined && typeof args.observer!=="boolean")throw new Error("Invalid browser observer watcher");
+      const parent=args.parentId===undefined?undefined:this.waiters.get(args.parentId);
+      if(args.parentId!==undefined && (!parent || parent.owner!==owner || parent.done))throw new Error("Unknown parent browser action watcher");
+      if(entry.navigations?.size && !args.observer)throw new Error("A native navigation is already active or requires cleanup");
       if (entry.dialog) throw new Error("Resolve the active JavaScript dialog with getJsDialog() first");
-      if ([...entry.watches].some(watch => !watch.opened || watch.owner !== owner)) throw new Error("A browser input action is already active for this tab");
+      if ([...entry.watches].some(watch => watch.owner !== owner || !args.observer && !watch.observer && !watch.opened)) throw new Error("A browser input action is already active for this tab");
       entry.passiveOwners?.delete(owner);
-      const watch = {id:++this.nextId,owner,entry,opened:false,revision:0,dialogs:new Set(),changes:new Set()};
+      const watch = {id:++this.nextId,owner,entry,parent,observer:args.observer===true,opened:false,revision:0,dialogs:new Set(),changes:new Set()};
       watch.waiting = new Promise(resolve => {watch.resolve=resolve;});
       watch.finished = new Promise(resolve => {watch.finish=resolve;});
       entry.watches.add(watch);
@@ -729,7 +735,7 @@ Chain locator/filter({hasText})/nth/first/last; read count/innerText/textContent
 act with click/dblclick/fill/press/check/uncheck/setChecked/selectOption/hover/scrollIntoViewIfNeeded.
 locator.drop({data?:{mimeType:string},files?:absolutePaths},{position?:{x,y},timeoutMs?}) sends trusted native HTML/file drag-and-drop. Files must be regular files on the browser host. Position uses padding-box CSS pixels. Cross-process frames bind native target/frame IDs and support nested frame hit testing. Same-process owners bind by native node identity through isolated DOM/shadow traversal, supporting identical URLs and reordered siblings. Known owned dialogs pause the active-time deadline; each response resumes its remaining budget, including sequential prompts. Target resolution and trial hover are canceled when that budget expires. reset/timeout/close cancel remaining stages, and native drag cancellation must acknowledge before ownership is released. Already dispatched page effects may finish.
 Playwright resolves fresh elements and waits for actionability; ambiguous matches fail. Default action timeout is 10 seconds.
-Navigation waits: tab.playwright.expectNavigation(async action, {url?,waitUntil?,timeoutMs?}), waitForURL(url, {waitUntil?,timeoutMs?}), waitForLoadState({state?,timeoutMs?}). expectNavigation installs a main-frame watcher before running the action and returns its result after navigation.
+Navigation waits: tab.playwright.expectNavigation(async action, {url?,waitUntil?,timeoutMs?}), waitForURL(url, {waitUntil?,timeoutMs?}), waitForLoadState({state?,timeoutMs?}). expectNavigation installs a main-frame watcher before running the action and returns its result after navigation. Navigation waits yield control on owned dialogs; respond with getJsDialog() in the next call to resume. Known dialogs pause one active-time wait budget (default 10s, timeoutMs:0 unlimited); callback actions stay awaited with their own deadlines and the REPL execution budget. Independent wait-then-input is supported; late scoped inputs/waits are refused after scope end.
 Playwright actions invalidate prior AX and screenshot indices. Read current state afterwards. File chooser events: start tab.playwright.waitForEvent("filechooser", {timeoutMs?}) before clicking, then await the handle and use isMultiple() / setFiles(absolutePaths, {timeoutMs?}). The file handle is one-shot. Downloads: start waitForEvent("download") before clicking, then await download.path({timeoutMs?}) for the completed local artifact. It includes new descendant popups opened during that wait. Bind an existing popup separately to collect its downloads.
 Developer logs: await tab.dev.logs({filter?,levels?,limit?}) returns chronological console entries with level/message/timestamp/url. Capture begins at tab binding, continues across calls/navigation, and ends on close/reset/timeout. Levels: debug/info/log/warn/error (warning aliases warn). Default limit 100; retained cap 1000 entries, each at most 16,384 UTF-16 code units. Objects use shallow CDP descriptions; no page getters are executed. Prior console history and out-of-process frame/worker logs are excluded.
 paste keeps clipboard writing and native editor input in the clipboard queue under a host input/focus lease. AX targets are validated before preparation and before paste down. Failed release blocks later clipboard API jobs until reset cleanup succeeds. Accepted clipboard writes remain after cancellation; paste down is never replayed.
@@ -799,19 +805,27 @@ export function createBrowserApi(activeOutput, environment = process.env, {runti
   const requestInput=inputRequest ?? (args=>inputs.request(inputOwner,args));
   const discoverTools=async targetId=>{try{await requestWebMcp({action:'discover'});if(targetId)await requestWebMcp({action:'observe',targetId});}catch(error){if(error.browserCleanupFailed)throw error;activeOutput().write(`WebMCP discovery unavailable: ${error.message}. Explicit fetchTools() remains available.`,"cua.webmcp");}};
   const checkDialog = async targetId => {await requestDialog({action:"check",targetId});await discoverTools(targetId);};
-  async function withDialogAction(targetId, operation) {
-    const id = await requestDialog({action:"watch",targetId});
-    const opened = requestDialog({action:"wait",id});
-    const changes=after=>requestDialog({action:'changes',id,after},0);
-    let failure;
-    const navigate=(method,params,options)=>requestDialog({action:"navigate",id,targetId,method,params,options},0);
-    const work = Promise.resolve().then(() => operation(opened,changes,navigate)).catch(error=>{
-      failure=String(error?.message ?? error).slice(0,16_384);
-      throw error;
-    }).finally(() => requestDialog({action:"end",id,error:failure}));
-    work.catch(() => {});
-    return Promise.race([work,opened.then(result => result.opened ? undefined : work)]);
+  const dialogActions=new AsyncLocalStorage();
+  function withDialogAction(targetId,operation,{observer=false}={}) {
+    const parent=dialogActions.getStore();
+    const task=(async()=>{
+      if(parent){if(!parent.active || (await parent.changes(-1)).done)throw new Error("Browser action scope ended");}
+      const id=await requestDialog({action:"watch",targetId,observer,...(parent?{parentId:parent.id}:{})});
+      const opened=requestDialog({action:"wait",id},0),changes=after=>requestDialog({action:"changes",id,after},0);
+      const scope={id,changes,active:true,pending:new Set()};let failure;
+      const navigate=(method,params,options)=>requestDialog({action:"navigate",id,targetId,method,params,options},0);
+      const work=Promise.resolve().then(()=>dialogActions.run(scope,()=>operation(opened,changes,navigate))).catch(error=>{
+        failure=String(error?.message??error).slice(0,16_384);throw error;
+      }).finally(async()=>{
+        while(scope.pending.size)await Promise.allSettled([...scope.pending]);
+        scope.active=false;await requestDialog({action:"end",id,error:failure});
+      });work.catch(()=>{});
+      return parent?work:Promise.race([work,opened.then(result=>result.opened?undefined:work)]);
+    })();
+    if(parent){parent.pending.add(task);task.finally(()=>parent.pending.delete(task)).catch(()=>{});}
+    return task;
   }
+
   const logs = logRequest ? undefined : new BrowserConsoleLogs(() => endpoint()?.href);
   const logOwner = {};
   if (logs) cleanups.push(() => logs.cleanup(logOwner));
@@ -1005,7 +1019,7 @@ export function createBrowserApi(activeOutput, environment = process.env, {runti
         await requestLogs({action:"start",targetId:target.id});
         return requestLogs({action:"read",targetId:target.id,options});
       }}),
-      playwright: createPlaywrightApi(() => { const value = endpoint(); if (!value) throw new Error("No CDP browser configured"); return value.href; }, target.id, invalidate, focusLease, requestDownload, operation => withDialogAction(target.id,operation), async action => {await requestDialog({action:"checkPlaywright",targetId:target.id});if(action) await requestInput({action:"check"});}, requestDrop,requestEvaluate,requestContent),
+      playwright: createPlaywrightApi(() => { const value = endpoint(); if (!value) throw new Error("No CDP browser configured"); return value.href; }, target.id, invalidate, focusLease, requestDownload, (operation,options) => withDialogAction(target.id,operation,options), async action => {await requestDialog({action:"checkPlaywright",targetId:target.id});if(action) await requestInput({action:"check"});}, requestDrop,requestEvaluate,requestContent),
       async getJsDialog() {
         const dialog = await requestDialog({action:"get",targetId:target.id});
         if (!dialog) return undefined;

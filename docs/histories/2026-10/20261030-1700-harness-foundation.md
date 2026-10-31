@@ -3028,3 +3028,33 @@ checks both production copies. No dependency, release or CI changes.
 Other raw CDP/developer-capability and navigation-wait deadlines, unidentified or
 remote transport recovery, Linux actionability latency, physical/headful raw
 navigation and Windows remain unverified.
+
+
+## Dialog-aware navigation waits
+
+expectNavigation, waitForURL and waitForLoadState now hold observer watches that
+coexist with independent same-owner input. Async callback scopes link child
+watches to owner-validated parents, propagating same/cross-target dialog changes.
+The outer wait yields control for response while callback actions stay awaited.
+Native frame/URL/load waits share a dialog-paused active-time budget, use public
+AbortSignals and report its concrete timeout reason. Callback failures retain
+priority; admitted children drain before scope end, and late scoped inputs/waits
+are refused. Closed owners cannot create fresh watches. Unlimited wait lifecycle
+RPCs no longer expire after 30 seconds. Connection setup retains its own policy.
+
+Node suites pass: macOS 212/212; Linux 211/212 with one platform-only skip.
+Owned Chrome 158 source and source-relocated current-runtime installations pass
+both JS hosts on macOS/Linux: modal handoff, repeated/async dialogs, cross-target
+callbacks, raw goto nesting, standalone wait/input, resumed timeout, callback
+value/failure/drain, late scoped action refusal and reset. Worker unlimited wait
+survives 31 seconds before native navigation completes it. Build/pack checks both
+copies of both changed production modules. Existing dialog and early-dialog
+regressions pass. Console fixture now uses an independent target for its second session and
+explicit handoff for its retained primary tab, matching current ownership rules;
+resource-owner and closed-target assertions follow the current runtime. Its
+console/navigation/reset/timeout/close/startup checks pass.
+
+No dependency, release or CI changes. Asynchronous cross-target dialogs after a
+child watcher ends, arbitrary callback JS cancellation beyond the REPL budget,
+broader provider races, other raw CDP deadlines, Windows and physical desktop
+verification remain open. Full parity remains active.

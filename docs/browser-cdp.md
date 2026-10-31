@@ -222,18 +222,28 @@ await tab.playwright.waitForLoadState({state:"load", timeoutMs:5000});
 
 `expectNavigation` registers a main-frame navigation listener before calling the
 action, then waits for the optional URL pattern and requested load state. It
-returns the action's value. Same-document navigation and same-URL reloads are
+returns the action's value on normal completion. An owned JavaScript dialog yields
+control early; respond with `getJsDialog()` in the next call. That response waits
+for callback work and navigation settlement, or yields for the next dialog.
+Same-document navigation and same-URL reloads are
 supported; child-frame navigation alone does not satisfy the wait. URL strings
 use Playwright's glob matching. Main-frame navigation and load/URL waits share
-the supplied wait deadline; the callback also remains subject to the REPL's
-execution budget. Callback errors are propagated and pending watcher rejections
+one active-time deadline, paused for known owned dialogs. Callback actions keep
+their own deadlines and remain awaited, including already admitted unawaited
+inputs; the callback also remains subject to the REPL execution budget. Callback errors are propagated and pending watcher rejections
 are consumed during disconnect. The callback is never retried.
 
 `waitForURL` resolves when the current or future URL matches, with the requested
 load state. It additionally accepts `waitUntil:"commit"`. `waitForLoadState`
 accepts `state:"load"`, `"domcontentloaded"` or `"networkidle"`. The default wait
 timeout is 10 seconds; `timeoutMs:0` disables that local wait timeout while the
-Worker execution budget still applies. Invalid options fail before an action
+execution budget still applies, with no hidden 30-second dialog RPC expiry.
+Independent wait-then-input calls can share a tab; concurrent inputs remain
+exclusive. Callback child actions propagate dialogs to their owning wait,
+including another explicitly bound tab. Late scoped inputs/waits are refused
+after scope completion or reset. Arbitrary callback JavaScript runs until it
+settles or the REPL budget ends; its own failure takes precedence over an expired
+navigation wait. Invalid options fail before an action
 callback runs. Prefer a concrete URL or visible page state over network-idle on
 pages with persistent connections. Forced Worker termination closes its watcher
 connections through the existing cancellation path.
@@ -443,8 +453,8 @@ retrying an uncertain action. The pinned Playwright public AbortSignal cancels
 expired work; connection/focus cleanup must still acknowledge completion.
 `timeoutMs: 0` disables the action deadline while turn/reset/close cancellation
 remains active. Raw navigation methods use the same active-time budget with host-owned stop/receipt
-settlement. Connection setup, other raw CDP commands and navigation-wait deadlines
-retain their separate policies.
+settlement. Navigation waits use the same dialog active-time policy. Connection setup and
+other raw CDP commands retain their separate policies.
 
 One observer per endpoint/tab is shared inside the host process. An action's
 dialog belongs to its initiating session; an unclaimed asynchronous dialog belongs
