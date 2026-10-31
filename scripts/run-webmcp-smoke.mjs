@@ -20,7 +20,7 @@ const server=createServer((req,res)=>{
  </script>`);
 });
 await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));const url=`http://127.0.0.1:${server.address().port}/`;
-const browser=await chromium.connectOverCDP(endpoint,{noDefaults:true}),native={async request(){throw Error('native unused');}};
+let browser=await chromium.connectOverCDP(endpoint,{noDefaults:true});const native={async request(){throw Error('native unused');}};
 async function run(session,code){const result=await session.run(code,30000);assert.equal(result.isError,false,result.content.at(-1).text);return JSON.parse(result.content.at(-1).text);}
 async function until(fn){const end=Date.now()+5000;while(!fn()){assert.ok(Date.now()<end,'Native tool notice did not arrive');await new Promise(resolve=>setTimeout(resolve,20));}}
 async function settleNotices(session){
@@ -80,20 +80,28 @@ try{
    const formTools=listing(await run(session,`var formTools=await cap.fetchTools();nodeRepl.write(JSON.stringify(formTools.description()));`)),form=formTools.find(tool=>tool.name.startsWith('submit_echo__'));assert.ok(form);
    assert.equal(await run(session,`nodeRepl.write(JSON.stringify(await formTools.call(${JSON.stringify(form.name)},{text:'owned-form-value'})));`),null);await page.waitForURL(url+'empty?text=owned-form-value');
    await session.reset();assert.equal(session.browserWebMcp.owners.size,0);
-   for(const ending of ['crash','reset','close']){
+   for(const ending of ['crash','reload','reset','close']){
     await run(session,`var b=await cua.getBrowser({id:'cdp'});var tab=await b.tabs.get(${JSON.stringify(id)});await tab.markHandoff();await tab.goto(${JSON.stringify(url+'cancel?'+ending)});nodeRepl.write(JSON.stringify(true));`);
     await page.waitForURL(url+'cancel?'+ending,{waitUntil:'load'});await page.evaluate(()=>fixture.ready);
     const current=listing(await run(session,`var cap=await tab.capabilities.get('webmcp');var current=await cap.fetchTools();nodeRepl.write(JSON.stringify(current.description()));`)),waiting=current.find(tool=>tool.name.startsWith('slow__'));assert.ok(waiting);
     await run(session,`var pending=current.call(${JSON.stringify(waiting.name)},{}).catch(error=>error.message);nodeRepl.write(JSON.stringify(true));`);await page.waitForFunction(()=>fixture.started===1);
-    if(ending==='crash'){
+    if(ending==='crash'||ending==='reload'){
      const cdp=await page.context().newCDPSession(page),crashed=page.waitForEvent('crash',{timeout:5000});void cdp.send('Page.crash').catch(()=>{});await crashed;assert.match(await run(session,'nodeRepl.write(JSON.stringify(await pending));'),/renderer crashed/);
+     if(ending==='reload'){
+      const reload=await session.run('await tab.reload();await tab.playwright.waitForLoadState({timeoutMs:5000});nodeRepl.write(JSON.stringify(tab.id));');assert.equal(reload.isError,false,JSON.stringify(reload.content));assert.equal(JSON.parse(reload.content.at(-1).text),id);
+      void cdp.detach().catch(()=>{});await browser.close();browser=await chromium.connectOverCDP(endpoint,{noDefaults:true});page=await targetPage(id);await page.waitForLoadState('load');await page.evaluate(()=>fixture.ready);
+      assert.equal((await session.run(`await current.call(${JSON.stringify(waiting.name)},{});`)).isError,true);assert.equal(await page.evaluate(()=>fixture.started),0);
+      await page.evaluate(()=>document.modelContext.registerTool({name:'recovered_echo',description:'Owned same-tab recovery',inputSchema:{type:'object'},execute:()=> 'same-tab-ready'}));await settleNotices(session);await until(()=>[...session.browserWebMcp.owners.values()].some(state=>state.notifications.has(id)));
+      const notice=await session.run('nodeRepl.write("reload-notice")');assert.equal(notice.content.filter(item=>item._meta?.id==='cua.webmcp').length,1);
+      const reloaded=listing(await run(session,`var reloaded=await cap.fetchTools();nodeRepl.write(JSON.stringify(reloaded.description()));`)),echo=reloaded.find(tool=>tool.name.startsWith('recovered_echo__'));assert.ok(echo);assert.equal(await run(session,`nodeRepl.write(JSON.stringify(await reloaded.call(${JSON.stringify(echo.name)},{})));`),'same-tab-ready');continue;
+     }
      let timer;try{await Promise.race([session.reset(),new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('Crashed WebMCP cleanup did not finish within 15000 ms')),15000);})]);}finally{clearTimeout(timer);}
      assert.equal(session.browserWebMcp.owners.size,0);void cdp.detach().catch(()=>{});await page.close();
      const previousId=id;id=await run(session,`var b=await cua.getBrowser({id:'cdp'});var tab=await b.tabs.new();await tab.goto(${JSON.stringify(url+'cancel?recovered')});await tab.markHandoff();nodeRepl.write(JSON.stringify(tab.id));`);assert.notEqual(id,previousId);page=await targetPage(id);await page.waitForURL(url+'cancel?recovered',{waitUntil:'load'});await page.evaluate(()=>fixture.ready);
      const recovered=listing(await run(session,`var cap=await tab.capabilities.get('webmcp');var recovered=await cap.fetchTools();nodeRepl.write(JSON.stringify(recovered.description()));`)),echo=recovered.find(tool=>tool.name.startsWith('echo__'));assert.ok(echo);assert.equal(await run(session,`nodeRepl.write(JSON.stringify(await recovered.call(${JSON.stringify(echo.name)},{text:'after-crash'})));`),JSON.stringify({content:[{type:'text',text:'after-crash'}]}));
     }else{await session[ending]();await page.waitForFunction(()=>fixture.aborted===1);assert.equal(session.browserWebMcp.owners.size,0);}
    }
-   console.log(`${Session.name} PASS native tools, isolated API, exact same-URL/OOP frames, stale replacement/turn/navigation, provider validation errors, initial and late-frame discovery, coalesced main/child/OOP tool-change notices, renderer crash/reset and fresh-tab recovery, turn/reset/close native cancellation settlement, declarative form and empty listing`);
+   console.log(`${Session.name} PASS native tools, isolated API, exact same-URL/OOP frames, stale replacement/turn/navigation, provider validation errors, initial and late-frame discovery, coalesced main/child/OOP tool-change notices, renderer crash/reset, fresh-tab and same-tab reload recovery, turn/reset/close native cancellation settlement, declarative form and empty listing`);
   }finally{await page?.close();await session.close();}
  }
 }finally{await browser.close();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}

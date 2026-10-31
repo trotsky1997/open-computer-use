@@ -111,9 +111,22 @@ that target's callers are gone. A main-page crash only supplies that confirmatio
 for its root/same-process records; surviving OOP sessions still require abort
 acknowledgement. A child-session crash cannot confirm release in a surviving root
 session. Crash outcomes remain errors and are never converted to navigation's
-`null` result. Inspect accepted side effects before continuing. Reset and a fresh
-tab are the verified recovery route; reloading the same crashed Playwright page
-is outside this validation.
+`null` result. Inspect accepted side effects before continuing. Reset with a
+fresh tab and explicit same-tab harness reload are both verified recovery routes.
+The reload route retains the existing JS binding and native tab ID, rejects old
+tool handles, resumes native discovery and accepts freshly fetched tools:
+
+```js
+await tab.reload();
+await tab.playwright.waitForLoadState({timeoutMs: 10000});
+const current = await (await tab.capabilities.get('webmcp')).fetchTools();
+nodeRepl.write(current.description());
+```
+
+Fetch after the page is ready and inspect the current tool list before another
+call. The controller reconnects its separate Playwright control client after a
+crash; a cached control Page object can retain its crashed flag. Actual recovery
+runs through the harness's explicit reload and load-wait methods.
 
 ## Validation
 
@@ -155,8 +168,8 @@ dialog controllers are rerun when this shared binding path changes.
 
 Ubuntu arm64 / Node 24.22.1 and macOS / Node 26.11.1 both pass the complete
 WebMCP controller on Chrome for Testing 158.0.8127.2, including renderer crash
-with an outstanding call, reset cleanup and a successful tool call in a fresh
-tab. The Linux runtime came from the [official version manifest](https://googlechromelabs.github.io/chrome-for-testing/158.0.8127.2.json).
+with an outstanding call, reset cleanup, fresh-tab calls and same-tab harness
+reload/load-wait with restored notices and a new tool call. The Linux runtime came from the [official version manifest](https://googlechromelabs.github.io/chrome-for-testing/158.0.8127.2.json).
 The fixture closes its owned HTTP connections before awaiting server shutdown;
 this prevents an accepted local keepalive connection from delaying process exit
 on Node 24. Crash control sessions detach asynchronously after their target dies.

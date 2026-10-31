@@ -498,7 +498,9 @@ and callable handles still require an explicit fetch. Observers share existing
 bounded cleanup and retain failed disconnects for retry. Native target/main-page
 crashes reject outstanding calls. Destruction confirms only the affected native
 session; a surviving OOP/root session still requires cancellation acknowledgement.
-Renderer-crash reset and fresh-tab recovery have macOS/Linux arm64 evidence.
+Renderer-crash reset/fresh-tab recovery and explicit same-tab reload/load-wait
+have macOS/Linux arm64 evidence. Reload retains the tab binding/ID while old
+collections stay invalid; discovery and fresh native calls resume.
 The public tab capability prints untrusted metadata and preserves native result
 strings; the ordinary host action/confirmation policy still applies. Installer,
 CLI readiness and npm copy lists include the host module. See [WebMCP](browser-webmcp.md).

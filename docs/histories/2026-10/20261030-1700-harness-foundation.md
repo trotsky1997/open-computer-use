@@ -1897,3 +1897,27 @@ virtual-display option check. The Linux browser/input/navigation/filechooser,
 dialog and early-dialog/popup recovery controllers also completed successfully.
 No dependency, CI, package release or user-profile change was added. Full harness
 parity remains active.
+
+## Crashed-tab reload through the harness
+
+Verified the existing explicit tab.reload() route after a renderer crash during
+an outstanding WebMCP invocation. The controller waits through the harness's
+playwright.waitForLoadState, retains the native target ID and JS tab/capability
+bindings, and does not reset the JS session. The old fetched collection fails
+without starting another provider invocation in the reloaded document.
+
+Registering a new owned tool after reload produces a native discovery notice;
+a freshly fetched handle executes successfully on that same tab. The separate
+Playwright control connection is recreated after the crash so its cached Page
+crash flag cannot stand in for the harness's reload behavior. The existing reset/
+fresh-tab, ordinary native calls, frames, form and reset/close checks continue.
+
+Both source and Worker sessions pass the complete updated controller on macOS
+and Ubuntu arm64 with Chrome for Testing 158.0.8127.2. The final Linux child,
+controller and shell all report exit code 0. Added the verified reload/load-wait/
+fetch workflow to the public guide, architecture and parity/quality tracking.
+This change strengthens live evidence and documentation for the existing native
+reload implementation; it adds no runtime API, dependency, CI or registry release.
+
+Whole-browser process death, live OOP-child crash, Windows, physical/headful and
+external-site recovery remain open. Full harness parity remains active.
