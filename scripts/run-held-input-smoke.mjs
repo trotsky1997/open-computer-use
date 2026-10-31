@@ -7,14 +7,17 @@ const endpoint=process.env.OPEN_COMPUTER_USE_CDP_URL;
 if(!endpoint) throw new Error("Set OPEN_COMPUTER_USE_CDP_URL to disposable Chrome");
 const server=createServer((req,res)=>{
  res.setHeader('Content-Type','text/html');
- res.end(`<!doctype html><style>body{margin:0;height:${req.url.includes('key-scroll')?'4000':'1000'}px}button{position:fixed;left:80px;top:70px;width:200px;height:70px}input{position:fixed;left:80px;top:180px}output{position:fixed;left:10px;top:240px;width:600px;height:150px;overflow:auto;white-space:pre-wrap}</style><button ${req.url.includes("draggable")?'draggable="true"':''}>Held target</button><input aria-label="Typing"><output id="log">[]</output><script>
- const events=location.search==='?arrived'?JSON.parse(sessionStorage.getItem('navigationEvents')||'[]'):[];log.textContent=JSON.stringify(events);for(const type of ['keydown','keyup','mousedown','mouseup','click','dblclick']) document.addEventListener(type,e=>{
- events.push({type:e.type,target:e.target.tagName,x:e.clientX,y:e.clientY,key:e.key,shift:e.shiftKey,ctrl:e.ctrlKey,alt:e.altKey,meta:e.metaKey,buttons:e.buttons,detail:e.detail,scrollY,repeat:e.repeat,trusted:e.isTrusted,time:e.timeStamp});log.textContent=JSON.stringify(events);
+ res.end(`<!doctype html><style>body{margin:0;height:${req.url.includes('key-scroll')?'4000':'1000'}px}button{position:fixed;left:80px;top:70px;width:200px;height:70px}input{position:fixed;left:80px;top:180px}output{position:fixed;left:10px;top:240px;width:600px;height:150px;overflow:auto;white-space:pre-wrap}</style><button ${req.url.includes("draggable")?'draggable="true"':''}>Held target</button><input id="typing" aria-label="Typing"><input id="other" aria-label="Other" style="top:210px"><output id="log">[]</output><script>
+ const events=location.search==='?arrived'?JSON.parse(sessionStorage.getItem('navigationEvents')||'[]'):[];log.textContent=JSON.stringify(events);for(const type of ['keydown','keyup','mousedown','mouseup','click','dblclick','beforeinput','input','focusin']) document.addEventListener(type,e=>{
+ events.push({type:e.type,target:e.target.tagName,id:e.target.id,data:e.data,inputType:e.inputType,visibility:document.visibilityState,x:e.clientX,y:e.clientY,key:e.key,shift:e.shiftKey,ctrl:e.ctrlKey,alt:e.altKey,meta:e.metaKey,buttons:e.buttons,detail:e.detail,scrollY,repeat:e.repeat,trusted:e.isTrusted,time:e.timeStamp});log.textContent=JSON.stringify(events);
+ if(e.type==='focusin'&&e.target.id==='typing'&&location.search==='?text-redirect')document.getElementById('other').focus();
+ if(e.type==='focusin'&&e.target.id==='typing'&&location.search==='?text-selection')e.target.setSelectionRange(1,3);
+ if(e.type==='beforeinput'&&location.search==='?text-dialog'){history.replaceState({},'',location.pathname);prompt('Text pause');}
  if(e.type==='mousedown' && location.search==='?dialog') {history.replaceState({},'',location.pathname);prompt('Held pause');}
  if(e.type==='keydown' && e.key==='ArrowDown' && location.search==='?key-dialog') {history.replaceState({},'',location.pathname);prompt('Key pause');}
  if(e.type==='keydown' && e.key==='Enter' && location.search==='?key-nav') {sessionStorage.setItem('navigationEvents',JSON.stringify(events));location.href='/?arrived';}
  if(e.type==='keyup' && location.search==='?release-dialog') {history.replaceState({},'',location.pathname);alert('Release pause');}
- });</script>`);
+ });if(location.search==='?text-selection')document.getElementById('typing').value='abcd';</script>`);
 });
 await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
 const url=`http://127.0.0.1:${server.address().port}/`;
@@ -27,7 +30,47 @@ async function state(name='tab'){return run(`nodeRepl.write(JSON.stringify(await
 async function index(name='tab'){const result=(await state(name)).match(/\[(\d+)\] button "Held target"/);assert.ok(result);return result[1];}
 async function events(id){const target=(await(await fetch(new URL('/json/list',endpoint))).json()).find(target=>target.id===id);return withConnection(target.webSocketDebuggerUrl,async send=>JSON.parse((await send('Runtime.evaluate',{expression:'document.querySelector("output").textContent',returnByValue:true})).result.value));}
 async function waitFor(test){const deadline=Date.now()+5000;while(!await test()){assert.ok(Date.now()<deadline,'Input event timeout');await new Promise(resolve=>setTimeout(resolve,10));}}
+async function textState(id){const target=(await(await fetch(new URL('/json/list',endpoint))).json()).find(target=>target.id===id);return withConnection(target.webSocketDebuggerUrl,async send=>(await send('Runtime.evaluate',{expression:"({events:JSON.parse(document.querySelector('output').textContent),value:document.getElementById('typing').value,other:document.getElementById('other').value,visibility:document.visibilityState})",returnByValue:true})).result.value);}
 try{
+ for(const Session of [WorkerJavaScriptSession,PersistentJavaScriptSession])for(const mode of ['redirect','normal','current','selection','reply','turn','reset','timeout','close',...(Session===WorkerJavaScriptSession?['exit']:[]),'focus-failure']){
+  const current=new Session({native});let competitor,originalRelease;
+  try{
+   const modal=['reply','turn','reset','timeout','close','exit'].includes(mode),id=await setup(modal?'?text-dialog':mode==='redirect'?'?text-redirect':mode==='selection'?'?text-selection':'','texttab',current);
+   const baseline=await textState(id);
+   await run(`var ax=await texttab.getAXState({emit:false});var field=ax.split('\\n').find(line=>line.includes(' textbox \"Typing\"')).match(/^\\[([^\\]]+)\\]/)[1];nodeRepl.write(JSON.stringify(true));`,current);
+   if(mode==='current')await run(`await texttab.playwright.getByLabel('Typing').fill('pre');nodeRepl.write(JSON.stringify(true));`,current);
+   const beforeCount=(await textState(id)).events.length;
+   let competitorId;
+   if(modal||mode==='focus-failure'){competitor=new Session({native});competitorId=await setup('','textcompetitor',competitor);}
+   if(mode==='focus-failure'){
+    const focus=current.browserInputs.focus;originalRelease=focus.release;focus.release=function(owner,lease){if(this.entries.get(lease)?.targetId===id)return Promise.reject(Error('Injected text focus-release outage'));return originalRelease.call(this,owner,lease);};
+   }
+   const running=current.run(`await texttab.typeText(${mode==='current'?'null':'field'},'中😀');${modal&&!['turn','reply'].includes(mode)?'await new Promise(()=>{});':''}`, mode==='timeout'?1200:30000);
+   if(modal){
+    await waitFor(()=>[...current.browserDialogs.targets.values()].some(entry=>entry.targetId===id&&entry.dialog?.type==='prompt'));
+    assert.ok([...current.browserInputs.leases.values()].some(record=>record.targetId===id));
+    const denied=await competitor.run(`await textcompetitor.typeText(null,'wrong');`);assert.equal(denied.isError,true);assert.match(denied.content.at(-1).text,/already owns|dialog/);
+    if(mode==='reply'){assert.equal((await running).isError,false);await run(`await (await texttab.getJsDialog()).accept('continue');nodeRepl.write(JSON.stringify(true));`,current);}
+    if(mode==='turn')await current.endTurn();if(mode==='reset')await current.reset();if(mode==='close')await current.close();if(mode==='exit')await current.worker.terminate();
+   }
+   const result=await running;
+   if(mode==='focus-failure'){
+    assert.equal(result.isError,true);assert.equal(current.browserInputs.leases.size,1);
+    const denied=await competitor.run(`await textcompetitor.typeText(null,'wrong');`);assert.equal(denied.isError,true);assert.match(denied.content.at(-1).text,/already owns/);
+    assert.equal((await current.run('nodeRepl.write(1)')).isError,true);
+    current.browserInputs.focus.release=originalRelease;originalRelease=undefined;await current.reset();
+   }
+   const final=await textState(id),insertions=final.events.slice(beforeCount).filter(e=>e.type==='input');
+   assert.equal(result.isError,modal&&!['turn','reply'].includes(mode)||mode==='redirect'||mode==='focus-failure',JSON.stringify({content:result.content,final}));
+   if(mode==='redirect'){assert.match(result.content.at(-1).text,/focus/i);assert.equal(final.value,'');assert.equal(final.other,'');assert.equal(insertions.length,0);}
+   else if(modal&&mode!=='reply'){assert.ok(['','中😀'].includes(final.value));assert.ok(insertions.length<=1);}
+   else{assert.equal(final.value,mode==='current'?'pre中😀':mode==='selection'?'a中😀d':'中😀');assert.equal(insertions.length,1);assert.ok(final.events.slice(beforeCount).filter(e=>['beforeinput','input'].includes(e.type)).every(e=>e.trusted&&e.visibility==='visible'));}
+   assert.equal(final.other,'');assert.equal(final.visibility,baseline.visibility);
+   assert.equal(current.browserInputs.leases.size,0);assert.equal(current.browserFocusLeases.entries.size,0);
+   if(competitorId){const untouched=await textState(competitorId);assert.equal(untouched.value,'');assert.equal(untouched.other,'');}
+   console.log(`${Session.name} PASS ${mode} text input, trusted receiver, native target focus, no replay and cleanup`);
+  }finally{if(originalRelease)current.browserInputs.focus.release=originalRelease;await competitor?.close();await current.close();}
+ }
  const id=await setup();let target=await index();
  await run(`await tab.click(${JSON.stringify(target)},{key:'shift+ctrl',durationMs:80,clickCount:2});nodeRepl.write(JSON.stringify(true));`);
  let log=await events(id),mouse=log.filter(e=>['mousedown','mouseup'].includes(e.type));

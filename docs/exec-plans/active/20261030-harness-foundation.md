@@ -1595,3 +1595,46 @@ standalone, installed Persistent/Worker and installed MCP launcher browser flows
 pass, including the existing page-world geometry tampering fixture. The Linux
 owned fixture retains CDPScreenshotNewSurface. Windows/headful and atomic target
 fencing remain unverified.
+
+
+## Host-owned native text insertion
+
+A disposable Chrome control on macOS and arm64 Linux reproduced Worker-local
+text insertion after a focus handler redirected the requested field: the second
+field received the text, with hidden-page native beforeinput/input events.
+
+Raw tab typeText now transfers target AX identity, loader and text to the
+existing BrowserInputs manager. Under the origin/focus lease, the host rechecks
+native AX identity before DOM.focus and focused=true afterward, then sends one
+Input.insertText. Current-focus insertion uses the same manager. Targeted text
+rejects bare backend IDs without AX identity. Native capability requirements are
+selected per action; the shared AX lookup also serves pointer point resolution.
+No alternate input manager, dependency or CI was added.
+
+The held-input controller adds 21 cases across both JS hosts, asserting receiver
+values, trusted visibility, selection/Unicode behavior, redirected-focus refusal, explicit prompt response,
+turn/reset/timeout/close/Worker-exit lifecycle, competing-text refusal and failed
+focus-release retention/reset retry with no replay. Existing held-input cases
+remain in the same controller. A small unit test covers identity/focus, loader
+change, cancellation before insertion and failed cleanup without another edit.
+
+The input call may report a pending dialog while the host retains ownership;
+turn cleanup cancels that owner. Accepted native input may finish after prompt
+cleanup, so cancellation assertions permit zero or one completed insertion.
+Native focus checks and insert dispatch remain separate commands; the source
+shortcut records the remaining atomic-edit requirement. Broader editor/IME,
+headful/Windows and concurrent page/client behavior remain open.
+
+
+Validation: macOS Node 26 passes 172/172 tests; arm64 Linux Node 24 passes
+171 with one macOS-only virtual-display skip. Chrome 158 on each platform passes
+all 21 text cases, the existing held-input suite, 53 pointer cases and the generic
+browser controller. Standalone, installed Persistent/Worker and installed MCP
+launcher flows pass after source removal. Linux retains the documented
+CDPScreenshotNewSurface fixture flag. Headful/Windows and broader editor/IME
+behavior remain unverified. Indexed pressKey still carries only a backend ID;
+its host AX focus revalidation remains a separate open parity item.
+
+The client also freezes the observed AX loader and rejects a document change
+while preparing the text request geometry. Final full Node and generic browser
+checks pass on both platforms with this binding in place.

@@ -357,6 +357,13 @@ Cleanup drains release dialogs and retains failed pointer/focus ownership for
 retry. Source-level sessions use the same manager with local focus cleanup.
 See [browser held clicks](browser-held-input.md).
 
+Raw tab typeText also runs in BrowserInputs under the origin/focus lease. The
+host revalidates AX target identity before focus and its native focused property
+after focus before dispatching one insertText. Current-focus insertion shares the
+same lifecycle. Dialog/cancellation and failed focus-release retries preserve
+ownership and never replay accepted text. Text input requires native insertion
+and AX identity capabilities only when requested.
+
 Raw tab pressKey shares BrowserInputs ownership even without an explicit duration.
 The host focuses validated backend-node IDs after acquiring the origin lease,
 checks the loader before each new down, holds the whole chord and releases in

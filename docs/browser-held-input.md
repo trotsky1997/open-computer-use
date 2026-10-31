@@ -170,3 +170,34 @@ CDP inspection and event dispatch remain separate commands. Arbitrary concurrent
 layout/handler changes can still occur after the final check. The harness aborts
 observed changes and preserves admitted effects; atomic browser-side target
 fencing, child-frame transforms and external-client coordination remain open.
+
+
+## Host-owned text insertion
+
+`await tab.typeText(elementIndexOrNull, text)` uses BrowserInputs for the entire
+native focus/insertion lifecycle, sharing the origin lease and virtual focus
+with clicks, keys and drops. An AX index transfers its observed backend ID,
+role/name and loader to the host. Native AX identity is rechecked before focus;
+after DOM.focus the same node must still match and report focused=true. A page
+focus handler that redirects to another field causes refusal before insertion.
+Null uses the current focus. Text must be a string; empty text remains allowed.
+
+Input.insertText performs one native Unicode insertion using the current
+selection, with native beforeinput/input events. The manager keeps ownership
+through native completion and dialog handling. Turn/reset/timeout/close or Worker
+exit cancels remaining stages and restores virtual focus. An accepted edit may
+finish after cancellation; it is not rolled back or replayed. A focus-release
+failure retains input/focus ownership, blocks reuse and permits reset cleanup
+without another insertion. Accepted page focus changes can also remain.
+
+The existing held-input controller adds 21 text cases across both JS hosts:
+redirected focus refusal, background Unicode insertion, current-focus and
+selection replacement, explicit prompt response, turn/reset/timeout/close and Worker-exit handling of a
+beforeinput prompt, competing text input refusal and failed focus-release retry.
+Receiver values and trusted events are the assertions. The pre-change control
+on each platform wrote the text into the second field while the page was hidden.
+
+Native AX focus checks and insertion remain separate CDP commands. Concurrent
+focus/handler changes after the check, additional editor/IME providers and
+headful/Windows require further work. DOM focus is not restored to its old
+editable element; the virtual page focus lease is restored.

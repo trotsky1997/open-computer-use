@@ -54,6 +54,11 @@ export class BrowserInputs {
       if(active.has(this.endpoint())) throw new Error("A native input action already owns this browser");
       return;
     }
+    if(args?.action==="text") {
+      if(typeof args.text!=="string")throw new Error("typeText requires text");
+      if(args.backendNodeId!==undefined)throw new Error("Text target requires AX identity");
+      return this.perform(owner,args,{keys:[],count:0,durationMs:0},true);
+    }
     if(args?.action==="key") return this.pressKey(owner,args);
     if(args?.action==="drag") return this.perform(owner,args,validateClick({}));
     if(args?.action!==undefined && args.action!=="click") throw new Error("Unknown browser input action");
@@ -65,12 +70,14 @@ export class BrowserInputs {
     return response.json();
   }
   async target(endpoint,id) {return (await this.json(endpoint,"/json/list")).find(target=>target.id===id && target.type==="page");}
-  async supported(endpoint,keyboard=false,element=false) {
+  async supported(endpoint,{keyboard=false,element=false,text=false}={}) {
     const protocol=await this.json(endpoint,"/json/protocol");
     const required={Input:["dispatchKeyEvent","dispatchMouseEvent","cancelDragging"],Page:["enable","getFrameTree","getLayoutMetrics","handleJavaScriptDialog"],Emulation:["setFocusEmulationEnabled"]};
     if(keyboard) required.DOM=["focus"];
-    if(element) {required.Page.push("createIsolatedWorld");required.DOM=["scrollIntoViewIfNeeded","resolveNode"];required.Accessibility=["getPartialAXTree"];required.Runtime=["callFunctionOn","releaseObject"];}
-    if(!Object.entries(required).every(([domain,names])=>names.every(name=>protocol.domains?.find(item=>item.domain===domain)?.commands?.some(command=>command.name===name)))) throw new Error("Managed inputs require CDP input, cancellation, dialog, focus and requested AX isolation support");
+    if(text)required.Input.push("insertText");
+    if(element)required.Accessibility=["getPartialAXTree"];
+    if(element && !keyboard) {required.Page.push("createIsolatedWorld");required.DOM=["scrollIntoViewIfNeeded","resolveNode"];required.Runtime=["callFunctionOn","releaseObject"];}
+    if(!Object.entries(required).every(([domain,names])=>names.every(name=>protocol.domains?.find(item=>item.domain===domain)?.commands?.some(command=>command.name===name)))) throw new Error("Managed inputs require CDP input, cancellation, dialog, focus and requested AX target support");
   }
   check(record) {if(record.canceled) throw new Error("Browser input canceled");}
   async idle(record) {
@@ -96,12 +103,17 @@ export class BrowserInputs {
     }
     if(JSON.stringify(actual)!==JSON.stringify(record.geometry)) throw new Error("Browser input document or geometry changed");
   }
-  async elementPoint(record,element,position) {
-    const send=async(method,params={})=>{this.check(record);const result=await record.connection.send(method,params,0);this.check(record);return result;};
+  async elementNode(record,element) {
     await this.guard(record);
-    const current=await send("Accessibility.getPartialAXTree",{backendNodeId:element.backendNodeId,fetchRelatives:false});
+    const current=await record.connection.send("Accessibility.getPartialAXTree",{backendNodeId:element.backendNodeId,fetchRelatives:false},0);
+    this.check(record);
     const node=current.nodes.find(node=>node.backendDOMNodeId===element.backendNodeId && !node.ignored);
     if(!node || node.role?.value!==element.role || node.name?.value!==element.name)throw new Error("Element changed; read AX state again");
+    return node;
+  }
+  async elementPoint(record,element,position) {
+    const send=async(method,params={})=>{this.check(record);const result=await record.connection.send(method,params,0);this.check(record);return result;};
+    await this.elementNode(record,element);
     await this.guard(record);
     // Rechecks keep the admitted point; scrolling again would silently retarget.
     if(!position)await send("DOM.scrollIntoViewIfNeeded",{backendNodeId:element.backendNodeId});
@@ -143,14 +155,14 @@ export class BrowserInputs {
     if(this.closedOwners.has(owner)) throw new Error("Browser input session closed");
     if(active.has(endpoint)) throw new Error("A native input action already owns this browser");
     const {x,y}=args.position ?? {},viewport=args.geometry?.viewport;
-    if(args.element!==undefined && (keyboard || args.action==='drag' || args.position!==undefined || !args.geometry?.loaderId || !Number.isInteger(args.element?.backendNodeId) || args.element.backendNodeId<=0 || !['role','name'].every(key=>args.element[key]===undefined || typeof args.element[key]==='string')))throw new Error("Invalid browser element target");
+    if(args.element!==undefined && (keyboard && args.action!=='text' || args.action==='drag' || args.position!==undefined || args.backendNodeId!==undefined || !args.geometry?.loaderId || !Number.isInteger(args.element?.backendNodeId) || args.element.backendNodeId<=0 || !['role','name'].every(key=>args.element[key]===undefined || typeof args.element[key]==='string')))throw new Error("Invalid browser element target");
     if(!keyboard && args.element===undefined && (![x,y].every(Number.isFinite) || x<0 || y<0 || x>=viewport?.clientWidth || y>=viewport?.clientHeight || !viewport)) throw new Error("Invalid browser input position");
     if(args.action==='drag' && (![args.end?.x,args.end?.y].every(Number.isFinite) || args.end.x<0 || args.end.y<0 || args.end.x>=viewport.clientWidth || args.end.y>=viewport.clientHeight)) throw new Error("Invalid browser drag destination");
     if(keyboard && (!args.geometry?.loaderId || (args.backendNodeId!==undefined && (!Number.isInteger(args.backendNodeId) || args.backendNodeId<=0)))) throw new Error("Invalid browser key target");
     const record={keyboard,owner,endpoint,targetId:args.targetId,position:{x,y},geometry:args.geometry,keys:[],modifiers:0,abort:new AbortController()};
     active.set(endpoint,record);this.leases.set(endpoint,record);
     record.work=(async()=>{
-      await this.supported(endpoint,keyboard,args.element!==undefined);this.check(record);
+      await this.supported(endpoint,{keyboard,element:args.element!==undefined,text:args.action==='text'});this.check(record);
       const target=await this.target(endpoint,args.targetId);this.check(record);
       if(!target) throw new Error("Browser input tab closed");
       if(this.focus) {
@@ -161,8 +173,21 @@ export class BrowserInputs {
       record.connection=await this.open(target.webSocketDebuggerUrl);this.check(record);
       const send=record.connection.send;
       if(!this.focus) {record.emulated=true;await send("Emulation.setFocusEmulationEnabled",{enabled:true});}
-      if(args.element!==undefined)record.position=await this.elementPoint(record,args.element);
-      if(keyboard && args.backendNodeId!==undefined) {await this.guard(record);await send("DOM.focus",{backendNodeId:args.backendNodeId},0);}
+      if(args.element!==undefined) {
+        if(keyboard)await this.elementNode(record,args.element);
+        else record.position=await this.elementPoint(record,args.element);
+      }
+      const backendNodeId=args.element?.backendNodeId ?? args.backendNodeId;
+      if(keyboard && backendNodeId!==undefined) {await this.guard(record);await send("DOM.focus",{backendNodeId},0);}
+      if(args.action==='text') {
+        if(args.element!==undefined) {
+          const node=await this.elementNode(record,args.element);
+          if(!node.properties?.some(property=>property.name==='focused'&&property.value?.value===true))throw new Error("Text target lost focus; read AX state again");
+        }
+        await this.guard(record);
+        // shortcut: focus can change after the AX check; strict target binding needs a browser-side atomic edit.
+        await send("Input.insertText",{text:args.text},0);
+      }
       for(const key of options.keys) {
         await this.guard(record);
         record.keys.push(key.up);record.modifiers=key.down.modifiers;
