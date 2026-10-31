@@ -185,3 +185,19 @@ test('keyboard input binds native AX focus and retains failed cleanup without re
   assert.equal(input.leases.size,0);assert.equal(browserPointerLeases.has(endpoint),false);
  }
 });
+
+test('paste exit proof retires only the original dead input and focus leases',async()=>{
+ const endpoint='http://dead-paste-input/',owner={};let gone=false,queries=0;
+ const exitProof={browserGone:()=>gone};
+ const focus=new BrowserFocusLeases(async(_target,enabled)=>{if(!enabled)throw Error('Must not touch replacement focus');});
+ const id=await focus.acquire(owner,'old-target',exitProof);
+ const input=new BrowserInputs(()=>endpoint,()=>{throw Error('Unexpected CDP connection');},()=>0,focus);
+ input.target=async()=>{queries++;throw Error('Original browser offline');};
+ const record={endpoint,owner,targetId:'old-target',exitProof,focus:id,keys:[{type:'keyUp',key:'v'}],mouse:{button:'left'},abort:new AbortController()};
+ input.leases.set(endpoint,record);browserPointerLeases.set(endpoint,record);
+ await assert.rejects(input.finish(record),/offline/);
+ assert.equal(input.leases.get(endpoint),record);assert.equal(focus.entries.has(id),true);assert.equal(queries,1);
+ gone=true;queries=0;
+ await input.finish(record);
+ assert.equal(queries,0);assert.equal(input.leases.size,0);assert.equal(browserPointerLeases.has(endpoint),false);assert.equal(focus.entries.size,0);
+});

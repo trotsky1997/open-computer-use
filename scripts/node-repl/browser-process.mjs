@@ -19,9 +19,10 @@ export async function browserExitProof(endpoint,webSocketDebuggerUrl,send){
   if(!Array.isArray(processInfo)||!processInfo.length||processInfo.some(info=>!Number.isInteger(info.id)||info.id<=0||info.id>2147483647))return;
   const browser=processInfo.find(info=>info.type==='browser');if(!browser)return;
   const lsof=process.platform==='darwin'?'/usr/sbin/lsof':process.platform==='linux'?'/usr/bin/lsof':undefined;if(!lsof)return;
-  const {stdout}=await execute(lsof,['-nP','-a','-p',String(browser.id),`-iTCP@${url.hostname==='localhost'?'127.0.0.1':url.hostname}:${port}`,'-sTCP:LISTEN','-Fp'],{timeout:1000,maxBuffer:8192});
+  // Busy macOS process queries can exceed one second.
+  const {stdout}=await execute(lsof,['-nP','-a','-p',String(browser.id),`-iTCP@${url.hostname==='localhost'?'127.0.0.1':url.hostname}:${port}`,'-sTCP:LISTEN','-Fp'],{timeout:5000,maxBuffer:8192});
   if(!stdout.split('\n').includes(`p${browser.id}`))return;
-  const textFiles=await execute(lsof,['-nP','-a','-p',String(browser.id),'-d','txt','-Fn'],{timeout:1000,maxBuffer:262144});
+  const textFiles=await execute(lsof,['-nP','-a','-p',String(browser.id),'-d','txt','-Fn'],{timeout:5000,maxBuffer:262144});
   if(!textFiles.stdout.split('\n').includes(`n${executable}`))return;
   const pids=[...new Set(processInfo.map(info=>info.id))];
   return {browserGone:()=>ended(browser.id),processesGone:()=>pids.every(ended)};

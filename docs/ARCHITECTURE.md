@@ -378,8 +378,18 @@ promise. A pending or unverifiable result retains the control page and an
 endpoint-wide fence against new managed input and clipboard access. Reset retries
 settlement before permission/target cleanup; it never repeats the write. Known
 completion survives a cleanup reply loss. The fence is held in host memory:
-host-process death, destroyed completion contexts and confirmed browser-exit
-retirement still require further recovery work.
+host-process death and destroyed completion contexts still require recovery work.
+
+Clipboard bridges also retain the original endpoint/browser identity and the
+existing local process-exit proof. A confirmed original browser exit retires
+its virtual clipboard jobs as failed with unknown completion, without contacting
+a replacement browser. Cleanup removes private control metadata and skips native
+permission/target/focus commands for that dead process. Managed paste transfers
+the same proof to its input and focus leases, allowing reset after process death.
+A live or unidentified browser retains the completion fence; a changed browser
+route alone never clears it. Local identity requires the explicit profile,
+matching DevToolsActivePort route, actual listener PID and executable. The two
+lsof queries each have a five-second bound after observed one-second timeouts.
 
 Raw tab pressKey shares BrowserInputs ownership even without an explicit duration.
 The client transfers the observed AX role/name/backend node and loader. Under

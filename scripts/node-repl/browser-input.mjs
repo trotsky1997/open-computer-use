@@ -177,14 +177,14 @@ export class BrowserInputs {
     if(!keyboard && args.element===undefined && (![x,y].every(Number.isFinite) || x<0 || y<0 || x>=viewport?.clientWidth || y>=viewport?.clientHeight || !viewport)) throw new Error("Invalid browser input position");
     if(args.action==='drag' && (![args.end?.x,args.end?.y].every(Number.isFinite) || args.end.x<0 || args.end.y<0 || args.end.x>=viewport.clientWidth || args.end.y>=viewport.clientHeight)) throw new Error("Invalid browser drag destination");
     if(keyboard && (!args.geometry?.loaderId || args.backendNodeId!==undefined)) throw new Error("Invalid browser key target");
-    const record={keyboard,paste:args.action==='paste',owner,endpoint,targetId:args.targetId,position:{x,y},geometry:args.geometry,keys:[],modifiers:0,abort:new AbortController()};
+    const record={keyboard,paste:args.action==='paste',exitProof:prepare?.exitProof,owner,endpoint,targetId:args.targetId,position:{x,y},geometry:args.geometry,keys:[],modifiers:0,abort:new AbortController()};
     active.set(endpoint,record);this.leases.set(endpoint,record);
     record.work=(async()=>{
       await this.supported(endpoint,{keyboard,element:args.element!==undefined,text:args.action==='text'});this.check(record);
       const target=await this.target(endpoint,args.targetId);this.check(record);
       if(!target) throw new Error("Browser input tab closed");
       if(this.focus) {
-        try {record.focus=await this.focus.acquire(owner,args.targetId);}
+        try {record.focus=await this.focus.acquire(owner,args.targetId,record.exitProof);}
         catch(error) {record.focus=error.browserFocusLease;throw error;}
       }
       this.check(record);
@@ -252,7 +252,7 @@ export class BrowserInputs {
     record.finishing=(async()=>{
       await record.work?.catch(()=>{});
       const needsRelease=record.mouse || record.keys.length || record.emulated || record.draining;
-      const target=needsRelease ? await this.target(record.endpoint,record.targetId) : undefined;
+      const target=needsRelease && !record.exitProof?.browserGone() ? await this.target(record.endpoint,record.targetId) : undefined;
       if(target) {
         record.draining=true;
         let connection,dialogs=0,dialogError;

@@ -108,3 +108,50 @@ test('native clipboard evidence survives duplicate starts, pending queries and c
  assert.equal(rejected.state,'rejected');assert.match(rejected.error,/native denied/);
  await assert.rejects(invoke('settle','reject','http://other/'),/page changed/);
 });
+
+test('confirmed original browser exit retires uncertain jobs without touching a replacement',async()=>{
+ const owner={},endpoint='http://clipboard-exit/';let replacement=false,gone=false,queries=0;
+ const clipboard=new BrowserClipboard(()=>endpoint,async(url,operation)=>operation(async(method,args)=>{
+  if(method==='Browser.getBrowserCommandLine')return {arguments:['--headless=new']};
+  if(method==='Target.getTargetInfo')return {targetInfo:{type:'page'}};
+  if(method==='Target.getBrowserContexts')return {browserContextIds:[]};
+  if(method==='Target.createTarget')return {targetId:'control-exit'};
+  if(method==='Runtime.evaluate')return {result:{value:clipboard.owners.get(owner).bridges.get('default').url}};
+  if(method==='Page.getFrameTree')return {frameTree:{frame:{id:'frame',loaderId:'loader'}}};
+  return {};
+ }));
+ clipboard.ensureServer=async()=> 'http://owned-control/';
+ clipboard.json=async(_endpoint,route)=>{queries++;return route==='/json/version'?{webSocketDebuggerUrl:replacement?'new-browser':'old-browser'}:[{id:'control-exit',webSocketDebuggerUrl:'control'}];};
+ clipboard.jobCall=async(_page,_job,phase)=>{
+  if(phase==='start')throw Error('Connection lost');
+  return {state:phase==='register'?'armed':'running'};
+ };
+ await assert.rejects(clipboard.request(owner,{method:'writeText',targetId:'tab',value:'pending'}),/completion unresolved/);
+ const bridge=clipboard.owners.get(owner).bridges.get('default');bridge.exitProof={browserGone:()=>gone};
+ assert.throws(()=>clipboard.assertSettled(),/completion unresolved/);
+ replacement=true;
+ await assert.rejects(clipboard.cleanup(owner),/browser changed/);
+ assert.equal(bridge.jobs.size,1);assert.throws(()=>clipboard.assertSettled(),/completion unresolved/);
+ gone=true;queries=0;
+ await clipboard.cleanup(owner);
+ assert.equal(queries,0);assert.equal(clipboard.owners.size,0);assert.equal(bridge.jobs.size,0);
+ assert.deepEqual(clipboard.internalTargets(),[]);clipboard.assertSettled();
+});
+
+test('clipboard cleanup restores permission on its original live browser independently of other endpoints',async()=>{
+ const owner={},other={},endpoint='http://original/',settings=[];
+ const clipboard=new BrowserClipboard(()=> 'http://replacement/',async(_socket,operation)=>operation(async(method,args)=>{
+  if(method==='Target.getBrowserContexts')return {browserContextIds:[]};
+  if(method==='Browser.setPermission')settings.push(args.setting);
+  if(method==='Target.getTargets')return {targetInfos:[{targetId:'old-control'}]};
+  if(method==='Target.closeTarget')return {success:true};
+  return {};
+ }));
+ clipboard.json=async(saved,route)=>{assert.equal(saved,endpoint);assert.equal(route,'/json/version');return {webSocketDebuggerUrl:'old-browser'};};
+ const bridge={endpoint,browser:'old-browser',origin:'http://private-origin/',context:{},targetId:'old-control',jobs:new Set()};
+ const state=bridge=>({bridges:new Map([['default',bridge]]),pending:new Set(),tickets:new Set()});
+ clipboard.owners.set(owner,state(bridge));
+ clipboard.owners.set(other,state({...bridge,endpoint:'http://replacement/',browser:'new-browser',targetId:'new-control'}));
+ await clipboard.cleanup(owner);
+ assert.deepEqual(settings,['prompt']);assert.equal(clipboard.owners.has(other),true);
+});

@@ -1772,3 +1772,53 @@ Remaining: the uncertain-job fence is host-memory scoped. Host-process death,
 a destroyed control execution context and confirmed browser-exit retirement
 still need recovery work. Headful/Windows and atomic focus/edit dispatch remain
 open. The overall harness-parity goal stays active.
+
+
+## Confirmed browser-exit recovery for clipboard and paste
+
+Clipboard bridges now capture the existing local process identity proof and keep
+their original endpoint/browser route. If that original browser is confirmed
+exited, settlement retires its virtual clipboard task as failed with unknown
+completion, and cleanup removes its private metadata without sending permission,
+target or focus commands to a replacement instance. A changed route or lost
+connection with a live/unidentified process keeps the original completion fence.
+Permission sharing is scoped to the same endpoint and browser instance.
+
+Managed paste transfers its private preparation proof into its input record and
+focus lease. Confirmed process death allows key/button/focus ownership to retire
+without querying dead targets or dispatching into a new browser. Other input
+paths retain their existing release requirements. The shared identity helper's
+two lsof deadlines each increase from one to five seconds after observed
+one-second identity-query failures; failed identity discovery stays conservative.
+
+Added `scripts/run-clipboard-exit-smoke.mjs`, which owns all browser processes,
+profiles and HTTP fixtures it touches. Both hosts exercise pending write/read/
+paste and live transport loss followed by SIGKILL, checking bounded failure,
+retained fencing while live, reset recovery, zero clipboard cleanup connections
+to a replacement browser, and fresh clipboard/native paste with exactly one edit.
+It covers both same-port replacement and a changed endpoint. Small checks cover
+uncertain-job retirement, dead paste input/focus release and permission cleanup
+across different browser endpoints.
+
+The overall parity goal remains active. Host-process crash recovery, destroyed
+control contexts while the browser survives, unidentified/remote browser death,
+headful/Windows and atomic focus/edit dispatch remain open.
+
+
+Validation: macOS Node 26 passes 178/178 checks; arm64 Linux Node 24 passes
+177 with one macOS-only skip (`node --test --test-concurrency=1
+scripts/node-repl/*.test.mjs`). An initial macOS process-identity check failed
+under its old one-second lsof limits; the final full suite passes with five-second
+bounds. Both systems pass all eight new clipboard-exit cases and the previous
+eight transport-loss cases across Persistent/Worker hosts, full native
+text/HTML/PNG clipboard coverage, 27 paste / 21 text / 10 indexed-key cases and
+the existing held-input controller. The macOS desktop text-clipboard hash stays
+unchanged. The shared-helper change also passes all ten existing browser-exit
+DOM-read/WebMCP cases on each system. Source-removed installed Persistent/Worker
+and MCP browser flows pass on both platforms; Linux retains
+CDPScreenshotNewSurface.
+
+To reproduce the owned-process exit cases, set OCU_TEST_CHROME_EXECUTABLE to an
+owned test Chromium 158+ executable and run
+`node scripts/run-clipboard-exit-smoke.mjs`. The controller creates and removes
+its own profiles and kills only its own subprocesses.

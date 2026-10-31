@@ -351,11 +351,11 @@ export class BrowserFocusLeases {
     this.entries = new Map();
     this.nextId = 1;
   }
-  async acquire(owner, targetId) {
+  async acquire(owner, targetId, exitProof) {
     if (typeof targetId !== "string" || !targetId) throw new Error("Invalid browser focus target");
     if ([...this.entries.values()].some(entry => entry.targetId === targetId)) throw new Error("Browser target already has an active input lease");
     const id = this.nextId++;
-    const entry = {owner, targetId};
+    const entry = {owner, targetId, exitProof};
     this.entries.set(id, entry);
     entry.ready = Promise.resolve().then(() => this.updateFocus(targetId, true));
     try { await entry.ready; return id; }
@@ -370,7 +370,7 @@ export class BrowserFocusLeases {
     if (!entry || entry.owner !== owner) throw new Error("Unknown browser focus lease");
     if (!entry.releasing) entry.releasing = (async () => {
       await entry.ready.catch(() => {});
-      await this.updateFocus(entry.targetId, false);
+      if(!entry.exitProof?.browserGone())await this.updateFocus(entry.targetId, false);
       this.entries.delete(id);
     })().catch(error => {
       entry.releasing = undefined;

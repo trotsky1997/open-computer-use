@@ -1,5 +1,6 @@
 import {createServer} from "node:http";
 import {randomUUID} from "node:crypto";
+import {browserExitProof} from "./browser-process.mjs";
 
 const LIMIT = 16 * 1024 * 1024;
 const queues = new Map();
@@ -115,7 +116,15 @@ export class BrowserClipboard {
     if(result.exceptionDetails)throw new Error(result.exceptionDetails.exception?.description ?? result.exceptionDetails.text ?? "Clipboard job failed");
     return result.result.value;
   }
+  retireJob(job) {
+    job.bridge.jobs.delete(job);unsettled.get(job.endpoint)?.delete(job);
+    if(!unsettled.get(job.endpoint)?.size)unsettled.delete(job.endpoint);
+  }
   async settle(job) {
+    if(job.bridge.exitProof?.browserGone()) {
+      this.retireJob(job);
+      return {state:"rejected",error:"Browser process exited; clipboard completion unknown"};
+    }
     const {bridge}=job;
     const version=await this.json(job.endpoint,"/json/version");
     if(version.webSocketDebuggerUrl!==job.browser)throw new Error("Clipboard browser changed; completion unresolved");
@@ -127,8 +136,7 @@ export class BrowserClipboard {
       job.result=result;
       await page("Emulation.setFocusEmulationEnabled",{enabled:false});
       await this.jobCall(page,job,"drop").catch(()=>{});
-      bridge.jobs.delete(job);unsettled.get(job.endpoint)?.delete(job);
-      if(!unsettled.get(job.endpoint)?.size)unsettled.delete(job.endpoint);
+      this.retireJob(job);
       return result;
     });
   }
@@ -194,7 +202,7 @@ export class BrowserClipboard {
         const key = targetInfo.browserContextId ?? "default";
         let bridge = state.bridges.get(key);
         if (!bridge) {
-          bridge = {context,jobs:new Set()};
+          bridge = {context,jobs:new Set(),endpoint,browser:version.webSocketDebuggerUrl,exitProof:await browserExitProof(endpoint,version.webSocketDebuggerUrl,send)};
           state.bridges.set(key,bridge);
           const origin = await this.ensureServer();
           bridge.path = `/__ocu_clipboard_${randomUUID()}`;
@@ -206,6 +214,7 @@ export class BrowserClipboard {
           if (!controls.has(endpoint)) controls.set(endpoint,new Set());
           controls.get(endpoint).add(bridge.targetId);
         }
+        if(bridge.browser!==version.webSocketDebuggerUrl)throw new Error("Clipboard browser changed; reset the owning session");
         await send("Browser.setPermission",{permission:{name:"clipboard-read",allowWithoutSanitization:true},setting:"granted",origin:bridge.origin,...context});
         const target = (await this.json(endpoint,"/json/list")).find(target=>target.id===bridge.targetId);
         if (!target) throw new Error("Clipboard control tab closed; reset the session");
@@ -238,8 +247,7 @@ export class BrowserClipboard {
               job.result=result;
               await page("Emulation.setFocusEmulationEnabled",{enabled:false});
               await this.jobCall(page,job,"drop").catch(()=>{});
-              bridge.jobs.delete(job);unsettled.get(endpoint).delete(job);
-              if(!unsettled.get(endpoint).size)unsettled.delete(endpoint);
+              this.retireJob(job);
             } catch(error) {
               job.uncertain=true;
               try {result=await this.settle(job);}
@@ -248,13 +256,14 @@ export class BrowserClipboard {
             if(result.state!=="fulfilled")throw new Error(result.error ?? "Clipboard operation canceled before execution");
             return result.value;
           } finally {
-            try {await page("Emulation.setFocusEmulationEnabled",{enabled:false});}
+            try {if(!bridge.exitProof?.browserGone())await page("Emulation.setFocusEmulationEnabled",{enabled:false});}
             catch (error) {
               try {await this.connect(target.webSocketDebuggerUrl,fresh=>fresh("Emulation.setFocusEmulationEnabled",{enabled:false}));}
-              catch {error.browserCleanupFailed=true;throw error;}
+              catch {if(!bridge.exitProof?.browserGone()){error.browserCleanupFailed=true;throw error;}}
             }
           }
         });
+        operation.exitProof=bridge.exitProof;
         if (args.method === "paste") {
           if (this.closedOwners.has(owner)) throw new Error("Browser clipboard session closed");
           return this.input(owner,{action:"paste",targetId:args.targetId,element:args.element,geometry:args.geometry},operation);
@@ -276,17 +285,18 @@ export class BrowserClipboard {
     const state = this.owners.get(owner);
     if (!state) return;
     await Promise.allSettled([...state.pending]);
-    const endpoint = this.endpoint();
     for (const [key,bridge] of state.bridges) {
-      for(const job of bridge.jobs ?? []) {
+      const endpoint=bridge.endpoint;
+      for(const job of bridge.jobs) {
         try {await this.settle(job);}
         catch(error) {job.uncertain=true;error.browserCleanupFailed=true;throw error;}
       }
-      if (bridge.targetId) {
+      if (bridge.targetId && !bridge.exitProof?.browserGone()) {
         const version = await this.json(endpoint,"/json/version");
+        if(bridge.browser!==version.webSocketDebuggerUrl)throw new Error("Clipboard browser changed; cleanup requires confirmed original process exit");
         await this.connect(version.webSocketDebuggerUrl,async send => {
           const contexts = await send("Target.getBrowserContexts");
-          const shared = [...this.owners.values()].some(state=>[...state.bridges.values()].some(other=>other !== bridge && other.origin === bridge.origin && other.context.browserContextId === bridge.context.browserContextId));
+          const shared = [...this.owners.values()].some(state=>[...state.bridges.values()].some(other=>other !== bridge && other.endpoint === endpoint && other.browser === bridge.browser && other.origin === bridge.origin && other.context.browserContextId === bridge.context.browserContextId));
           if (!shared && bridge.origin && (!bridge.context.browserContextId || contexts.browserContextIds.includes(bridge.context.browserContextId))) await send("Browser.setPermission",{permission:{name:"clipboard-read",allowWithoutSanitization:true},setting:"prompt",origin:bridge.origin,...bridge.context});
           const target = (await send("Target.getTargets")).targetInfos.find(target=>target.targetId===bridge.targetId);
           if (target && !(await send("Target.closeTarget",{targetId:bridge.targetId})).success) throw new Error("Browser refused clipboard control tab cleanup");
