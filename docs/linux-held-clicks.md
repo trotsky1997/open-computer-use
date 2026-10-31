@@ -37,6 +37,10 @@ system shortcuts remain possible while ordinary keys are held.
 Each attempted down is registered before delivery. Cleanup attempts mouse release
 first, then every attempted key release in reverse order, including cancellation
 and failed sends. A failed key release does not skip the other key releases.
+After sending releases, cleanup polls the logical key map for at most 250 ms,
+including cancellation, and reports unconfirmed ownership if attempted keys stay
+down. It sends no repeated releases. Receiver-event checks remain separate from
+this native logical-state confirmation.
 [Native cancellation](linux-native-cancellation.md) stops the remaining sequence;
 reset/close waits for child exit. The ordinary 30-second operation allowance is
 extended by requested total mouse dwell, within the native timer range. The host

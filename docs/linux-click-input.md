@@ -121,6 +121,9 @@ Both hosts pass shaped receiver tests without a WM and with decorated/undecorate
 Openbox: exact click coordinates/modifiers/dwell, timed keys, wheel direction,
 held drag motion, separate visible and input-only hole refusal, region reset,
 and reset/close button/key release. The independent Input hole is visibly filled
-in the screenshot. Broader child-window/provider hit testing and regions changing
-during an action remain open. Run `linux-shaped-input-js-smoke.mjs` with the same
+in the screenshot. The fixture also changes its Input region on a receiving press
+or held motion: the click stops after one pair, and the drag releases at canvas
+x=50 before the new hole at x=60. Clearing the region restores fresh clicks.
+Both hosts cover these mutations under all three compositor/WM layouts. Broader
+child-window/provider hit testing and arbitrary concurrent region changes remain open. Run `linux-shaped-input-js-smoke.mjs` with the same
 owned compositor/WM desktop setup as the other input controllers.

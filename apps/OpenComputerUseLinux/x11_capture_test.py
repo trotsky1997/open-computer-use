@@ -400,6 +400,21 @@ class DragTests(unittest.TestCase):
 class HeldClickTests(unittest.TestCase):
     client = ImageTests.client
 
+    def test_key_cleanup_waits_for_owned_release_without_resending(self):
+        client = self.client()
+        client.keyboard_state = mock.Mock(side_effect=[{50}, set()])
+        xtest = mock.Mock()
+        with mock.patch.object(capture.time, 'sleep') as sleep:
+            with client.held_keys(xtest, [50, 37]):
+                pass
+        sleep.assert_called_once()
+        self.assertEqual(xtest.XTestFakeKeyEvent.call_args_list, [mock.call(1, 50, 1, 0), mock.call(1, 37, 1, 0), mock.call(1, 37, 0, 0), mock.call(1, 50, 0, 0)])
+        client.keyboard_state = mock.Mock(return_value={50})
+        with mock.patch.object(capture.time, 'monotonic', side_effect=[0, 0.3]):
+            with self.assertRaisesRegex(RuntimeError, 'release remains unconfirmed'):
+                with client.held_keys(xtest, [50]):
+                    pass
+
     def prepared(self):
         client = self.client()
         xtest = mock.Mock()

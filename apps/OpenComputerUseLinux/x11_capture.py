@@ -566,6 +566,13 @@ class X11:
                 self.lib.XSync(self.display, 0)
                 if failed:
                     raise RuntimeError("Held key release failed; inspect keyboard state before retrying")
+                if held:
+                    deadline = time.monotonic() + 0.25
+                    while set(held) & self.keyboard_state():
+                        remaining = deadline - time.monotonic()
+                        if self.error or remaining <= 0:
+                            raise RuntimeError("Held key release remains unconfirmed; inspect keyboard state before retrying")
+                        time.sleep(min(0.005, remaining))
 
     def click(self, expected_pid, rectangle, point, button, count, symbols=(), duration=None):
         if button not in ("left", "middle", "right") or type(count) is not int or not 1 <= count <= 3:

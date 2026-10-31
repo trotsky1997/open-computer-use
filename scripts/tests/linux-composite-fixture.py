@@ -37,6 +37,7 @@ events = {}
 motions, wheels, key_events = {}, {}, {}
 canvases = {}
 shaped = {}
+armed, changes = {}, []
 
 
 def window_point(key, x, y):
@@ -58,7 +59,7 @@ def canvas_point(key, x=40, y=23):
 
 
 def state(*_args):
-    result = {'pid': os.getpid(), 'shaped': shaped, 'events': events, 'motions': motions, 'wheels': wheels, 'keys': key_events, 'pointerPoints': {key: canvas_point(key) for key in windows}, 'holePoints': {key: canvas_point(key, 72, 30) for key in windows}, 'inputHolePoints': {key: canvas_point(key, 112, 30) for key in windows}, 'dragPoints': {key: [canvas_point(key, 20, 55), canvas_point(key, 140, 55)] for key in windows}, 'cornerPoints': {key: window_point(key, 2, 2) for key in windows}, 'windows': {key: {'x': window.get_position()[0], 'y': window.get_position()[1], 'visible': window.get_visible()} for key, window in windows.items()}}
+    result = {'pid': os.getpid(), 'shaped': shaped, 'armed': armed, 'changes': changes, 'events': events, 'motions': motions, 'wheels': wheels, 'keys': key_events, 'pointerPoints': {key: canvas_point(key) for key in windows}, 'holePoints': {key: canvas_point(key, 72, 30) for key in windows}, 'inputHolePoints': {key: canvas_point(key, 112, 30) for key in windows}, 'dragPoints': {key: [canvas_point(key, 20, 55), canvas_point(key, 140, 55)] for key in windows}, 'cornerPoints': {key: window_point(key, 2, 2) for key in windows}, 'windows': {key: {'x': window.get_position()[0], 'y': window.get_position()[1], 'visible': window.get_visible()} for key, window in windows.items()}}
     with open(os.path.join(root, 'state.next'), 'w') as output:
         json.dump(result, output)
     os.replace(os.path.join(root, 'state.next'), os.path.join(root, 'state.json'))
@@ -94,12 +95,20 @@ def create(key, position, rgba=False):
         events[key].append({'phase': phase, 'button': event.button, 'x': event.x, 'y': event.y, 'state': int(event.state), 'time': event.time})
         if phase == 'press':
             canvas.grab_focus()
+            if armed.get(key) == 'press':
+                armed.pop(key)
+                shape(key, 2, (30, 13))
+                changes.append({'key': key, 'trigger': 'press', 'time': event.time})
         state()
         return False
     canvas.connect('button-press-event', received, 'press')
     canvas.connect('button-release-event', received, 'release')
     def motion(_widget, event):
         motions[key].append({'x': event.x, 'y': event.y, 'state': int(event.state)})
+        if event.state & Gdk.ModifierType.BUTTON1_MASK and armed.get(key) == 'move':
+            armed.pop(key)
+            shape(key, 2, (60, 45))
+            changes.append({'key': key, 'trigger': 'move', 'time': event.time})
         state()
     def wheel(_widget, event):
         wheels[key].append(event.direction.value_nick)
@@ -129,16 +138,16 @@ def create(key, position, rgba=False):
         window.present()
         canvas.grab_focus()
         window.get_window().focus(Gdk.CURRENT_TIME)
-    def shape(target, kind=0):
+    def shape(target, kind=0, hole=None):
         destination = windows[target]
         tag = target if kind == 0 else 'input:' + target
-        shaped[tag] = not shaped.get(tag, False)
+        shaped[tag] = True if hole is not None else not shaped.get(tag, False)
         region = None
         if shaped[tag]:
             region = cairo.Region(cairo.RectangleInt(0, 0, destination.get_allocated_width(), destination.get_allocated_height()))
             if kind == 0:
                 region.subtract(cairo.RectangleInt(0, 0, 12, 12))
-            x, y = canvases[target].translate_coordinates(destination, 60 if kind == 0 else 100, 20)
+            x, y = canvases[target].translate_coordinates(destination, *(hole if hole is not None else (60 if kind == 0 else 100, 20)))
             region.subtract(cairo.RectangleInt(x, y, 24, 20))
         display = xlib.XOpenDisplay(None)
         if not display:
@@ -164,6 +173,8 @@ def create(key, position, rgba=False):
                ('Shape A', lambda _b: shape('A')),
                ('Shape Alpha', lambda _b: shape('Alpha')),
                ('Input Alpha', lambda _b: shape('Alpha', 2)),
+               ('Change on press', lambda _b: armed.update(Alpha='press')),
+               ('Change on move', lambda _b: armed.update(Alpha='move')),
                ('Hide A', lambda _b: windows['A'].hide()),
                ('Close A', lambda _b: windows['A'].destroy())]
     row = Gtk.Grid()
@@ -185,5 +196,12 @@ create('Alpha', (10, 260), True)
 create('Black', (360, 260))
 windows['B'].present()
 windows['B'].get_window().focus(Gdk.CURRENT_TIME)
-GLib.timeout_add(50, state)
+# Keep the receiver event queue progressing after the input sender exits.
+def refresh_state():
+    Gdk.Display.get_default().sync()
+    state()
+    return True
+
+
+GLib.timeout_add(50, refresh_state)
 Gtk.main()

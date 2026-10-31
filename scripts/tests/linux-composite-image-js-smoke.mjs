@@ -41,7 +41,7 @@ for(const Session of [PersistentJavaScriptSession,WorkerJavaScriptSession]){
   await action('b','Offscreen A');await until(async()=>JSON.parse(await readFile(path.join(root,'state.json'),'utf8')).windows.A.x<0);assert.ok((await image('a')).red>1000);
   await action('b','Ambiguous A');assert.equal((await session.run('await a.getScreenshot({emit:false});')).isError,true);
   await action('b','Separate');await action('b','Hide A');assert.equal((await session.run('await a.getScreenshot({emit:false});')).isError,true);
-  await action('b','Separate');assert.ok((await image('a')).red>1000);
+  await action('b','Separate');await action('b','Focus');assert.ok((await image('a')).red>1000);
   await action('b','Close A');assert.equal((await session.run('await a.getScreenshot({emit:false});')).isError,true);
   console.log(`${Session.name} PASS real compositor background/occluded/offscreen native pixels, same-title isolation, straight alpha, bounded shape holes/reset and hole-input refusal, resize/remap, ARGB pointer recipient, focus preservation and inactive/ambiguous/hidden/stale refusal`);
  }catch(error){try{process.stderr.write((await readFile(root+'/fixture-errors.log','utf8')).slice(-4000));process.stderr.write(await readFile(root+'/state.json','utf8'));}catch{}throw error;}finally{await session.close();await native.close();if(pid)try{process.kill(pid,'SIGTERM');}catch(e){if(e.code!=='ESRCH')throw e;}await rm(root,{recursive:true,force:true});}

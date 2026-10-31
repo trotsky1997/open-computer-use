@@ -1019,3 +1019,39 @@ of default bounds, client bounding and client input regions. Broader child-windo
 provider hit testing, dynamic region changes during actions, GNOME/KWin, hardware,
 GPU/full-screen, Wayland/portal and external interruption/claims remain open.
 The full harness parity goal stays active.
+
+## Dynamic native input regions and release acknowledgement
+
+The owned GTK receiver changes its native Input region in response to the first
+physical press or held motion. Both JS hosts verify prompt failure, one matched
+mouse press/release, reverse modifier release, no later click in the sequence,
+drag release at canvas x=50 before the new x=60 hole, and fresh click recovery
+after clearing the Input region. Independent XQueryKeymap probes verify no keys
+remain down after dynamic refusal and reset/close.
+
+Shared held-key cleanup now confirms attempted keys leave the logical key map
+within 250 ms, inside cancellation deferral, without repeating key releases. The
+small check covers delayed acknowledgement and its timeout. This applies to both
+held clicks and explicit-duration pressKey.
+
+During repeated no-WM checks, the GTK receiver intermittently omitted its final
+Shift release record while an independent native keymap probe was empty. The
+fixture now keeps synchronizing its display and writing state every 50 ms after
+the sender exits. Three consecutive full controller runs then passed for both
+hosts. The exact earlier event-observation cause remains unconfirmed; native
+logical-state confirmation and receiver records remain separate checks.
+
+Validation: 95 Python checks on macOS and Ubuntu arm64, and the native Go suite
+on Ubuntu arm64 passed. Running the Go suite directly on macOS fails the Linux
+platform guard; the cross-compiled test binary was run successfully on Linux.
+The updated shaped controller passed all three owned compositor/WM layouts in
+both hosts. Existing held-click and timed-key controllers passed under Openbox/
+xcompmgr in both hosts. The shared compositor-image controller exposed a focus
+transition after remapping the fixture; it now explicitly restores B's focus
+before checking background screenshot focus preservation. The assertion remains;
+both hosts passed the compositor-image controller in both Openbox layouts.
+No new dependency, CI or release was added.
+
+Arbitrary concurrent changes, broader child-window/provider hit testing, GNOME/
+KWin, hardware, GPU/full-screen and Wayland/portal remain open. Full harness
+parity remains active.

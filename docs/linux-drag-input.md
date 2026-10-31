@@ -54,3 +54,9 @@ Cross-window drag/drop, complex clipping, real window managers, physical devices
 Qt/Electron, broader compositor/WM behavior, Wayland and other platform routes
 remain open or unverified. This within-window route does not complete the full
 harness parity goal.
+
+The shaped-input fixture changes its native Input region on the first held
+motion. Under xcompmgr alone and decorated/undecorated Openbox, both JS hosts
+stop at canvas x=50 before the newly excluded x=60 point, receive one button
+release, and accept a fresh click after the Input region is cleared. Arbitrary
+concurrent region changes still race the sequential verifier.
