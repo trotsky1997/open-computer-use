@@ -3058,3 +3058,52 @@ No dependency, release or CI changes. Asynchronous cross-target dialogs after a
 child watcher ends, arbitrary callback JS cancellation beyond the REPL budget,
 broader provider races, other raw CDP deadlines, Windows and physical desktop
 verification remain open. Full parity remains active.
+
+
+## Browser AX semantic state and compact output
+
+Native browser AX output previously discarded checked/disabled/expanded and
+other semantic properties, making checkbox results unobservable through AX.
+It now retains semantic state, descriptions and accessible hierarchy with
+Chromium node IDs. Ignored ancestors flatten. InlineTextBox duplicates are
+omitted because Chromium assigns new layout IDs on every CDP attachment.
+Native and browser output share the existing compact line-replacement diff
+algorithm. Return values stay full; only emitted observations advance the
+per-binding baseline. Initial binding output establishes it. Screenshots,
+loader/URL/fragment changes and failed page reads/Playwright operations reset it.
+Boolean observation options validate before page access.
+
+Source plugin installation, CLI test fixtures and both npm runtime copies now
+carry the shared module. Existing browser/held-input/pointer/installed-MCP index
+extractors accept hierarchy indentation. Main browser smoke sessions use their
+own targets under current exclusive ownership, including cancellation recovery;
+failed file selection verifies unchanged source state independently of Worker
+fixtures.
+
+Owned Chrome 158 both JS hosts pass source and source-relocated current-runtime
+installed controllers on macOS/Linux: checkbox true/false, mixed pressed state,
+disabled/expanded/selected/required/readonly/description, native AX click results,
+compact/full/unchanged output, unseen-read history, screenshots, failures and
+cross-/same-document navigation. Node suites pass 213/213 on macOS and 212/213
+on Linux with one platform-only skip. The main browser regression passes AX
+editing, key/paste/scroll, pointer/drag, locators/frames, cancellation recovery,
+navigation waits and chooser flows. No dependencies, release or CI changes.
+
+Native iframe AX indices/input routing, broader provider/state fidelity, physical
+macOS/headful and Windows proof remain open. The full parity goal stays active.
+
+
+Final output-owner audit held an actual native AX response, opened a native
+alert, then resumed initial binding in the next JS call. This reproduced an
+initial observation trying to emit through its old output owner. Initial reads
+remain silent; a private one-shot callback emits and seeds a baseline only when
+the original binding call completes without yielding. Resumed background reads
+never output. PersistentJavaScriptSession source/installed Chrome probes verify
+response success and the next full baseline after handoff. The regular semantic
+matrix still runs in both hosts.
+
+Linux full source-relocated installation passed standalone/managed MCP, both
+hosts, native tab coordination, deadline suites and isolated headful visibility,
+clipboard/GTK interop, private-profile recovery and shutdown. This broad run
+preceded the final initial-output correction; exact final modules are verified
+separately through fresh source-relocated installs and early-dialog regressions.

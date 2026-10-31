@@ -233,7 +233,7 @@ fi
 if [[ ! -f "${repl_source_root}/open-computer-use-repl.mjs" ]]; then
   repl_source_root="${plugin_source_root}/scripts"
 fi
-for repl_file in open-computer-use-repl.mjs open-computer-use-kernel.mjs ocu-config.mjs browser-cdp.mjs browser-playwright.mjs browser-downloads.mjs browser-clipboard.mjs browser-viewport.mjs browser-drop.mjs browser-input.mjs browser-tabs.mjs browser-tab-claims.mjs browser-process.mjs browser-runtime.mjs browser-runtime-child.mjs browser-debugger.mjs browser-assets.mjs browser-webmcp.mjs browser-content.mjs browser-chrome.mjs browser-evaluate.mjs browser-evaluate-dom.mjs browser-evaluate-worker.mjs runtime-dependencies.mjs; do
+for repl_file in accessibility-state.mjs open-computer-use-repl.mjs open-computer-use-kernel.mjs ocu-config.mjs browser-cdp.mjs browser-playwright.mjs browser-downloads.mjs browser-clipboard.mjs browser-viewport.mjs browser-drop.mjs browser-input.mjs browser-tabs.mjs browser-tab-claims.mjs browser-process.mjs browser-runtime.mjs browser-runtime-child.mjs browser-debugger.mjs browser-assets.mjs browser-webmcp.mjs browser-content.mjs browser-chrome.mjs browser-evaluate.mjs browser-evaluate-dom.mjs browser-evaluate-worker.mjs runtime-dependencies.mjs; do
   if [[ ! -f "${repl_source_root}/${repl_file}" ]]; then
     echo "Missing JS REPL runtime at ${repl_source_root}/${repl_file}" >&2
     exit 1
@@ -315,6 +315,7 @@ cp "${repl_source_root}/browser-clipboard.mjs" "${plugin_install_root}/scripts/b
 cp "${repl_source_root}/browser-downloads.mjs" "${plugin_install_root}/scripts/browser-downloads.mjs"
 cp "${repl_source_root}/browser-playwright.mjs" "${plugin_install_root}/scripts/browser-playwright.mjs"
 cp "${repl_source_root}/browser-cdp.mjs" "${plugin_install_root}/scripts/browser-cdp.mjs"
+cp "${repl_source_root}/accessibility-state.mjs" "${plugin_install_root}/scripts/accessibility-state.mjs"
 cp "${repl_source_root}/ocu-config.mjs" "${plugin_install_root}/scripts/ocu-config.mjs"
 
 config_target="$(node -e 'const fs=require("node:fs"); const p=process.argv[1]; if(fs.existsSync(p) && !fs.statSync(p).isFile()) throw Error("Codex config must be a regular file"); const target=fs.existsSync(p)?fs.realpathSync(p):p; if (/[\r\n]/.test(target)) throw Error("Codex config path must not contain line breaks"); process.stdout.write(target);' "${config_path}")"

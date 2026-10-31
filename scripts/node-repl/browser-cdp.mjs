@@ -1,3 +1,4 @@
+import {accessibilityStateDiff,browserAccessibilityState} from './accessibility-state.mjs';
 import {AsyncLocalStorage} from 'node:async_hooks';
 import {BrowserWebMcp,WEBMCP_DOCUMENTATION,webMcpInput,webMcpDescription} from './browser-webmcp.mjs';
 import {normalizeHistoryOptions} from './chrome-browser-extension/history.mjs';
@@ -721,7 +722,7 @@ Use cua.listTabs(), cua.getTab(id or {url}), and cua.createBrowserTab("cdp", url
 Tab bindings expose getAXState(), getScreenshot(), getAXStateAndScreenshot(), screenshot(),
 title(), url(), goto(url,{timeoutMs?}), back({timeoutMs?}), forward({timeoutMs?}), reload({timeoutMs?}), close(), markDeliverable() and markHandoff(). Raw navigation commands use a host-owned native connection and default 10s active-time budget, paused across known owned dialogs. timeoutMs:0 disables the command deadline while reset/close/turn timeout still cancels. Cancellation waits for stopLoading, the original receipt and a renderer barrier; failed cleanup keeps ownership and stops reuse until reset retries or the original browser exit is confirmed. Native errorText is reported even after a dialog response. A dismissed beforeunload cancels navigation. Command acknowledgement does not wait for page load; inspect state or use navigation waits.
 Created tabs/popups are ephemeral at turn end unless marked. Latest mark wins; both marks clear when the next turn begins, so mark again as needed. User tabs stay open. js_reset retains tab ownership. Session close keeps marked survivors. Observations emit by default;
-pass {emit:false} to suppress output. AX state uses browser accessibility node IDs.
+pass {emit:false} to suppress output. AX state uses browser accessibility node IDs and exposes semantic properties, descriptions and hierarchy. Emitted observations use compact diffs when smaller, or report unchanged state. Pass {disableDiffing:true} for full output; return values always contain the full current tree. Unseen reads do not advance the diff baseline. Screenshots, navigation and failed browser operations clear it. Native iframe AX/input routing remains open; use documented frame locators.
 Tab input: click(elementIndex, {mouseButton?, clickCount?, key?, durationMs?}), typeText(elementIndexOrNull, text),
 pressKey(elementIndexOrNull, key, {durationMs?}), paste(elementIndexOrNull, text, {format:"text"|"html"}),
 and scroll(elementIndex, direction, pages). Read fresh AX state after actions.
@@ -878,9 +879,10 @@ export function createBrowserApi(activeOutput, environment = process.env, {runti
     const version = await json("/json/version");
     return withConnection(version.webSocketDebuggerUrl, send => send(method, params));
   }
+  const initialAX=new WeakMap();
   function bind(target) {
-    let elements = new Map(), documentId, capture;
-    const invalidate = () => { elements.clear(); documentId = undefined; capture = undefined; };
+    let elements = new Map(), documentId, capture, previousObservation;
+    const invalidate = error => { elements.clear(); documentId = undefined; capture = undefined;if(error)previousObservation=undefined; };
     const ready = async () => {
       const current = (await targets()).find(item => item.id === target.id);
       if (!current) throw new Error("Tab closed or no longer available");
@@ -889,13 +891,13 @@ export function createBrowserApi(activeOutput, environment = process.env, {runti
       return current;
     };
     const operate = async operation => {
-      const current=await ready();
-      try { return await withConnection(current.webSocketDebuggerUrl, operation); }
-      catch (error) { invalidate(); throw error; }
+      try { const current=await ready();return await withConnection(current.webSocketDebuggerUrl, operation); }
+      catch (error) { invalidate(error);throw error; }
     };
     const command = (method, params) => operate(send => send(method, params));
     const navigation=(method,params,options={})=>{
       validateTimeoutOptions(options);
+      previousObservation=undefined;
       return withDialogAction(target.id,async(_opened,_changes,navigate)=>{await ready();return navigate(method,params,options);});
     };
     const input = operation => withDialogAction(target.id, () => operate(async send => {
@@ -930,21 +932,28 @@ export function createBrowserApi(activeOutput, environment = process.env, {runti
       return position;
     }
     async function ax(options = {}) {
+      if(!options || typeof options!=="object" || Array.isArray(options) || Object.keys(options).some(key=>!["emit","disableDiffing"].includes(key)))throw new Error("Invalid AX observation options");
+      for(const key of ["emit","disableDiffing"])if(options[key]!==undefined && typeof options[key]!=="boolean")throw new Error(`${key} must be a boolean`);
       const result = await operate(async send => {
         const before = (await send("Page.getFrameTree")).frameTree.frame;
         const tree = await send("Accessibility.getFullAXTree");
         const after = (await send("Page.getFrameTree")).frameTree.frame;
-        if (before.loaderId !== after.loaderId) throw new Error("Page changed during AX observation; read state again");
+        if (before.loaderId !== after.loaderId || before.url !== after.url || before.urlFragment !== after.urlFragment) throw new Error("Page changed during AX observation; read state again");
         documentId = after.loaderId;
         elements = new Map(tree.nodes.filter(node => !node.ignored && node.backendDOMNodeId).map(node => [String(node.nodeId), node]));
-        return tree;
+        return {...tree,documentURL:after.url+(after.urlFragment??"")};
       });
-      const state = result.nodes.filter(node => !node.ignored).map(node => `[${node.nodeId}] ${node.role?.value ?? ""} ${JSON.stringify(node.name?.value ?? "")}${node.value ? ` value=${JSON.stringify(node.value.value)}` : ""}`).join("\n");
-      if (options.emit !== false) activeOutput().write(state, "cua.state");
+      const signature=JSON.stringify([documentId,result.documentURL]);
+      const state=browserAccessibilityState(result.nodes);
+      if(initialAX.has(tab))initialAX.set(tab,()=>{activeOutput().write(state,"cua.state");previousObservation={text:state,signature};});
+      if(options.emit!==false){
+        activeOutput().write(accessibilityStateDiff(!options.disableDiffing && previousObservation?.signature===signature ? previousObservation.text : undefined,state,`tab ${target.id}`),"cua.state");
+        previousObservation={text:state,signature};
+      }
       return state;
     }
     async function screenshot(options = {}, format = "png", emit = true) {
-      invalidate();
+      previousObservation=undefined;invalidate();
       const {bytes, image} = await operate(async send => {
         const before = await geometry(send);
         const region = screenshotRegion(options,before);
@@ -983,7 +992,7 @@ export function createBrowserApi(activeOutput, environment = process.env, {runti
         if (result.exceptionDetails) throw new Error(result.exceptionDetails.exception?.description ?? result.exceptionDetails.text ?? "Text operation failed");
       });
     }
-    return Object.freeze({
+    const tab=Object.freeze({
       ...info(target),
       content:Object.freeze({
         exportGsuite:async type=>{await checkDialog(target.id);return requestContent({action:'exportGsuite',targetId:target.id,type});},
@@ -1132,6 +1141,8 @@ export function createBrowserApi(activeOutput, environment = process.env, {runti
         await requestLogs({action:"stop",targetId:target.id});
       },
     });
+    initialAX.set(tab,undefined);
+    return tab;
     async function traverse(offset,options) {
       validateTimeoutOptions(options);
       invalidate();
@@ -1157,11 +1168,13 @@ export function createBrowserApi(activeOutput, environment = process.env, {runti
     if (dialog) activeOutput().write(`Active JavaScript ${dialog.type} dialog; use tab.getJsDialog().`,"cua.state");
     else {
       const allowDialog=async error=>{if(!await requestDialog({action:"state",targetId:tab.id})) throw error;};
+      // Initial observation may resume after yielding a dialog into another JS call.
       const state=await withDialogAction(tab.id,()=>tab.getAXState({emit:false}).catch(allowDialog)).catch(allowDialog);
       const opened = await requestDialog({action:"state",targetId:tab.id});
       if (opened) activeOutput().write(`Active JavaScript ${opened.type} dialog; use tab.getJsDialog().`,"cua.state");
-      else if(state!==undefined) activeOutput().write(state,"cua.state");
+      else if(state!==undefined)initialAX.get(tab)?.();
     }
+    initialAX.delete(tab);
     return tab;
   }
   let browserDocsShown=false;

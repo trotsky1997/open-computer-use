@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import {accessibilityStateDiff} from './accessibility-state.mjs';
 import {browserRuntime} from './browser-runtime.mjs';
 import {BrowserWebMcp} from './browser-webmcp.mjs';
 import {BrowserContent} from "./browser-content.mjs";
@@ -534,20 +535,7 @@ export function createCuaApi(native, activeOutput, onDispose, {tabRequest,platfo
     if (options.emit === false) return;
     const signature = JSON.stringify(optionsToSnapshotArgs(options));
     const previous = observations.get(app);
-    let output = text;
-    if (!options.disableDiffing && previous?.signature === signature) {
-      const before = previous.text.split("\n"), after = text.split("\n");
-      let start = 0, end = 0;
-      while (start < before.length && start < after.length && before[start] === after[start]) start++;
-      while (end < before.length - start && end < after.length - start && before[before.length - 1 - end] === after[after.length - 1 - end]) end++;
-      if (start === before.length && start === after.length) output = "Accessibility state unchanged.";
-      else {
-        const removed = before.slice(start, before.length - end);
-        const added = after.slice(start, after.length - end);
-        const diff = `Accessibility state diff for ${app} (replace ${removed.length} line(s) at line ${start + 1} with ${added.length} line(s)):\n${removed.map(line => `- ${line}`).join("\n")}\n${added.map(line => `+ ${line}`).join("\n")}`;
-        if (diff.length < text.length) output = diff;
-      }
-    }
+    const output = accessibilityStateDiff(!options.disableDiffing && previous?.signature === signature ? previous.text : undefined, text, app);
     await emitText(output, options);
     observations.set(app, { text, signature });
   }

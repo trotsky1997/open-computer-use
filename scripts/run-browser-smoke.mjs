@@ -60,7 +60,7 @@ try {
   const find = (state, role, name) => {
     const line = state.split('\n').find(line => line.includes(` ${role} "${name}"`));
     assert.ok(line, `Missing ${role} ${name} in ${state}`);
-    return line.match(/^\[([^\]]+)\]/)[1];
+    return line.trimStart().match(/^\[([^\]]+)\]/)[1];
   };
   let state = await tab.getAXState({emit:false});
   await assert.rejects(tab.click(find(state, 'button', 'Covered button')), /covered or not visible/);
@@ -134,7 +134,7 @@ try {
     const state = JSON.parse(result.content.at(-1).text);
     assert.equal(state.browsers[0].tabs.some(item => item.id === tab.id), true);
     assert.match(state.errors[0], /native inventory unavailable/);
-    const typed = await session.run(`var workerTab = await cua.getTab(${JSON.stringify(tab.id)}); var ax = await workerTab.getAXState({emit:false}); var field = ax.split("\\n").find(line => line.includes(' textbox "Name"')).match(/^\\[([^\\]]+)\\]/)[1]; await workerTab.setValue(field, "Worker target"); await workerTab.selectText(field, "target"); await workerTab.typeText(null, "input verified"); await workerTab.getAXState();`);
+    const typed = await session.run(`var workerTab = await cua.createBrowserTab("cdp",${JSON.stringify(url.replace('/first','/second'))},{visible:false}); var ax = await workerTab.getAXState({emit:false}); var field = ax.split("\\n").find(line => line.includes(' textbox "Name"')).trimStart().match(/^\\[([^\\]]+)\\]/)[1]; await workerTab.setValue(field, "Worker target"); await workerTab.selectText(field, "target"); await workerTab.typeText(null, "input verified"); await workerTab.getAXState();`);
     assert.equal(typed.isError, false, JSON.stringify(typed.content));
     assert.ok(typed.content.some(item => item.text?.includes('value="Worker input verified"')));
   } finally {await session.close();}
@@ -179,7 +179,7 @@ try {
   assert.equal(await user.inputValue(), 'Locator survives navigation');
   const locatorWorker = new WorkerJavaScriptSession({native:{async request(){throw new Error('Native not used');}}});
   try {
-    let result = await locatorWorker.run(`var locatorTab = await cua.getTab(${JSON.stringify(tab.id)}); var userLocator = locatorTab.playwright.getByLabel("User name"); await userLocator.fill("Worker locator"); nodeRepl.write(await userLocator.inputValue());`);
+    let result = await locatorWorker.run(`var locatorTab = await cua.createBrowserTab("cdp",${JSON.stringify(url.replace('/first','/locators'))},{visible:false}); var userLocator = locatorTab.playwright.getByLabel("User name"); await userLocator.fill("Worker locator"); nodeRepl.write(await userLocator.inputValue());`);
     assert.equal(result.isError, false, JSON.stringify(result.content));
     assert.equal(result.content.at(-1).text, 'Worker locator');
     result = await locatorWorker.run(`await userLocator.fill("Persistent worker locator"); nodeRepl.write(await locatorTab.playwright.getByRole("button", {name:/^Save$/}).count());`);
@@ -189,16 +189,19 @@ try {
   for (const mode of ['timeout','reset','close','exit','cleanup-failure']) {
     const cancellation = new WorkerJavaScriptSession({native:{async request(){throw new Error('Native not used');}}});
     const originalUpdate = cancellation.browserFocusLeases.updateFocus;
+    let cancellationId;
     try {
+      const created=await cancellation.run(`var t=await cua.createBrowserTab('cdp',${JSON.stringify(url.replace('/first','/locators'))},{visible:false});await t.markHandoff();nodeRepl.write(t.id);`);
+      assert.equal(created.isError,false,JSON.stringify(created.content));cancellationId=created.content.at(-1).text;
       if (mode === 'cleanup-failure') cancellation.browserFocusLeases.updateFocus = (target,enabled) => {
         if (!enabled) throw new Error('Injected cleanup outage');
         return originalUpdate(target,enabled);
       };
-      const baseline = await visibility(tab.id);
-      const running = cancellation.run(`var t = await cua.getTab(${JSON.stringify(tab.id)}); await t.playwright.getByRole("button", {name:"Never enabled",exact:true}).click({timeoutMs:0});`, ['timeout','cleanup-failure'].includes(mode) ? 1500 : 10000);
+      const baseline = await visibility(cancellationId);
+      const running = cancellation.run(`await t.playwright.getByRole("button", {name:"Never enabled",exact:true}).click({timeoutMs:0});`, ['timeout','cleanup-failure'].includes(mode) ? 1500 : 10000);
       let acquired = false;
       for (let i=0;i<100;i++) {
-        if ((await visibility(tab.id)) === 'visible') { acquired = true; break; }
+        if ((await visibility(cancellationId)) === 'visible') { acquired = true; break; }
         await new Promise(resolve=>setTimeout(resolve,20));
       }
       assert.equal(acquired,true,`${mode}: host focus lease was never observed`);
@@ -213,7 +216,7 @@ try {
         cancellation.browserFocusLeases.updateFocus = originalUpdate;
         await cancellation.reset();
       }
-      assert.equal(await visibility(tab.id),baseline,`${mode}: focus cleanup did not restore background visibility`);
+      assert.equal(await visibility(cancellationId),baseline,`${mode}: focus cleanup did not restore background visibility`);
       if(mode !== 'close') {
         const recovered = await cancellation.run('nodeRepl.write(42)');
         assert.equal(recovered.content.at(-1).text,'42',mode);
@@ -221,6 +224,7 @@ try {
     } finally {
       cancellation.browserFocusLeases.updateFocus = originalUpdate;
       await cancellation.close();
+      if(cancellationId)await fetch(new URL(`/json/close/${cancellationId}`,process.env.OPEN_COMPUTER_USE_CDP_URL));
     }
   }
   const navigationURL = url.replace('/first','/navigation');
@@ -250,7 +254,7 @@ try {
   const navigationWorker = new WorkerJavaScriptSession({native:{async request(){throw new Error('Native not used');}}});
   try {
     await tab.goto(navigationURL);
-    let result = await navigationWorker.run(`var nt = await cua.getTab(${JSON.stringify(tab.id)}); var value = await nt.playwright.expectNavigation(async()=>{await nt.playwright.getByRole("link",{name:"Redirect link"}).click();return "Worker navigation";},{url:"**/arrived",timeoutMs:5000}); await nt.playwright.waitForLoadState({state:"load"}); nodeRepl.write(value);`);
+    let result = await navigationWorker.run(`var nt = await cua.createBrowserTab("cdp",${JSON.stringify(navigationURL)},{visible:false}); var value = await nt.playwright.expectNavigation(async()=>{await nt.playwright.getByRole("link",{name:"Redirect link"}).click();return "Worker navigation";},{url:"**/arrived",timeoutMs:5000}); await nt.playwright.waitForLoadState({state:"load"}); nodeRepl.write(value);`);
     assert.equal(result.isError,false,JSON.stringify(result.content));
     assert.equal(result.content.at(-1).text,'Worker navigation');
     result = await navigationWorker.run('await nt.playwright.waitForURL("**/never-navigation",{timeoutMs:0});',500);
@@ -283,7 +287,7 @@ try {
   await assert.rejects(tab.playwright.waitForEvent('filechooser',{timeoutMs:100}),/Timeout/);
   const fileWorker = new WorkerJavaScriptSession({native:{async request(){throw new Error('Native not used');}}});
   try {
-    let result = await fileWorker.run(`var ft = await cua.getTab(${JSON.stringify(tab.id)}); var pendingFile = ft.playwright.waitForEvent("filechooser",{timeoutMs:5000}); await ft.playwright.getByLabel("Single upload").click(); var fileHandle=await pendingFile; nodeRepl.write(fileHandle.isMultiple());`);
+    let result = await fileWorker.run(`var ft = await cua.createBrowserTab("cdp",${JSON.stringify(url.replace('/first','/files'))},{visible:false}); var pendingFile = ft.playwright.waitForEvent("filechooser",{timeoutMs:5000}); await ft.playwright.getByLabel("Single upload").click(); var fileHandle=await pendingFile; nodeRepl.write(fileHandle.isMultiple());`);
     assert.equal(result.isError,false,JSON.stringify(result.content));
     assert.equal(result.content.at(-1).text,'false');
     result = await fileWorker.run(`await fileHandle.setFiles(${JSON.stringify(fileB)}); nodeRepl.write(await ft.playwright.getByText("b.txt",{exact:true}).count());`);
@@ -292,17 +296,18 @@ try {
     result = await fileWorker.run('await ft.playwright.waitForEvent("filechooser",{timeoutMs:0});',500);
     assert.equal(result.isError,true);
     assert.match(result.content.at(-1).text,/timed out/);
-    result = await fileWorker.run(`var ft = await cua.getTab(${JSON.stringify(tab.id)}); var pendingFile=ft.playwright.waitForEvent("filechooser",{timeoutMs:5000}); await ft.playwright.getByLabel("Single upload").click(); var fileHandle=await pendingFile;`);
+    result = await fileWorker.run(`var ft = await cua.createBrowserTab("cdp",${JSON.stringify(url.replace('/first','/files'))},{visible:false}); var pendingFile=ft.playwright.waitForEvent("filechooser",{timeoutMs:5000}); await ft.playwright.getByLabel("Single upload").click(); var fileHandle=await pendingFile;`);
     assert.equal(result.isError,false,JSON.stringify(result.content));
     await fileWorker.reset();
-    result = await fileWorker.run(`var ft = await cua.getTab(${JSON.stringify(tab.id)}); var pendingFile=ft.playwright.waitForEvent("filechooser",{timeoutMs:5000}); await ft.playwright.getByLabel("Single upload").click(); await (await pendingFile).setFiles(${JSON.stringify(fileA)}); nodeRepl.write(await ft.playwright.getByText("a.txt",{exact:true}).count());`);
+    result = await fileWorker.run(`var ft = await cua.createBrowserTab("cdp",${JSON.stringify(url.replace('/first','/files'))},{visible:false}); var pendingFile=ft.playwright.waitForEvent("filechooser",{timeoutMs:5000}); await ft.playwright.getByLabel("Single upload").click(); await (await pendingFile).setFiles(${JSON.stringify(fileA)}); nodeRepl.write(await ft.playwright.getByText("a.txt",{exact:true}).count());`);
     assert.equal(result.isError,false,JSON.stringify(result.content));
     assert.equal(result.content.at(-1).text,'1');
   } finally {await fileWorker.close();}
+  const beforeMissing=await tab.playwright.locator('#file-result').innerText();
   pendingChooser = tab.playwright.waitForEvent('filechooser',{timeoutMs:5000});
   await tab.playwright.getByLabel('Single upload').click();
   await assert.rejects((await pendingChooser).setFiles(path.join(fileDirectory,'missing.txt')),/ENOENT|no such file/i);
-  assert.equal(await tab.playwright.getByText('a.txt',{exact:true}).count(),1);
+  assert.equal(await tab.playwright.locator('#file-result').innerText(),beforeMissing);
   const observerBrowser = await chromium.connectOverCDP(process.env.OPEN_COMPUTER_USE_CDP_URL,{noDefaults:true});
   try {
     const observedPage = observerBrowser.contexts().flatMap(context=>context.pages()).find(page=>page.url()===url.replace('/first','/files'));

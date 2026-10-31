@@ -16,7 +16,7 @@ export function createPlaywrightApi(endpoint, targetId, invalidate, focusLease, 
   const actions = ["click", "dblclick", "fill", "press", "check", "uncheck", "setChecked", "selectOption", "hover", "scrollIntoViewIfNeeded", "pressSequentially", "type", "drop"];
   async function invoke(path, method, args) {
     const observer=["expectNavigation","waitForURL","waitForLoadState"].includes(method);
-    const run=async(_opened,changes)=>{if(checkDialog)await checkDialog(actions.includes(method));return perform(path,method,args,changes);};
+    const run=async(_opened,changes)=>{try{if(checkDialog)await checkDialog(actions.includes(method));return await perform(path,method,args,changes);}catch(error){invalidate(error);throw error;}};
     return withAction && (actions.includes(method)||observer)?withAction(run,{observer}):run();
   }
   async function perform(path, method, args, dialogChanges) {

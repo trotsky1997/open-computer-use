@@ -2405,3 +2405,33 @@ hosts on macOS/Linux. Node: 212/212 macOS, 211/212 Linux with one platform-only
 skip. Broader provider races, asynchronous cross-target dialogs after the child
 watch ends, other raw CDP deadlines, Windows and physical desktop proof remain
 open; full harness parity stays active.
+
+## Browser AX semantics and output
+
+Implemented native AX hierarchy, descriptions and semantic properties with stable
+native node indices. Ignored ancestors flatten; layout-only InlineTextBox
+nodes are omitted because their IDs churn between attachments. Native and browser
+output reuse one compact line-diff function. Only emitted observations advance
+the per-binding baseline, while full return values and fresh indices remain
+available to code. Screenshots, loader/URL/fragment changes and failed page
+reads/Playwright operations reset output history. Initial observations establish
+a baseline; options validate before page access.
+
+Owned Chrome 158 source/current-runtime installed tests after source relocation
+pass both hosts on macOS/Linux: false/true/mixed states, descriptions, native AX
+checkbox clicks, unseen reads, compact/full/unchanged output, screenshots,
+failures and cross-/same-document navigation. Node: 213/213 macOS; 212/213 Linux
+with one platform-only skip. Main browser regression now uses independent owned
+Worker targets and indentation-aware index extraction. Installer, CLI test
+fixtures and both npm runtime copies carry the shared module. Native iframe
+AX/input routing, other provider fidelity, physical desktop and Windows remain
+open; full harness parity stays active.
+
+Initial binding emission also preserves JS output ownership. An exact native AX
+reply hold followed by modal handoff reproduced stale-owner output failure in
+PersistentJavaScriptSession; completed initial trees now emit through a private
+one-shot callback only while their original call remains active. Final source
+and source-relocated installed controllers include that deterministic probe.
+The full Linux installed headful/MCP pipeline passed before this final boundary
+correction; current-module equality and native early-dialog checks cover the
+correction without repeating unrelated long deadline suites.

@@ -20,7 +20,7 @@ async function until(check){const deadline=Date.now()+5000;while(!await check())
 async function setup(session,route=''){
  const id=await run(session,`var tab=await cua.createBrowserTab('cdp',${JSON.stringify(url+route)},{visible:false});await tab.markHandoff();await tab.playwright.waitForURL(${JSON.stringify(url+route)});nodeRepl.write(JSON.stringify(tab.id));`);ids.add(id);
  const baseline=await state(id),width=await run(session,'var image=await tab.getScreenshot({emit:false});nodeRepl.write(JSON.stringify(image.readUInt32BE(16)));'),scale=width/baseline.width;
- await run(session,`var from=[${50*scale},${100*scale}],to=[${240*scale},${100*scale}];var ax=await tab.getAXState({emit:false});var index=ax.split('\\n').find(line=>line.includes(' button \"Pointer surface\"')).match(/^\\[([^\\]]+)\\]/)[1];nodeRepl.write(JSON.stringify(true));`);return {id,baseline};
+ await run(session,`var from=[${50*scale},${100*scale}],to=[${240*scale},${100*scale}];var ax=await tab.getAXState({emit:false});var index=ax.split('\\n').find(line=>line.includes(' button \"Pointer surface\"')).trimStart().match(/^\\[([^\\]]+)\\]/)[1];nodeRepl.write(JSON.stringify(true));`);return {id,baseline};
 }
 try{
  for(const Session of [WorkerJavaScriptSession,PersistentJavaScriptSession])for(const [mode,kind] of [['hover-move','ax'],['hover-cover','ax'],['hover-name','ax'],['multi-name','ax'],['multi-move','ax'],['hover-content','click'],['hover-content','drag']]){

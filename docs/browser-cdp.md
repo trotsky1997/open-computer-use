@@ -32,7 +32,28 @@ AX state. URL matching is exact and ambiguous matches fail explicitly. Tabs expo
 `id`, `providerTabId`, `browserId`, `title` and `url`; metadata describes the binding
 at creation time. Refresh the tab inventory to obtain current titles and URLs.
 Observation methods support `{emit:false}` and return full state / PNG bytes.
-Browser AX node IDs are supplied by Chromium. Supported input operations are:
+Browser AX node IDs are supplied by Chromium. Output preserves accessible
+hierarchy and includes semantic properties such as checked/pressed (including
+mixed), disabled, expanded, selected, required, readonly, invalid, focus and
+range values, plus accessible descriptions. Ignored ancestors are flattened;
+layout-only InlineTextBox duplicates are omitted because their native IDs change
+between CDP attachments. Visible actionable indices remain native node IDs.
+
+Emitted AX observations use a compact line replacement diff when it is shorter
+than the full tree, or `Accessibility state unchanged.`. Pass
+`{disableDiffing:true}` for full output. Return values always contain the full
+current state. Each binding tracks its emitted baseline; `{emit:false}` reads
+update its actionable indices without advancing that baseline. Screenshots,
+document/URL changes and failed page reads or Playwright operations reset the
+baseline. The next successful observation emits a complete tree. Initial binding
+observations also establish a baseline. Initial binding reads stay silent until their
+original call can emit the completed tree; a dialog-yielded read never writes
+output into a later JS call. Option fields are `emit` and
+`disableDiffing`, both booleans.
+
+Native AX observation/input currently covers the top-level document. Use
+`frameLocator()` and `domSnapshot()` for iframe content while native frame-bound
+indices and input routing remain open work. Supported input operations are:
 
 ```js
 await tab.click(elementIndex, {mouseButton: "left", clickCount: 1});

@@ -40,7 +40,7 @@ try{
   try{
    if(mode==='navigation'){originalOpen=current.browserInputs.open;current.browserInputs.open=async(...args)=>{const connection=await originalOpen(...args),send=connection.send;connection.send=async(method,params,...rest)=>{const result=await send(method,params,...rest);if(method==='Input.dispatchKeyEvent')acknowledgements.push(params);return result;};return connection;};}
    const id=await setup(mode==='redirect'?'?text-redirect':mode==='navigation'?'?key-nav':mode.startsWith('shift-')?'?key-'+mode:'','keytarget',current),baseline=await textState(id);
-   await run(`var ax=await keytarget.getAXState({emit:false});var field=ax.split('\\n').find(line=>line.includes(' textbox \"Typing\"')).match(/^\\[([^\\]]+)\\]/)[1];nodeRepl.write(JSON.stringify(true));`,current);
+   await run(`var ax=await keytarget.getAXState({emit:false});var field=ax.split('\\n').find(line=>line.includes(' textbox \"Typing\"')).trimStart().match(/^\\[([^\\]]+)\\]/)[1];nodeRepl.write(JSON.stringify(true));`,current);
    const result=await current.run(`await keytarget.pressKey(field,${JSON.stringify(mode==='navigation'?'shift+Return':mode==='redirect'?'a':'shift+a')});`);
    if(mode==='navigation')await run(`await keytarget.playwright.waitForURL(${JSON.stringify(url+'?arrived')});nodeRepl.write(JSON.stringify(true));`,current);
    const final=await textState(id);
@@ -65,7 +65,7 @@ try{
   try{
    const modal=['reply','turn','reset','timeout','close','exit'].includes(mode),id=await setup(modal?'?text-dialog':mode==='redirect'?'?text-redirect':mode==='selection'?'?text-selection':'','texttab',current);
    const baseline=await textState(id);
-   await run(`var ax=await texttab.getAXState({emit:false});var field=ax.split('\\n').find(line=>line.includes(' textbox \"Typing\"')).match(/^\\[([^\\]]+)\\]/)[1];nodeRepl.write(JSON.stringify(true));`,current);
+   await run(`var ax=await texttab.getAXState({emit:false});var field=ax.split('\\n').find(line=>line.includes(' textbox \"Typing\"')).trimStart().match(/^\\[([^\\]]+)\\]/)[1];nodeRepl.write(JSON.stringify(true));`,current);
    if(mode==='current')await run(`await texttab.playwright.getByLabel('Typing').fill('pre');nodeRepl.write(JSON.stringify(true));`,current);
    const beforeCount=(await textState(id)).events.length;
    let competitorId;
