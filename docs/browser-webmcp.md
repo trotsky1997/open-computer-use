@@ -105,6 +105,16 @@ cancellation signal, and a callback that ignores it may continue accepted side
 effects. Cancellation supplies no rollback; inspect state before another action.
 Other owners' pages and native browser processes remain open.
 
+Native session crash events and main-page crash events interrupt outstanding
+invocations with a renderer-crashed error. A destroyed native target confirms
+that target's callers are gone. A main-page crash only supplies that confirmation
+for its root/same-process records; surviving OOP sessions still require abort
+acknowledgement. A child-session crash cannot confirm release in a surviving root
+session. Crash outcomes remain errors and are never converted to navigation's
+`null` result. Inspect accepted side effects before continuing. Reset and a fresh
+tab are the verified recovery route; reloading the same crashed Playwright page
+is outside this validation.
+
 ## Validation
 
 ```sh
@@ -127,12 +137,12 @@ opaque names and raw string results. Temporary reference tabs were closed.
 
 A disposable testing profile used Chrome's test keychain flag because the new
 browser's real keychain read blocked; process-stack
-sampling identified that wait. No normal profile/keychain settings were changed. All 160 Node checks pass;
+sampling identified that wait. No normal profile/keychain settings were changed. All 162 Node checks pass on macOS; Linux passes 161 with the macOS-only virtual-display check skipped;
 native-free CLI/MCP and both sessions’ read-only evaluation regressions also
 passed on Chrome 158, including renderer-crash cleanup.
 The test runtime came from the official Chrome for Testing channel metadata.
 Browser-wide discovery of unbound tabs, real user-interaction/consent dialogs, headful and
-Linux/Windows behavior, browser crashes and broader external-site workflows remain
+Windows behavior, whole-browser process death, live OOP-child crash and broader external-site workflows remain
 unverified. Full transport/claims/native desktop parity remains an active goal.
 
 Turn-owned discovery also passes both sessions on Chrome 158: initial tools
@@ -142,3 +152,11 @@ connection round trips settle fixture events before unrelated-tab isolation
 assertions. A separate older Chrome passes ordinary binding and explicit
 unsupported-WebMCP behavior. Ordinary browser, navigation/input/filechooser and
 dialog controllers are rerun when this shared binding path changes.
+
+Ubuntu arm64 / Node 24.22.1 and macOS / Node 26.11.1 both pass the complete
+WebMCP controller on Chrome for Testing 158.0.8127.2, including renderer crash
+with an outstanding call, reset cleanup and a successful tool call in a fresh
+tab. The Linux runtime came from the [official version manifest](https://googlechromelabs.github.io/chrome-for-testing/158.0.8127.2.json).
+The fixture closes its owned HTTP connections before awaiting server shutdown;
+this prevents an accepted local keepalive connection from delaying process exit
+on Node 24. Crash control sessions detach asynchronously after their target dies.

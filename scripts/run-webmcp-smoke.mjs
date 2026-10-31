@@ -28,13 +28,14 @@ async function settleNotices(session){
  const sessions=new Set(states.flatMap(state=>[...state.collections.values(),...state.observers.values()].flatMap(entry=>[...entry.watchers.keys()])));
  await Promise.all([...sessions].map(session=>session.send('Page.getFrameTree')));
 }
+async function targetPage(id){for(const context of browser.contexts())for(const page of context.pages()){const cdp=await context.newCDPSession(page);try{if((await cdp.send('Target.getTargetInfo')).targetInfo.targetId===id)return page;}finally{await cdp.detach();}}throw Error('Owned fixture page is missing');}
 function listing(text){const start=text.indexOf('['),end=text.lastIndexOf(']');return start<0?[]:JSON.parse(text.slice(start,end+1));}
 try{
  for(const Session of [WorkerJavaScriptSession,PersistentJavaScriptSession]){
   const session=new Session({native});let page;
   try{
-   const initial=await session.run(`var b=await cua.getBrowser({id:'cdp'});var tab=await b.tabs.new();await tab.goto(${JSON.stringify(url)});await tab.markHandoff();nodeRepl.write(JSON.stringify(tab.id));`);assert.equal(initial.isError,false);const id=JSON.parse(initial.content.at(-1).text);
-   for(const context of browser.contexts())for(const candidate of context.pages()){const cdp=await context.newCDPSession(candidate);try{if((await cdp.send('Target.getTargetInfo')).targetInfo.targetId===id)page=candidate;}finally{await cdp.detach();}}
+   const initial=await session.run(`var b=await cua.getBrowser({id:'cdp'});var tab=await b.tabs.new();await tab.goto(${JSON.stringify(url)});await tab.markHandoff();nodeRepl.write(JSON.stringify(tab.id));`);assert.equal(initial.isError,false);let id=JSON.parse(initial.content.at(-1).text);
+   page=await targetPage(id);
    assert.ok(page);await page.waitForURL(url,{waitUntil:'load'});for(const frame of page.frames())await frame.evaluate(()=>fixture.ready);
    if(missing){assert.equal(await run(session,`var cap=await tab.capabilities.get('webmcp');var failed=false;try{await cap.fetchTools();}catch(e){failed=/Native WebMCP is unavailable/.test(e.message);}nodeRepl.write(JSON.stringify(failed));`),true);console.log(`${Session.name} PASS explicit missing-native failure`);continue;}
    assert.equal([...session.browserWebMcp.owners.values()].reduce((n,state)=>n+state.collections.size,0),0,'Discovery fetched callable handles');
@@ -75,18 +76,24 @@ try{
    await page.waitForURL(url+'empty');
    assert.equal(await run(session,`var stale=false;try{await next.call(${JSON.stringify(nav.name)},{});}catch(e){stale=true;}nodeRepl.write(JSON.stringify(stale));`),true);
    assert.equal(await run(session,`var empty=await cap.fetchTools();nodeRepl.write(JSON.stringify(empty.description()));`),'No WebMCP tools are available in this document.');
-   await run(session,`await tab.goto(${JSON.stringify(url+'form')});nodeRepl.write(JSON.stringify(true));`);await page.waitForURL(url+'form',{waitUntil:'load'});for(const frame of page.frames())await frame.evaluate(()=>fixture.ready);
+   await run(session,`await tab.goto(${JSON.stringify(url+'form')});nodeRepl.write(JSON.stringify(true));`);await page.waitForURL(url+'form',{waitUntil:'load'});await page.evaluate(()=>fixture.ready);
    const formTools=listing(await run(session,`var formTools=await cap.fetchTools();nodeRepl.write(JSON.stringify(formTools.description()));`)),form=formTools.find(tool=>tool.name.startsWith('submit_echo__'));assert.ok(form);
    assert.equal(await run(session,`nodeRepl.write(JSON.stringify(await formTools.call(${JSON.stringify(form.name)},{text:'owned-form-value'})));`),null);await page.waitForURL(url+'empty?text=owned-form-value');
    await session.reset();assert.equal(session.browserWebMcp.owners.size,0);
-   for(const ending of ['reset','close']){
+   for(const ending of ['crash','reset','close']){
     await run(session,`var b=await cua.getBrowser({id:'cdp'});var tab=await b.tabs.get(${JSON.stringify(id)});await tab.markHandoff();await tab.goto(${JSON.stringify(url+'cancel?'+ending)});nodeRepl.write(JSON.stringify(true));`);
     await page.waitForURL(url+'cancel?'+ending,{waitUntil:'load'});await page.evaluate(()=>fixture.ready);
     const current=listing(await run(session,`var cap=await tab.capabilities.get('webmcp');var current=await cap.fetchTools();nodeRepl.write(JSON.stringify(current.description()));`)),waiting=current.find(tool=>tool.name.startsWith('slow__'));assert.ok(waiting);
-    await run(session,`var pending=current.call(${JSON.stringify(waiting.name)},{}).catch(()=>{});nodeRepl.write(JSON.stringify(true));`);await page.waitForFunction(()=>fixture.started===1);
-    await session[ending]();await page.waitForFunction(()=>fixture.aborted===1);assert.equal(session.browserWebMcp.owners.size,0);
+    await run(session,`var pending=current.call(${JSON.stringify(waiting.name)},{}).catch(error=>error.message);nodeRepl.write(JSON.stringify(true));`);await page.waitForFunction(()=>fixture.started===1);
+    if(ending==='crash'){
+     const cdp=await page.context().newCDPSession(page),crashed=page.waitForEvent('crash',{timeout:5000});void cdp.send('Page.crash').catch(()=>{});await crashed;assert.match(await run(session,'nodeRepl.write(JSON.stringify(await pending));'),/renderer crashed/);
+     let timer;try{await Promise.race([session.reset(),new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('Crashed WebMCP cleanup did not finish within 15000 ms')),15000);})]);}finally{clearTimeout(timer);}
+     assert.equal(session.browserWebMcp.owners.size,0);void cdp.detach().catch(()=>{});await page.close();
+     const previousId=id;id=await run(session,`var b=await cua.getBrowser({id:'cdp'});var tab=await b.tabs.new();await tab.goto(${JSON.stringify(url+'cancel?recovered')});await tab.markHandoff();nodeRepl.write(JSON.stringify(tab.id));`);assert.notEqual(id,previousId);page=await targetPage(id);await page.waitForURL(url+'cancel?recovered',{waitUntil:'load'});await page.evaluate(()=>fixture.ready);
+     const recovered=listing(await run(session,`var cap=await tab.capabilities.get('webmcp');var recovered=await cap.fetchTools();nodeRepl.write(JSON.stringify(recovered.description()));`)),echo=recovered.find(tool=>tool.name.startsWith('echo__'));assert.ok(echo);assert.equal(await run(session,`nodeRepl.write(JSON.stringify(await recovered.call(${JSON.stringify(echo.name)},{text:'after-crash'})));`),JSON.stringify({content:[{type:'text',text:'after-crash'}]}));
+    }else{await session[ending]();await page.waitForFunction(()=>fixture.aborted===1);assert.equal(session.browserWebMcp.owners.size,0);}
    }
-   console.log(`${Session.name} PASS native tools, isolated API, exact same-URL/OOP frames, stale replacement/turn/navigation, provider validation errors, initial and late-frame discovery, coalesced main/child/OOP tool-change notices, turn/reset/close native cancellation settlement, declarative form and empty listing`);
-  }finally{await session.close();await page?.close();}
+   console.log(`${Session.name} PASS native tools, isolated API, exact same-URL/OOP frames, stale replacement/turn/navigation, provider validation errors, initial and late-frame discovery, coalesced main/child/OOP tool-change notices, renderer crash/reset and fresh-tab recovery, turn/reset/close native cancellation settlement, declarative form and empty listing`);
+  }finally{await page?.close();await session.close();}
  }
-}finally{await browser.close();await new Promise(resolve=>server.close(resolve));}
+}finally{await browser.close();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}

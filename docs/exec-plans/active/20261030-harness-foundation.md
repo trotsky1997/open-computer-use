@@ -1137,3 +1137,39 @@ before unrelated-tab isolation checks.
 No new dependency, CI, package publication or user-profile modification. Unbound
 browser-wide inventory, real consent, headful, other-platform and crash behavior
 remain open. Full harness parity remains active.
+
+## Linux WebMCP validation and native renderer-crash cleanup
+
+Validated the current native WebMCP workflow on Ubuntu arm64 / Node 24.22.1
+using official Chrome for Testing 158.0.8127.2 and a disposable profile. Both JS
+hosts pass discovery before fetch, preloaded tabs, exact same-URL/OOP frames,
+new frames, stale registrations/navigation, provider errors, native calls,
+declarative forms and turn/reset/close cleanup. macOS / Node 26.11.1 also passes
+the updated full controller. No normal profile or keychain settings were changed.
+
+An actual main-renderer crash during an outstanding tool call reproduced a
+reset that did not complete within 15 seconds. Fetched collections now race
+trusted page/native-session crash signals and report a renderer-crashed error.
+Each native record keeps its target/session relationship. Confirmed destruction
+only releases callers in that destroyed session or the crashed root process;
+a surviving OOP/root session still needs cancellation acknowledgement. Crash
+errors stay errors rather than returning navigation's null result. Targeted
+checks cover root crash, OOP cancellation and child/root crash separation.
+
+Both hosts now pass root renderer crash, invocation failure, reset cleanup and a
+successful tool call in a fresh tab on macOS and Linux. Same-tab reload through
+Playwright was rejected as a crashed page and remains outside this evidence.
+Whole-browser process death and live OOP-child crash also remain unverified.
+
+The fixture closes owned HTTP connections before server shutdown, fixing Node
+24 process-exit waits on an accepted local connection. The crashed control
+session detaches asynchronously. Its form case waits for main-document tool
+readiness; a child registration promise could remain pending while the harness
+had no outstanding request. Existing same-URL/OOP imperative assertions remain
+separate and pass. Inspector observations were limited to the owned test process.
+
+All 162 Node checks pass on macOS. Linux passes 161 and skips the macOS-only
+virtual-display option check. The Linux browser/input/navigation/filechooser,
+dialog and early-dialog/popup recovery controllers also completed successfully.
+No dependency, CI, package release or user-profile change was added. Full harness
+parity remains active.

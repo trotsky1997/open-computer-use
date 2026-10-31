@@ -62,7 +62,7 @@ test('native cancel waits for the original invocation to settle after abort',asy
 
 test('native inventory notices are frame-scoped, coalesced and fenced by owner lifecycle',async()=>{
  const {EventEmitter}=await import('node:events'),f=fixture(()=>{}),entry=f.state.collections.get('collection');entry.watchers=new Map();
- const session=new EventEmitter();let enables=0;session.send=async()=>{enables++;session.emit('WebMCP.toolsAdded',{tools:[{frameId:'main'}]});return {};};
+ const session=new EventEmitter();let enables=0;session.send=async method=>{if(method==='WebMCP.enable'){enables++;session.emit('WebMCP.toolsAdded',{tools:[{frameId:'main'}]});}return {};};
  await f.host.watch(f.state,entry,{session,frameId:'main'});await f.host.watch(f.state,entry,{session,frameId:'child'});assert.equal(enables,1);assert.deepEqual(f.host.notifications(f.owner),[]);
  session.emit('WebMCP.toolsAdded',{tools:{}});session.emit('WebMCP.toolsRemoved',{tools:[null]});session.emit('WebMCP.toolsAdded',{tools:[{frameId:'unrelated'}]});assert.deepEqual(f.host.notifications(f.owner),[]);
  session.emit('WebMCP.toolsAdded',{tools:[{frameId:'child'}]});session.emit('WebMCP.toolsRemoved',{tools:[{frameId:'main'}]});
@@ -102,4 +102,22 @@ test('initial discovery notices filter exact frames and failed observer close re
  session.emit('WebMCP.toolsAdded',{tools:[{frameId:'foreign'}]});assert.deepEqual(f.host.notifications(f.owner),[]);
  await assert.rejects(f.host.cleanup(f.owner),/Observer disconnect failed/);assert.equal(f.host.owners.size,1);assert.equal(f.state.observers.size,1);assert.equal(f.state.collections.size,0);
  fail=false;await f.host.cleanup(f.owner);assert.equal(f.host.owners.size,0);
+});
+
+test('renderer crash releases root callers and still awaits OOP cancellation',async()=>{
+ for(const root of [true,false]){
+  let signalCrash,acknowledge,cancels=0;const ack=new Promise(resolve=>{acknowledge=resolve;});
+  const f=fixture((_method,params)=>{if(params.functionDeclaration.includes('this.cancel')){cancels++;return ack;}return new Promise(()=>{});}),entry=f.state.collections.get('collection');
+  entry.tools.get('tool').root=root;entry.crash=new Promise((_,reject)=>{signalCrash=reject;});
+  const call=f.host.request(f.owner,f.args);call.catch(()=>{});entry.crashed=true;entry.rootCrashed=true;entry.stale=true;signalCrash(Error('WebMCP renderer crashed'));
+  await new Promise(resolve=>setImmediate(resolve));assert.equal(cancels,root?0:1);
+  if(!root){assert.equal(f.state.active.size,1);assert.equal(f.closed(),0);acknowledge({result:{type:'undefined'}});}
+  await assert.rejects(call,/renderer crashed/);assert.equal(f.state.active.size,0);await f.host.cleanup(f.owner);assert.equal(f.closed(),1);
+ }
+});
+
+test('a child renderer crash cannot confirm release in the surviving root session',async()=>{
+ let cancels=0;const f=fixture(async()=>{cancels++;return {result:{type:'undefined'}};}),entry=f.state.collections.get('collection'),record=entry.tools.get('tool');
+ const {EventEmitter}=await import('node:events'),child=new EventEmitter();child.send=async()=>({});entry.watchers=new Map();entry.rootSession=record.session;record.root=true;await f.host.watch(f.state,entry,{session:child,frameId:'child'});child.emit('Inspector.targetCrashed');assert.equal(entry.crashed,true);assert.equal(entry.rootCrashed,undefined);const active={entry,record,id:'owned'};await f.host.stop(f.state,active);
+ assert.equal(cancels,1);assert.equal(active.contextGone,undefined);await f.host.cleanup(f.owner);
 });
