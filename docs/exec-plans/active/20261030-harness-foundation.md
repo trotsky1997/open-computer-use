@@ -1055,3 +1055,28 @@ No new dependency, CI or release was added.
 Arbitrary concurrent changes, broader child-window/provider hit testing, GNOME/
 KWin, hardware, GPU/full-screen and Wayland/portal remain open. Full harness
 parity remains active.
+
+## WebMCP native cancellation settlement
+
+Read-through found that cleanup acknowledged abort dispatch without awaiting the
+native invocation's settlement. The isolated-world registry now retains each
+executeTool promise beside its AbortController. Its asynchronous cancel method
+signals abort and waits for that native promise to settle; CDP returns and awaits
+the cancellation promise before releasing ownership. Existing bounded cleanup,
+context-loss handling and failed-ack retention/retry remain shared by both hosts.
+No tool call is replayed and provider side effects can persist after cancellation.
+
+The focused check delays native settlement after abort and verifies that cancel
+stays pending. The host check requires a returned/awaited native cancellation
+promise, and existing cancellation failure/retry and context-loss checks pass.
+All 156 Node checks pass. Both source and Worker sessions pass the owned headless
+Chrome 158 workflow: native calls, exact frames, stale registrations/navigation,
+provider errors, turn/reset/close abort cleanup, declarative form and empty tools.
+The cancellation fixture uses separate URLs and explicit tab handoff so it can
+observe abort after reset/close without racing same-URL reload or tab disposal.
+
+No dependency, CI, install package, registry publication or user profile change.
+This round did not revalidate Linux/Windows/headful WebMCP, tool notifications or
+interaction/consent dialogs. Native caller settlement confirms the browser-side
+invocation; it provides no rollback of a provider's accepted effects. Full harness
+parity remains active.

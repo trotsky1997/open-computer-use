@@ -66,7 +66,11 @@ There is no extra permission grant or automatic user-interaction approval.
 The source and Worker REPLs share a host service. Each call has an independent
 AbortController in its native isolated world and a 120-second execution budget.
 Turn end/reset/close signals cancellation and waits for the native caller to
-acknowledge the abort before closing its connections. A failed acknowledgement
+acknowledge the abort before closing its connections. The isolated cancel method
+waits for that invocation's native `executeTool()` promise to settle; CDP awaits
+the returned cancellation promise. Abort dispatch alone cannot release ownership.
+The existing 10-second cancellation budget retains ownership on timeout, so a
+later cleanup can retry. A failed acknowledgement
 retains ownership for cleanup retry. Confirmed destruction of the exact context
 also ends its caller. Completed collections are released at the turn barrier;
 old JavaScript bindings must fetch new handles. Native tool callbacks receive a
@@ -88,7 +92,7 @@ macOS headless Chrome for Testing 158.0.8127.2 passed both source and Worker
 sessions: Unicode/raw string results, empty listings, main-world API spoofing,
 same-URL child frames, cross-origin OOP frames, denied child policy, guessed names,
 provider validation errors, same-name re-registration, old-turn handles, native
-abort signals, navigation/context destruction and a native declarative form's
+abort signals and turn/reset/close cleanup, navigation/context destruction and a native declarative form's
 input/submission/navigation. Native form tests only submitted synthetic values
 to the owned local server. Chrome 156 passed the explicit unsupported-version
 path. The reference harness's read-only echo fixture confirmed description shape,

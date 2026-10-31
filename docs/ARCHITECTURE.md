@@ -485,8 +485,9 @@ BrowserWebMcp owns fetched collections, isolated native registration objects and
 per-call abort controllers across source/Worker sessions. Exact native frame
 identities reuse the locator/evaluator helper. Chrome 158+ executes registrations
 by native tool ID, protecting a fetched handle from a same-name replacement.
-Turn cleanup joins abort acknowledgements before disconnecting and retains failed
-cleanup for retry. Browser navigation/context destruction invalidates collections.
+Turn cleanup waits for each native executeTool promise to settle after abort,
+using an awaited isolated-world cancellation method, before disconnecting. Its
+bounded cancellation retains failed cleanup for retry. Browser navigation/context destruction invalidates collections.
 The public tab capability prints untrusted metadata and preserves native result
 strings; the ordinary host action/confirmation policy still applies. Installer,
 CLI readiness and npm copy lists include the host module. See [WebMCP](browser-webmcp.md).

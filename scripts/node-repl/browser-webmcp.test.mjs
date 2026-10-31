@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {BrowserWebMcp,webMcpInput} from './browser-webmcp.mjs';
+import {runInNewContext} from 'node:vm';
+import {BrowserWebMcp,webMcpInput,registeredTools} from './browser-webmcp.mjs';
 function fixture(send){
  const host=new BrowserWebMcp(()=> 'http://owned.test'),owner={},state=host.state(owner);let closes=0;
  const entry={id:'collection',targetId:'tab',endpoint:'http://owned.test',check(){if(state.closed)throw Error('Turn ended');},tools:new Map(),browser:{async close(){closes++;}},page:{isClosed:()=>false}};
@@ -22,7 +23,7 @@ test('WebMCP refuses foreign, changed-endpoint and unknown collection handles',a
 });
 test('WebMCP cleanup waits for native cancellation acknowledgement before disconnect',async()=>{
  let acknowledge;const ack=new Promise(resolve=>{acknowledge=resolve;});
- const f=fixture((_method,params)=>params.functionDeclaration.includes('this.cancel')?ack:new Promise(()=>{}));
+ const f=fixture((_method,params)=>{if(params.functionDeclaration.includes('this.cancel')){assert.equal(params.awaitPromise,true);assert.match(params.functionDeclaration,/return this.cancel/);return ack;}return new Promise(()=>{});});
  const call=f.host.request(f.owner,f.args);call.catch(()=>{});const cleanup=f.host.cleanup(f.owner);let finished=false;cleanup.then(()=>{finished=true;});
  await new Promise(resolve=>setImmediate(resolve));assert.equal(f.closed(),0);assert.equal(finished,false);
  acknowledge({result:{type:'undefined'}});await cleanup;await assert.rejects(call,/turn ended/);assert.equal(f.closed(),1);assert.equal(f.host.owners.size,0);
@@ -44,4 +45,17 @@ test('WebMCP destroyed native contexts end an invocation without retaining an im
   return new Promise(()=>{});
  });
  const call=f.host.request(f.owner,f.args);call.catch(()=>{});await f.host.cleanup(f.owner);assert.equal(f.closed(),1);
+});
+
+test('native cancel waits for the original invocation to settle after abort',async()=>{
+ let finish,signal,settled=false;const operation=new Promise((_,reject)=>{finish=reject;}),window={};
+ const reader=runInNewContext(`(${registeredTools.toString()})`,{window,location:{href:'https://owned.test'},AbortController,document:{modelContext:{
+  async getTools(){return [{window,name:'wait',origin:'https://owned.test',description:'Owned wait',inputSchema:{type:'object'}}];},
+  executeTool(_tool,_input,options){signal=options.signal;return operation;},
+ }}});
+ const tools=await reader('owned',true),call=tools.call(tools.describe()[0].name,{},'invocation');call.catch(()=>{});
+ const cancel=tools.cancel('invocation').then(()=>{settled=true;});await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(signal.aborted,true);assert.equal(settled,false);
+ finish(Error('Native invocation aborted'));await cancel;await assert.rejects(call,/Native invocation aborted/);
+ await tools.cancel('invocation');assert.equal(settled,true);
 });

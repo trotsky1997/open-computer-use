@@ -8,8 +8,8 @@ if(!endpoint)throw Error('Set OPEN_COMPUTER_USE_CDP_URL to an owned disposable W
 const missing=process.argv.includes('--missing-native');
 const server=createServer((req,res)=>{
  res.setHeader('Content-Type','text/html');
- const child=req.url.startsWith('/child'),empty=req.url.startsWith('/empty');
- res.end(`<title>Owned WebMCP fixture</title><p id="status">Ready</p>${!child&&!empty?'<form toolname="submit_echo" tooldescription="Submit an owned fixture value" toolautosubmit action="/empty" method="get"><input name="text" type="text" required><button type="submit">Submit fixture</button></form>':''}${!child&&!empty?`<iframe src="/child"></iframe><iframe src="/child"></iframe><iframe src="http://localhost:${server.address().port}/child" allow="tools"></iframe><iframe src="http://localhost:${server.address().port}/empty"></iframe>`:''}<script>
+ const child=req.url.startsWith('/child'),empty=req.url.startsWith('/empty'),cancellation=req.url.startsWith('/cancel');
+ res.end(`<title>Owned WebMCP fixture</title><p id="status">Ready</p>${!child&&!empty?'<form toolname="submit_echo" tooldescription="Submit an owned fixture value" toolautosubmit action="/empty" method="get"><input name="text" type="text" required><button type="submit">Submit fixture</button></form>':''}${!child&&!empty&&!cancellation?`<iframe src="/child"></iframe><iframe src="/child"></iframe><iframe src="http://localhost:${server.address().port}/child" allow="tools"></iframe><iframe src="http://localhost:${server.address().port}/empty"></iframe>`:''}<script>
  globalThis.fixture={calls:0,aborted:0,started:0,controller:new AbortController()};
  const mc=document.modelContext,token=crypto.randomUUID();
  fixture.ready=(async()=>{if(!mc||${empty})return;
@@ -57,7 +57,14 @@ try{
    const formTools=listing(await run(session,`var formTools=await cap.fetchTools();nodeRepl.write(JSON.stringify(formTools.description()));`)),form=formTools.find(tool=>tool.name.startsWith('submit_echo__'));assert.ok(form);
    assert.equal(await run(session,`nodeRepl.write(JSON.stringify(await formTools.call(${JSON.stringify(form.name)},{text:'owned-form-value'})));`),null);await page.waitForURL(url+'empty?text=owned-form-value');
    await session.reset();assert.equal(session.browserWebMcp.owners.size,0);
-   console.log(`${Session.name} PASS native tools, isolated API, exact same-URL/OOP frames, stale replacement/turn/navigation, provider validation errors, cancellation, declarative form and empty listing`);
+   for(const ending of ['reset','close']){
+    await run(session,`var b=await cua.getBrowser({id:'cdp'});var tab=await b.tabs.get(${JSON.stringify(id)});await tab.markHandoff();await tab.goto(${JSON.stringify(url+'cancel?'+ending)});nodeRepl.write(JSON.stringify(true));`);
+    await page.waitForURL(url+'cancel?'+ending,{waitUntil:'load'});await page.evaluate(()=>fixture.ready);
+    const current=listing(await run(session,`var cap=await tab.capabilities.get('webmcp');var current=await cap.fetchTools();nodeRepl.write(JSON.stringify(current.description()));`)),waiting=current.find(tool=>tool.name.startsWith('slow__'));assert.ok(waiting);
+    await run(session,`var pending=current.call(${JSON.stringify(waiting.name)},{}).catch(()=>{});nodeRepl.write(JSON.stringify(true));`);await page.waitForFunction(()=>fixture.started===1);
+    await session[ending]();await page.waitForFunction(()=>fixture.aborted===1);assert.equal(session.browserWebMcp.owners.size,0);
+   }
+   console.log(`${Session.name} PASS native tools, isolated API, exact same-URL/OOP frames, stale replacement/turn/navigation, provider validation errors, turn/reset/close native cancellation settlement, declarative form and empty listing`);
   }finally{await session.close();await page?.close();}
  }
 }finally{await browser.close();await new Promise(resolve=>server.close(resolve));}

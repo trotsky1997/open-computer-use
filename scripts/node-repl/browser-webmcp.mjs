@@ -9,7 +9,7 @@ export function webMcpInput(input={}){
  if(Buffer.byteLength(json)>1024*1024)throw Error('WebMCP input exceeds 1 MiB');const parsed=JSON.parse(json);if(!parsed||typeof parsed!=='object'||Array.isArray(parsed))throw Error('WebMCP input must be a JSON object');return parsed;
 }
 // Runs only fixed native API reader/caller code in a private isolated world.
-async function registeredTools(prefix,required){
+export async function registeredTools(prefix,required){
  const context=document.modelContext;
  if(!context?.getTools||!context.executeTool){if(!required)return {describe:()=>[]};throw Error('Native WebMCP is unavailable; use Chrome 158+ with WebMCP enabled');}
  let registered;try{registered=await context.getTools();}catch(error){if(!required&&error.name==='NotAllowedError')return {describe:()=>[]};throw error;}
@@ -19,10 +19,10 @@ async function registeredTools(prefix,required){
   describe(){return metadata;},
   async call(name,input,id){
    const tool=tools.get(name);if(!tool)throw Error('Unknown WebMCP tool; fetchTools again');
-   const controller=new AbortController();pending.set(id,controller);
-   try{return await context.executeTool(tool,input,{signal:controller.signal});}finally{pending.delete(id);}
+   const controller=new AbortController(),operation=context.executeTool(tool,input,{signal:controller.signal});pending.set(id,{controller,operation});
+   try{return await operation;}finally{pending.delete(id);}
   },
-  cancel(id){pending.get(id)?.abort();},
+  async cancel(id){const active=pending.get(id);if(active){active.controller.abort();await active.operation.catch(()=>{});}},
  });
 }
 function value(result){if(result.exceptionDetails)throw Error(result.exceptionDetails.exception?.description??result.exceptionDetails.text);return result.result.value;}
@@ -87,7 +87,7 @@ export class BrowserWebMcp {
  async stop(state,active){
   if(!active.stop){
    active.stop=(async()=>{
-    try{value(await bounded(active.record.session.send('Runtime.callFunctionOn',{objectId:active.record.objectId,functionDeclaration:'function(id){this.cancel(id)}',arguments:[{value:active.id}],returnByValue:true}),'WebMCP cancellation'));}
+    try{value(await bounded(active.record.session.send('Runtime.callFunctionOn',{objectId:active.record.objectId,functionDeclaration:'function(id){return this.cancel(id)}',arguments:[{value:active.id}],awaitPromise:true,returnByValue:true}),'WebMCP cancellation'));}
     catch(error){
      if(!active.entry.page?.isClosed()){
       let gone=false;
