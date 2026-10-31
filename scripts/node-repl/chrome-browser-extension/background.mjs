@@ -1,8 +1,8 @@
 import {readHistory} from './history.mjs';
 import {createManagement,privateTab} from './management.mjs';
 const management=createManagement(chrome);let queue=Promise.resolve();const histories=new Map();
-chrome.runtime.onMessage.addListener((message,_sender,reply)=>{if(message?.kind==='ocu:wake')reply({protocol:4});});
-Object.defineProperty(globalThis,'ocuChromeBridge',{value:Object.freeze({protocol:4,
+chrome.runtime.onMessage.addListener((message,_sender,reply)=>{if(message?.kind==='ocu:wake')reply({protocol:5});});
+Object.defineProperty(globalThis,'ocuChromeBridge',{value:Object.freeze({protocol:5,
  cancel(id){const control=histories.get(id);if(control)control.canceled=true;},
  request(request){
   if(request.action==='history'){
@@ -12,7 +12,8 @@ Object.defineProperty(globalThis,'ocuChromeBridge',{value:Object.freeze({protoco
   }
   const job=queue.then(async()=>{
    if(request.action==='audit')return (await management).audit();
-   if(request.action==='management')return (await management).invoke(request.namespace,request.method,request.args);
+   if(request.action==='managementPlan')return (await management).plan(request.namespace,request.method,request.args);
+   if(request.action==='management')return (await management).invoke(request.namespace,request.method,request.args,request.fingerprint);
    if(request.action==='userTabs'){
     const [before,targets,groups,windows]=await Promise.all([chrome.tabs.query({}),chrome.debugger.getTargets(),chrome.tabGroups.query({}),chrome.windows.getAll({})]);
     const normal=new Set(windows.filter(window=>['normal','popup'].includes(window.type)).map(window=>window.id));

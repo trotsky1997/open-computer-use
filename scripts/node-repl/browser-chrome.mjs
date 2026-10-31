@@ -8,11 +8,12 @@ export const CHROME_EXTENSION_URL=`chrome-extension://${CHROME_EXTENSION_ID}/bri
 export class BrowserChrome {
  constructor(endpoint,open){this.endpoint=endpoint;this.open=open;this.tabs=new BrowserTabs(endpoint,open,'ocu-bridge');this.owners=new Map();this.closedOwners=new WeakSet();this.initializing=Promise.resolve();}
  hidden(){const ids=[],urls=[];for(const entry of this.tabs.browsers.values()){ids.push(...entry.tabs.keys());urls.push(...entry.creating.keys());}return {ids,urls};}
- request(owner,args){
+ request(owner,args,coordinate){
   if(args?.action==='targets')return Promise.resolve(this.hidden());
   if(!['selected','userTabs','management','audit','history'].includes(args?.action))throw Error('Unknown Chrome bridge action');
   if(args.action==='history')args={...args,options:normalizeHistoryOptions(args.options),id:randomUUID()};
   const mutation=args.action==='management'&&validateManagement(args.namespace,args.method,args.args);
+  if(mutation&&typeof coordinate!=='function')throw Error('Management mutations require the shared tab coordinator');
   if(Buffer.byteLength(JSON.stringify(args))>65536)throw Error('Chrome bridge request exceeds 64 KiB');
   if(this.closedOwners.has(owner))throw Error('Chrome bridge turn ended');
   let entry=this.owners.get(owner);
@@ -23,15 +24,24 @@ export class BrowserChrome {
   }
   const job=(async()=>{
    await entry.ready;if(entry.error)throw entry.error;
-   const operation=this.invoke(entry,args);
+   const state={dispatched:false,canceled:false};
+   const check=()=>{if(entry.error||state.canceled)throw entry.error??Error('Management preparation canceled before dispatch');};
+   const operation=mutation?coordinate(async claim=>{
+    check();const plan=await this.invoke(entry,{...args,action:'managementPlan'});
+    if(!plan||!Array.isArray(plan.targetIds)||plan.targetIds.some(id=>typeof id!=='string'||!id)||new Set(plan.targetIds).size!==plan.targetIds.length||typeof plan.fingerprint!=='string'||!/^[\da-f]{64}$/u.test(plan.fingerprint))throw Error('Invalid management plan');
+    check();await claim(plan.targetIds);check();
+    state.dispatched=true;
+    try{return await this.invoke(entry,{...args,fingerprint:plan.fingerprint});}
+    catch(error){if(!error.nativeAcknowledged)error.managementUnconfirmed=true;throw error;}
+   }):this.invoke(entry,args);
    if(args.action==='history'){entry.histories.set(args.id,operation);const finished=()=>{entry.histories.delete(args.id);entry.historyStops.delete(args.id);};operation.then(finished,error=>{if(error.nativeAcknowledged)finished();}).catch(()=>{});}
    if(mutation){
     entry.mutations.add(operation);
-    operation.then(()=>entry.mutations.delete(operation),error=>{if(!error.nativeAcknowledged)entry.uncertain=error;entry.mutations.delete(operation);}).catch(()=>{});
+    operation.then(()=>entry.mutations.delete(operation),error=>{if(state.dispatched&&!error.nativeAcknowledged)entry.uncertain=error;entry.mutations.delete(operation);}).catch(()=>{});
    }
    let result;
    try{result=await this.bounded(entry,operation,!mutation);}
-   catch(error){if(args.action==='history'&&entry.histories.has(args.id))await this.stopHistory(entry,args.id);throw error;}
+   catch(error){if(mutation&&!state.dispatched)state.canceled=true;if(args.action==='history'&&entry.histories.has(args.id))await this.stopHistory(entry,args.id);throw error;}
    if(args.action==='selected'){
     if(result!==null&&(typeof result!=='string'||!result))throw Error('Invalid selected target identity');
     return result??undefined;
@@ -75,7 +85,7 @@ export class BrowserChrome {
    if(workers.length!==1)throw Error('Chrome extension worker has no unique target');entry.workerId=workers[0].targetId;
    ({sessionId:entry.sessionId}=await entry.connection.send('Target.attachToTarget',{targetId:entry.workerId,flatten:true}));
    const identity=await entry.connection.send('Runtime.evaluate',{expression:'({id:chrome.runtime.id,protocol:globalThis.ocuChromeBridge?.protocol})',returnByValue:true},10000,entry.sessionId);
-   if(identity.result.value?.id!==CHROME_EXTENSION_ID||identity.result.value?.protocol!==4)throw Error('Chrome browser extension identity/protocol mismatch');
+   if(identity.result.value?.id!==CHROME_EXTENSION_ID||identity.result.value?.protocol!==5)throw Error('Chrome browser extension identity/protocol mismatch');
    const object=await entry.connection.send('Runtime.evaluate',{expression:'globalThis.ocuChromeBridge'},10000,entry.sessionId);entry.objectId=object.result.objectId;
    if(entry.browser){await entry.browser.close();entry.browser=undefined;}await this.tabs.end(entry.owner,{final:true});
   }catch(error){

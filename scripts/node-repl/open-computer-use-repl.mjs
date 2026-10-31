@@ -92,7 +92,7 @@ async function hostRequest(services,owner,tabOwner,method,params,timeoutMs) {
     result=await services.browserDialogs.request(owner,args);
   }
   else if(method === "browser/webmcp") result=await services.browserWebMcp.request(owner,params);
-  else if(method === "browser/chrome") result=await services.browserChrome.request(owner,params);
+  else if(method === "browser/chrome") result=await services.browserChrome.request(owner,params,operation=>services.browserTabs.manage(tabOwner,operation));
   else if(method === "browser/evaluate") result=await services.browserEvaluator.request(owner,params);
   else if(method === "browser/content") result=await services.browserContent.request(owner,params);
   else if(method === "browser/assets") result=await services.browserAssets.request(owner,params);

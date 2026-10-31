@@ -38,3 +38,23 @@ test('claims refuse a symlinked shared directory',async()=>{
  try{const link=path.join(root,'link');await symlink(root,link,'dir');await assert.rejects(new BrowserTabClaims('/browser/one',link).claim({},'user',true),/private/);}
  finally{await rm(root,{recursive:true,force:true});}
 });
+
+test('layout gates serialize new claims while existing leases remain usable',async()=>{
+ const root=await mkdtemp(path.join(tmpdir(),'ocu-layout-test-'));
+ try{
+  const a=new BrowserTabClaims('/browser/one',root),b=new BrowserTabClaims('/browser/one',root),owner={},other={};
+  await a.claim(owner,'owned',true);await b.claim(other,'other-owned',true);
+  let pending,attempted,done=false;const reached=new Promise(resolve=>{attempted=resolve;}),reserve=b.reserve.bind(b);
+  b.reserve=async(...args)=>{if(args[4])attempted();return reserve(...args);};
+  await a.withLayout(owner,async()=>{
+   pending=b.claim(other,'new',true).then(()=>{done=true;});await reached;
+   await a.claim(owner,'owned',true);await b.claim(other,'other-owned',true);assert.equal(done,false);
+   await a.claim(owner,'under-gate',true);
+  });
+  await pending;assert.equal(done,true);
+  let start,late;const later=new Promise(resolve=>{start=resolve;});
+  await a.withLayout(owner,async()=>{late=(async()=>{await later;await a.claim(owner,'late',true);})();});
+  await b.withLayout(other,async()=>{start();assert.equal(await Promise.race([late.then(()=>true),new Promise(resolve=>setTimeout(()=>resolve(false),50))]),false);});
+  await late;await a.release(owner);await b.release(other);
+ }finally{await rm(root,{recursive:true,force:true});}
+});

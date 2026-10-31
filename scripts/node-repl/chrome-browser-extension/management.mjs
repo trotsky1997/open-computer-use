@@ -40,9 +40,47 @@ export async function createManagement(chrome){
    if(method==='move')await movableWindows([group.windowId,...(args[1].windowId!==undefined?[args[1].windowId]:[])]);
   }
  }
+ async function plan(namespace,method,args){
+  if(!validateManagement(namespace,method,args))throw Error('Only management mutations need a plan');
+  await guard(namespace,method,args);
+  const state=await before(namespace,method,args);let selected=[];
+  if(namespace!=='bookmarks'){
+   const ids=new Set(),layout=state.tabLayout;
+   const tab=id=>{const value=layout.tabs.find(tab=>tab.id===id);if(!value)throw Error('Management tab is unavailable');ids.add(value.windowId);};
+   if(namespace==='windows'){
+    if(method==='update')ids.add((await normalWindow(args[0])).id);
+    else if(args[0]?.tabId!==undefined)tab(args[0].tabId);
+    if(method==='create'&&args[0]?.focused!==false||method==='update'&&(args[1].focused===true||args[1].state!==undefined))for(const window of state.windows)ids.add(window.id);
+   }else if(namespace==='tabs'){
+    for(const id of [].concat(method==='group'?args[0].tabIds:args[0]))tab(id);
+    if(method==='move'&&args[1].windowId!==undefined)ids.add(args[1].windowId);
+   }else{
+    const group=layout.groups.find(group=>group.id===args[0]);if(!group)throw Error('Management group is unavailable');ids.add(group.windowId);
+    if(method==='move'&&args[1].windowId!==undefined)ids.add(args[1].windowId);
+   }
+   let moving=[],destination;
+   if(namespace==='tabs'&&(method==='remove'||method==='move')){moving=[].concat(args[0]);destination=method==='move'?args[1].windowId:undefined;}
+   if(namespace==='tabGroups'&&method==='move'){moving=layout.tabs.filter(tab=>tab.groupId===args[0]).map(tab=>tab.id);destination=args[1].windowId;}
+   if(namespace==='windows'&&method==='create'&&args[0]?.tabId!==undefined)moving=[args[0].tabId];
+   const closesWindow=moving.length&&layout.tabs.some(tab=>moving.includes(tab.id)&&
+    (method==='remove'||namespace==='windows'||destination!==undefined&&destination!==tab.windowId)&&
+    layout.tabs.filter(value=>value.windowId===tab.windowId).every(value=>moving.includes(value.id)));
+   if(closesWindow)for(const window of state.windows)ids.add(window.id);
+   if((await chrome.tabs.query({})).some(tab=>ids.has(tab.windowId)&&privateTab(tab)))throw Error('Management scope includes a private bridge tab; retry after bridge cleanup');
+   selected=layout.tabs.filter(tab=>ids.has(tab.windowId));
+   state.tabLayout={tabs:selected.sort((a,b)=>a.id-b.id),groups:layout.groups.filter(group=>ids.has(group.windowId)).sort((a,b)=>a.id-b.id)};
+   state.windows=state.windows.filter(window=>ids.has(window.id)).sort((a,b)=>a.id-b.id);
+  }
+  const targets=selected.length?await chrome.debugger.getTargets():[];
+  const targetIds=selected.map(tab=>{const matches=targets.filter(target=>target.tabId===tab.id&&target.type==='page');if(matches.length!==1)throw Error('Management tab has no unique debugger target');return matches[0].id;});
+  const data=new TextEncoder().encode(JSON.stringify({namespace,method,args,state,targetIds}));
+  const fingerprint=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',data)),byte=>byte.toString(16).padStart(2,'0')).join('');
+  return {targetIds,fingerprint};
+ }
  return {
+  plan,
   async audit(){return {changes:[...changes].reverse()};},
-  async invoke(namespace,method,args){
+  async invoke(namespace,method,args,fingerprint){
    const mutation=validateManagement(namespace,method,args);
    if(!mutation){
     const result=await chrome[namespace][method](...args);
@@ -56,7 +94,7 @@ export async function createManagement(chrome){
     }
     return result;
    }
-   await guard(namespace,method,args);
+   if(typeof fingerprint!=='string'||(await plan(namespace,method,args)).fingerprint!==fingerprint)throw Error('Management layout changed or plan is missing; inspect fresh state before retry');
    const change={createdAt:Date.now(),namespace,method,args,before:await before(namespace,method,args)};
    if(bytes(change)>6*1024*1024)throw Error('Management before-state exceeds the audit budget');
    const previous=changes;changes=[...changes,change];while(changes.length>100||bytes(changes)>6*1024*1024)changes.shift();

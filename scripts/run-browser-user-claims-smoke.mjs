@@ -33,6 +33,7 @@ try{
    assert.equal([...a.browserTabs.browsers.values()].some(entry=>entry.tabs.has(firstId)),false,'Listing claimed a user tab');
    await run(a,`var management=await browser.capabilities.get('management');var group=await management.tabs.group({tabIds:[${Number(row.providerTabId)},${Number(secondRow.providerTabId)}]});await management.tabGroups.update(group,{title:'Owned group'});nodeRepl.write(JSON.stringify(true));`);
    assert.equal((await run(a,'nodeRepl.write(JSON.stringify(await browser.user.openTabs()));')).find(tab=>tab.id===firstId).tabGroup,'Owned group');
+   await a.endTurn();
    await run(b,`var browser=await cua.getBrowser({id:'cdp'});var former=await browser.user.claimTab(${JSON.stringify(row)});nodeRepl.write(JSON.stringify(true));`);await b.endTurn();assert.equal(first.isClosed(),false);
    await run(a,`var claimed=await browser.user.claimTab(${JSON.stringify(row)});await claimed.playwright.getByLabel('Value').fill('owner A');nodeRepl.write(JSON.stringify(true));`);
    await denied(b,"await former.playwright.getByLabel('Value').fill('foreign write');",/another session/);

@@ -709,3 +709,21 @@ accepted native work can outlive a host. Fresh browser identity starts a new
 namespace. Raw clients, cross-machine filesystems, browser-wide management and
 physical takeover remain outside this protocol, and stale temporary records can
 outlive a closed browser until OS cleanup.
+
+Native management writes now run under BrowserTabs.manage and the shared layout
+transaction in BrowserTabClaims. New claim publication, native creation and
+explicit/cleanup closure enter the same gate; existing leases can be revalidated
+without taking it. Async reentrancy is limited to a live transaction scope, so
+late callbacks re-acquire the gate. Observer snapshots reserve only the calling
+session's inferred tabs to avoid cross-owner gate cycles.
+
+Extension protocol 5 exposes a read-only affected-window plan (native-to-CDP
+identity mapping plus scoped SHA-256 fingerprint). The host prechecks every
+foreign/closing/private target before publishing scope claims, then dispatches
+with the fingerprint for native revalidation before the audit/write. Window focus,
+state and last-tab closure expand scope across windows. Bookmark/unfocused blank
+creation has no tab scope. The native extension queue continues to serialize audit
+and actual Chrome calls. Pre-dispatch cancellation writes nothing; accepted native
+work drains before gate release. Lost completion retains the gate and requires
+browser-instance recovery. Raw/physical/page-driven actors, other machines and
+managed-browser visibility are still outside the protocol.

@@ -186,12 +186,26 @@ test('shared tab leases survive uncertain close and release after confirmed clea
  const root=await mkdtemp(path.join(tmpdir(),'ocu-claims-tabs-test-'));
  try{
   const {tabs,entry,live,setFailed}=fixture(),owner={},other={},foreign=new BrowserTabClaims('/browser/one',root);
-  entry.shared={prepare(){throw Error('Private claim unavailable');}};await assert.rejects(tabs.request(owner,{action:'create'}),/Private claim unavailable/);assert.deepEqual([...live.keys()],['user']);
+  entry.shared={withLayout(_owner,operation){return operation();},prepare(){throw Error('Private claim unavailable');}};await assert.rejects(tabs.request(owner,{action:'create'}),/Private claim unavailable/);assert.deepEqual([...live.keys()],['user']);
   entry.shared=new BrowserTabClaims('/browser/one',root);
   live.set('pending',{targetId:'pending',type:'page',url:'about:blank#ocu-private-creation'});await assert.rejects(tabs.request(other,{action:'claim',targetId:'pending'}),/Private pending/);assert.ok((await tabs.request(other,{action:'userTargets'})).includes('pending'));live.delete('pending');tabs.browsers.set(entry.endpoint,entry);
   await tabs.request(owner,{action:'claim',targetId:'user'});setFailed(true);
   await assert.rejects(tabs.request(owner,{action:'close',targetId:'user'}),/Close outage/);await assert.rejects(tabs.end(owner),/Close outage/);
   await assert.rejects(foreign.claim(other,'user',true),/another session or host/);
   setFailed(false);await tabs.end(owner);await foreign.claim(other,'user',true);await foreign.release(other);
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+
+test('management scopes reject a foreign lease before publishing any new claims',async()=>{
+ const {BrowserTabClaims}=await import('./browser-tab-claims.mjs'),{mkdtemp,rm}=await import('node:fs/promises'),{tmpdir}=await import('node:os'),path=await import('node:path');
+ const root=await mkdtemp(path.join(tmpdir(),'ocu-management-tabs-'));
+ try{
+  const {tabs,entry,live}=fixture(),owner={},other={},foreign=new BrowserTabClaims('/browser/one',root);entry.shared=new BrowserTabClaims('/browser/one',root);live.set('free',{targetId:'free',type:'page',url:'about:blank'});
+  await foreign.claim(other,'user',true);let writes=0;
+  await assert.rejects(tabs.manage(owner,async claim=>{await claim(['free','user']);writes++;}),/another session or host/);
+  assert.equal(writes,0);assert.equal(entry.tabs.has('free'),false);assert.deepEqual(await foreign.unavailable(other,['free']),[]);
+  await foreign.release(other);tabs.browsers.set(entry.endpoint,entry);
+  await tabs.manage(owner,async claim=>{await claim(['free','user']);writes++;});assert.equal(writes,1);
+  await tabs.end(owner);assert.equal(live.size,2);assert.deepEqual(await foreign.unavailable(other,['free','user']),[]);
  }finally{await rm(root,{recursive:true,force:true});}
 });

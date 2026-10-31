@@ -6,6 +6,13 @@ strings. CUA tab IDs are separate CDP strings. Locate native IDs with tabs.query
 Supported methods: windows.get/getAll/getCurrent/getLastFocused/create/update;
 tabs.get/query/group/ungroup/move/update/remove; tabGroups.get/query/update/move;
 bookmarks.get/getChildren/getRecent/getSubTree/getTree/search/create/update/move/remove/removeTree.
+Mutations use a same-machine layout gate and claim affected windows' tabs before dispatch.
+Foreign claims reject the whole scope. Focus/state changes and closing a last-tab window
+also reserve other windows. Unfocused blank windows and bookmarks can remain independent.
+Native layout fingerprints are rechecked before audit/write. Plans that change fail before
+write; inspect fresh state. Unconfirmed writes retain the gate until browser recovery.
+New tab creation/claims and explicit/cleanup closure pass the gate; existing owned tab
+observations/input remain available. Original scope claims release at turn/reset.
 Chrome Promise API signatures apply, with restrictions: no navigation, history, scripting,
 window removal or window URL arguments. tabs.update supports pinned/autoDiscardable only.
 windows.create() opens a blank normal non-incognito window; {tabId} moves an unpinned tab
@@ -20,7 +27,8 @@ session, survives extension worker restart and JS reset, and records before-stat
 Chrome dispatch. Failed native attempts can have partial effects; inspect fresh state and
 the audit after failure. Do not repeat an uncertain write. No automatic rollback.
 After changes, describe the result and how to undo it. Cancellation drains accepted writes;
-reset closes host connections and leaves requested organization changes in place.
+reset closes host connections; retained/user tabs keep organization changes.
+Agent-created tabs still require deliverable/handoff marks to survive turn cleanup.
 Read docs/browser-session.md for extension installation and required Chrome permissions.`;
 export const MANAGEMENT_METHODS={
  windows:['get','getAll','getCurrent','getLastFocused','create','update'],

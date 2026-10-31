@@ -2851,3 +2851,36 @@ unowned-headful fixture now uses its own tab to reach clipboard authorization.
 Source installer, npm staging, CLI doctor and its copied-runtime fixture include
 the new module. A browser-only npm build/tarball contains both runtime and plugin
 copies. No publication or release was performed.
+
+
+## Management mutations respect shared ownership
+
+Added extension protocol 5 affected-window plans and native-to-CDP target mapping,
+plus a scoped SHA-256 fingerprint rechecked before native audit/write. The host
+checks the complete scope before publishing claims. Tab/group source/destination
+windows participate; window focus/state and last-tab closure include other windows.
+Unfocused blank windows and bookmarks can remain independent of foreign tabs.
+
+BrowserTabClaims now provides a shared layout transaction. Management holds it
+through plan/reservation/native acknowledgement; new claims, native creation and
+explicit/cleanup closure enter it too. Existing owned observations/input can
+continue. Snapshot reservations are caller-owned, preventing cross-owner gate
+cycles. Reentrancy is confined to a live async scope. Pre-dispatch cancellation
+reserves nothing and sends no write; accepted native writes drain. Lost completion
+or killed hosts retain the gate until browser restart, with no TTL/replay/unlock.
+
+Expanded the owned independent-process controller with native tab/group/window
+refusals and unchanged audit/state, independent bookmark/background-window changes,
+held native dispatch through JS timeout/acknowledgement, and SIGKILL/reset/new-page
+fencing. Both JS hosts pass on macOS/Linux Chrome 158 from source and after source
+removal/installation. Ordinary organization, worker idle/restart, dialogs,
+clipboard and native selected-tab/session checks pass; Linux installed headful
+visibility/native clipboard/empty-window/MCP checks also pass. Node: macOS 200/200;
+Linux 199/200 with one macOS-only skip. Focused checks verify affected scopes,
+stale/missing plans, no partial ownership, pre-dispatch cancellation, accepted/lost
+write handling and gate lifetime across delayed callbacks. Grouping in the original
+user-tab fixture now ends its ownership turn before the next session claims it.
+
+The browser-only package build continues to include the updated runtime/extension.
+Raw clients, physical/page-driven races, cross-machine and visibility coordination,
+Windows and native crash takeover remain open. Upgrade/reload older extensions.

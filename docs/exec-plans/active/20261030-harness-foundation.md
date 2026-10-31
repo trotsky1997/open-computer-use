@@ -2166,3 +2166,48 @@ Crashed host claims remain until browser restart; stale temporary records can
 remain until OS cleanup. Raw clients, different machines/filesystem namespaces,
 browser-wide management, physical takeover and Windows evidence remain open.
 The complete parity goal remains active.
+
+## Management ownership arbitration
+
+Close the native management mutation bypass. Use a same-machine browser layout
+gate while planning/reserving/dispatching organization changes. New tab claims
+and native creation must pass the gate; existing owned tab actions remain usable.
+The extension plans affected windows/native tabs and maps them to CDP IDs. Acquire
+all affected claims before a write, reject foreign owners before partial claim
+publication, and revalidate a scoped layout fingerprint before audit/dispatch.
+Drain accepted writes on cancellation; keep the layout gate on unconfirmed native
+completion. Cover both JS hosts, independent processes, native tab/group/window
+changes, bookmark writes, stale plans, pending/cancelled writes and installed flow.
+Raw CDP/physical actors and cross-machine coordination remain outside this gate.
+
+Implemented extension protocol 5 planning with native-to-CDP target scope and a
+scoped SHA-256 layout fingerprint. Source/destination windows participate in tab
+and group mutations; focus/state or last-tab window closure expands to all
+windows. Bookmark and unfocused blank-window changes require no existing tab
+scope. Foreign/closing/private targets reject before any new scope claim is
+published. Fingerprint changes/missing plans fail before audit/native write.
+
+The shared layout transaction wraps management planning through acknowledgement.
+New claims, native creation and explicit/cleanup closure pass the same gate;
+existing owned observations/input remain available. Native observer snapshots
+reserve only the calling owner's inferred tabs to prevent cross-owner gate cycles.
+Async reentrancy expires with the transaction. Pre-dispatch cancellation reserves
+no target scope and sends no mutation; accepted writes drain. An unknown native
+completion or host death keeps the layout gate until browser restart.
+
+Owned Chrome 158 source/installed independent-process checks pass on macOS/Linux
+for both JS hosts: native tab pin/remove/group, source/destination moves, group
+changes, window updates and last-window refusal with unchanged audit/state;
+independent unfocused windows/bookmarks; native mutation held across JS timeout
+until acknowledgement; and SIGKILL during accepted mutation followed by refused
+new-page creation/reset. The ordinary management workflow (including 32s idle,
+worker restart, bookmarks/groups/window closure), dialogs, clipboard and selected
+session checks pass on both systems. Installed Linux headful visibility/native
+clipboard/empty-window/MCP flows also pass. Node checks: macOS 200/200, Linux
+199/200 with one macOS-only skip. The user-tab fixture now ends the grouping turn
+before another session claims the newly organized original pages.
+
+The layout gate covers cooperating current hosts for one same-machine OS user.
+Raw/physical/page-driven actors, other machines, managed-browser visibility,
+Windows evidence and native crash-settlement takeover remain open. The full
+parity goal stays active.

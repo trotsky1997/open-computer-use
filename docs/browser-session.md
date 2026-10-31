@@ -77,8 +77,8 @@ browser work may still run. There is no TTL or PID-based reassignment. Browser
 restart creates a new namespace; old temporary records can remain until OS temp
 cleanup. Native crash settlement and takeover recovery remain open.
 
-Different machines/filesystem namespaces, raw CDP clients, browser-wide
-management/visibility changes and physical user takeover remain outside this
+Different machines/filesystem namespaces, raw CDP clients, managed-browser
+visibility changes and physical user takeover remain outside this
 coordinator. Shared lease checks are verified on macOS/Linux; Windows remains
 unverified. These limits remain part of the full parity work.
 
@@ -100,8 +100,8 @@ The manifest requests `tabs`, `debugger`, `tabGroups`, `bookmarks` and `storage`
 retains the bounded before-state audit for this browser session. Optional `history`
 access requires a user gesture in the extension options; it starts disabled. There are no
 host permissions or remote endpoints. The host verifies extension identity and
-bridge protocol before invoking the fixed worker entry point. User metadata uses
-protocol 4; reload an older extension after upgrading the host.
+bridge protocol before invoking the fixed worker entry point. User metadata and planned management use
+protocol 5; reload an older extension after upgrading the host.
 
 Selection uses [tabs.query](https://developer.chrome.com/docs/extensions/reference/api/tabs)
 and [debugger.getTargets](https://developer.chrome.com/docs/extensions/reference/api/debugger),
@@ -177,3 +177,10 @@ release, direct child leases and uncertain-close retention.
 ```sh
 OCU_TEST_CHROME_EXECUTABLE=/absolute/path/to/chrome node scripts/run-browser-cross-host-claims-smoke.mjs
 ```
+
+Native management mutations now use shared affected-window claims and a browser
+layout gate, including fingerprint revalidation before audit/dispatch. See
+[management arbitration](browser-management.md#ownership-and-layout-arbitration).
+New claims, native creation and explicit/cleanup closure wait on active layout
+transactions; owned tab observations/input remain usable. Unconfirmed management
+completion keeps the gate through reset/crash until browser restart.
