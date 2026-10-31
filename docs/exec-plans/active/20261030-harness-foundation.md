@@ -2124,3 +2124,45 @@ open. The full parity goal stays active.
 Concurrent session reset now shares the browser dialog observer shutdown; a new
 observer waits for that shutdown before attaching. The native claims controller
 retains simultaneous reset checks after racing claims on both session types.
+
+## Same-machine cross-host tab coordination
+
+Extend tab ownership beyond one Node host with a per-browser-instance shared
+filesystem lease. Key by the CDP browser instance, including endpoint aliases;
+keep claims exclusive across independent processes/session types. Publish complete
+private records atomically, release only the owning session after action/resource
+cleanup, preserve handoff marks, and filter foreign claims from user inventory.
+Created tabs and inherited popups participate before actions/closure. Host death
+keeps claims fenced: native accepted browser work may still run after host exit,
+so PID disappearance alone cannot authorize reassignment. Browser restart gives a
+new namespace. Raw CDP/physical users and different machines remain outside this
+coordinator. Validate real Chrome with independent host processes, aliases,
+racing/released/retained claims, old handles, host death, and source-removed install.
+
+Implemented BrowserTabClaims with complete private records atomically published
+by directory rename, stable per-session tokens, browser-instance namespaces and
+matching-generation release after resource settlement. POSIX uses a common
+canonical temporary root independent of TMPDIR. Created tabs and inherited
+popups reserve leases before action/closure; nonce pages reject foreign binding
+while publication is pending. Directory readiness is checked before native page
+creation. Foreign nearest-opener leases fence unclaimed descendants, while
+existing direct child leases retain independent ownership. Unclaimed preexisting
+and idle children are conservatively fenced until the foreign opener releases.
+
+Both session types pass independent-process Chrome 158 checks on macOS/Linux:
+endpoint aliases, native content preservation, old-handle refusal, user inventory,
+created-tab/popup fencing and cleanup, handoff/release, competing claims, SIGKILL
+and refusal after reset, plus fresh-browser identity. Source-removed installation
+runs the same controller. Installer/npm staging/doctor/CLI fixtures include the
+new module; browser-only npm staging and tarball contents are verified. Node
+checks pass macOS 197/197 and Linux 196/197 (one macOS-only skip). Existing dialog
+and clipboard flows and isolated Linux installed headful visibility/native
+clipboard/empty-window/MCP recovery pass. The unowned-headful clipboard fixture
+now creates its own tab to reach the clipboard authorization check, keeping the
+new cross-host tab fence intact.
+
+No TTL/dead-PID lease reclamation is performed: native work may survive host death.
+Crashed host claims remain until browser restart; stale temporary records can
+remain until OS cleanup. Raw clients, different machines/filesystem namespaces,
+browser-wide management, physical takeover and Windows evidence remain open.
+The complete parity goal remains active.

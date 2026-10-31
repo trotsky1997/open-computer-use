@@ -100,6 +100,12 @@ if(process.argv[2]==='codex-plugin-config') { (await import('node:fs')).chmodSyn
   await new Promise((resolve,reject)=>{claims.once('error',reject);claims.once('exit',code=>code===0?resolve():reject(Error(claimOutput)));});
   for(const line of claimOutput.split('\n').filter(line=>line.includes('PASS')))console.log(line);
   console.log('PASS installed native user-tab metadata and host-local claims after source checkout removal');
+  const hosts=spawn(process.execPath,[path.join(source,'scripts/run-browser-cross-host-claims-smoke.mjs'),installed],{env:{...env,OCU_TEST_CHROME_EXECUTABLE:path.resolve(chrome)},stdio:['ignore','pipe','pipe']});let hostOutput='';
+  hosts.stdout.on('data',chunk=>{hostOutput+=chunk;});hosts.stderr.on('data',chunk=>{hostOutput+=chunk;});
+  await new Promise((resolve,reject)=>{hosts.once('error',reject);hosts.once('exit',code=>code===0?resolve():reject(Error(hostOutput)));});
+  for(const line of hostOutput.split('\n').filter(line=>line.includes('PASS')))console.log(line);
+  console.log('PASS installed independent-host tab coordination after source checkout removal');
+
 
   if(process.platform==='linux'&&process.argv.includes('--headful')){
    const visibility=spawn(process.execPath,[path.join(source,'scripts/run-managed-browser-visibility-smoke.mjs'),installed],{env:{...env,OCU_TEST_CHROME_EXECUTABLE:path.resolve(chrome)},stdio:['ignore','pipe','pipe']});let output='';

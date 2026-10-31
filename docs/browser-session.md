@@ -25,7 +25,7 @@ non-whitespace content and no control characters. They do not rename page titles
 windows or tab groups. `createBrowserTab('cdp',url,{visible,sessionName})` applies
 the name before creating a target; invalid names fail before target creation.
 
-## User tabs and host-local claims
+## User tabs and shared claims
 
 ```js
 const userTabs=await browser.user.openTabs();
@@ -38,7 +38,7 @@ page content remain untrusted and do not authorize additional actions. openTabs
 returns claimable user tabs in native normal/popup browser windows, ordered by
 lastOpened (native last-access time) descending. Rows contain a CDP id, native
 Chrome providerTabId, title/url, optional ISO lastOpened and tabGroup title.
-Agent-created tabs and tabs claimed by another session in this host are excluded.
+Agent-created tabs and tabs claimed by another participating session/host are excluded.
 Listing acquires no claims. Metadata requires the bundled extension.
 
 claimTab accepts an opaque id from the listing or its record. Record-based claims
@@ -46,7 +46,7 @@ recheck the native provider identity and URL; changed references require a fresh
 listing. Binding through getTab/tabs.get/selected also claims a tab. ID-based getTab checks
 ownership before discovery, preserving another session's active dialog/action. Host tab-scoped
 broker operations revalidate ownership, so a retained handle cannot control a tab
-currently claimed by another session. Claims serialize within the host. Native
+currently claimed by another session. Claims serialize across participating same-machine hosts for the same OS user. Native
 metadata remains available through ordinary tab inventory without claiming tabs.
 
 Unmarked original user tabs are released at turn end/reset/final close and stay
@@ -57,9 +57,30 @@ Preexisting children and popups first observed during idle handoff are protected
 from adoption on a later turn. An explicit close with an unconfirmed outcome
 retains the claim and blocks reuse until cleanup confirms closure.
 
-The coordinator is host-local. Other MCP hosts/processes, raw CDP clients,
-browser-wide management/visibility changes and physical user takeover remain
-outside this claim table. These limits remain part of the full parity work.
+The host table is backed by private, atomic filesystem leases keyed by the CDP
+browser instance ID. Independent Node/MCP hosts, endpoint aliases and both JS
+session types use the same namespace for one OS user. POSIX hosts use the
+canonical system temporary directory, independent of per-process TMPDIR; Windows
+uses the user's temporary directory. Records contain opaque IDs/tokens and PID,
+with no page URL/title. The directory must stay intact while the browser lives.
+
+A newly bound descendant of a foreign claimed opener is fenced before it has its
+own lease. This conservatively includes unclaimed preexisting/idle children until
+the opener is released; existing direct child leases retain their own ownership.
+This closes the interval before the creator's popup observer publishes its claim.
+Private creation nonce pages are also excluded/refused before their lease
+publishes. Claim-directory readiness is checked before opening a native page.
+
+Unmarked original pages release after host resources/actions settle. Crashed
+hosts retain their claims even if their PID has disappeared, because accepted
+browser work may still run. There is no TTL or PID-based reassignment. Browser
+restart creates a new namespace; old temporary records can remain until OS temp
+cleanup. Native crash settlement and takeover recovery remain open.
+
+Different machines/filesystem namespaces, raw CDP clients, browser-wide
+management/visibility changes and physical user takeover remain outside this
+coordinator. Shared lease checks are verified on macOS/Linux; Windows remains
+unverified. These limits remain part of the full parity work.
 
 ## Browser bridge setup
 
@@ -109,7 +130,7 @@ resources and requires fresh audit/state inspection before retrying the action.
 There is no automatic rollback or write replay.
 
 This remains CDP automation assisted by an extension bridge. Full extension/in-app
-transport, cross-host claims/physical takeover and the remaining provider work stay open.
+transport, cross-machine claims/physical takeover and the remaining provider work stay open.
 
 ## Validation
 
@@ -143,4 +164,16 @@ confirms closure. Source-removed installation runs the same claim controller.
 
 ```sh
 OCU_TEST_CHROME_EXECUTABLE=/absolute/path/to/chrome node scripts/run-browser-user-claims-smoke.mjs
+```
+
+Independent-process macOS/Linux checks additionally cover endpoint aliases,
+old handles, original/native content retention, created-tab and opener-descendant
+fencing, popup cleanup, handoff/release, simultaneous claims, SIGKILL followed by
+refusal after reset, and a fresh managed browser instance. The source-removed
+installation runs this controller with its installed runtime. Focused checks cover
+atomic publication, private-directory refusal, malformed records, ownership-only
+release, direct child leases and uncertain-close retention.
+
+```sh
+OCU_TEST_CHROME_EXECUTABLE=/absolute/path/to/chrome node scripts/run-browser-cross-host-claims-smoke.mjs
 ```

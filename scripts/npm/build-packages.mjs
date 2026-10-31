@@ -460,7 +460,7 @@ function copyInstallerScripts(packageRoot) {
     "browser-cdp.mjs",
     "browser-downloads.mjs",
     "browser-clipboard.mjs",
-    "browser-viewport.mjs", "browser-input.mjs", "browser-tabs.mjs", "browser-process.mjs","browser-runtime.mjs","browser-runtime-child.mjs", "browser-debugger.mjs","browser-assets.mjs","browser-webmcp.mjs","browser-content.mjs","browser-chrome.mjs","browser-evaluate.mjs","browser-evaluate-dom.mjs","browser-evaluate-worker.mjs","runtime-dependencies.mjs","browser-drop.mjs",
+    "browser-viewport.mjs", "browser-input.mjs", "browser-tabs.mjs", "browser-tab-claims.mjs", "browser-process.mjs","browser-runtime.mjs","browser-runtime-child.mjs", "browser-debugger.mjs","browser-assets.mjs","browser-webmcp.mjs","browser-content.mjs","browser-chrome.mjs","browser-evaluate.mjs","browser-evaluate-dom.mjs","browser-evaluate-worker.mjs","runtime-dependencies.mjs","browser-drop.mjs",
     "browser-playwright.mjs",
     "open-computer-use-repl.mjs",
     "open-computer-use-kernel.mjs",
@@ -487,6 +487,10 @@ function copyInstallerScripts(packageRoot) {
   cpSync(
     path.join(repoRoot, "scripts", "node-repl", "browser-tabs.mjs"),
     path.join(packageRoot, "plugins", "open-computer-use", "scripts", "browser-tabs.mjs")
+  );
+  cpSync(
+    path.join(repoRoot, "scripts", "node-repl", "browser-tab-claims.mjs"),
+    path.join(packageRoot, "plugins", "open-computer-use", "scripts", "browser-tab-claims.mjs")
   );
   cpSync(
     path.join(repoRoot, "scripts", "node-repl", "browser-input.mjs"),

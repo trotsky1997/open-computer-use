@@ -1,3 +1,4 @@
+import {BrowserTabClaims} from './browser-tab-claims.mjs';
 import {browserExitProof} from './browser-process.mjs';
 import {randomUUID} from "node:crypto";
 
@@ -34,6 +35,9 @@ export class BrowserTabs {
     for(const id of entry.tabs.keys()) if(!live.has(id)) entry.tabs.delete(id);
     for(const id of entry.seen??[])if(!live.has(id))entry.seen.delete(id);
     for(const info of targetInfos)if(info.type==='page'&&!entry.tabs.has(info.targetId))entry.seen.add(info.targetId);
+    entry.provisional=new Set(targetInfos.filter(info=>info.type==='page'&&/^about:blank#ocu(?:-bridge)?-/u.test(info.url)).map(info=>info.targetId));
+    entry.openers=new Map(targetInfos.filter(info=>info.type==='page'&&info.openerId).map(info=>[info.targetId,info.openerId]));
+    for(const [id,record] of entry.tabs)await entry.shared?.claim(record.owner,id,record.claimed===true,entry.openers);
     return live;
   }
   async closeTarget(entry,targetId) {
@@ -61,6 +65,7 @@ export class BrowserTabs {
       if(!response.ok) throw new Error(`Tab discovery failed: HTTP ${response.status}`);
       const {webSocketDebuggerUrl}=await response.json(),browserId=new URL(webSocketDebuggerUrl).pathname;
       if(entry.browserId&&entry.browserId!==browserId&&(entry.tabs.size||entry.lineage.size||entry.creating.size))throw Error('Browser instance changed; previous tab cleanup is unconfirmed; reconnect the original browser');
+      if(entry.browserId!==browserId)entry.shared=new BrowserTabClaims(browserId);
       entry.browserId=browserId;
       let connection;connection=await this.open(webSocketDebuggerUrl,event=>{
         if(event.method==='Target.targetCreated') this.inherit(entry,event.params.targetInfo);
@@ -93,6 +98,7 @@ export class BrowserTabs {
     const work=(async()=>{
       const entry=await this.browser(endpoint);
       if(args.action==='create') {
+        await entry.shared?.prepare();
         const marker=`about:blank#${this.markerPrefix}-${randomUUID()}`;entry.creating.set(marker,owner);
         let result;
         try {result=await entry.connection.send('Target.createTarget',{url:marker,background:args.visible===false});}
@@ -103,11 +109,13 @@ export class BrowserTabs {
         return result;
       }
       const live=await this.snapshot(entry);
-      if(args.action==='userTargets')return [...entry.tabs].filter(([,record])=>!record.claimed||record.owner!==owner||record.closing).map(([id])=>id);
+      if(args.action==='userTargets')return [...new Set([...entry.tabs].filter(([,record])=>!record.claimed||record.owner!==owner||record.closing).map(([id])=>id).concat([...entry.provisional],await entry.shared?.unavailable(owner,live,entry.openers)??[]))];
       if(!live.has(args.targetId)) throw new Error('Tab closed or no longer available');
       let record=entry.tabs.get(args.targetId);
+      if(!record&&entry.provisional.has(args.targetId))throw Error('Private pending browser tab belongs to another session or host');
       if(record && record.owner!==owner) throw new Error('Tab belongs to another session');
       if(record?.closing&&args.action!=='close')throw Error('Tab close is unresolved; retry cleanup before reuse');
+      await entry.shared?.claim(owner,args.targetId,record?record.claimed===true:true,entry.openers);
       if(!record){record={owner,claimed:true};entry.tabs.set(args.targetId,record);entry.lineage.set(args.targetId,owner);}
       if(args.action==='close') {
         record.closing=true;await this.closeTarget(entry,args.targetId);
@@ -140,6 +148,7 @@ export class BrowserTabs {
         }
         if([...entry.creating.values()].includes(owner)) throw new Error('The outcome of tab creation is unknown; retry cleanup after browser recovery');
         for(const [id,record] of entry.tabs) if(record.owner===owner && (final||record.claimed&&!record.mark)) entry.tabs.delete(id);
+        await entry.shared?.release(owner,new Set([...entry.tabs].filter(([,record])=>record.owner===owner).map(([id])=>id)));
         for(const [id,recordOwner] of entry.lineage) if(recordOwner===owner && !entry.tabs.has(id)) entry.lineage.delete(id);
         this.idle(entry);
       }

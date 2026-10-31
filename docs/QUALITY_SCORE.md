@@ -29,3 +29,5 @@ WebMCP 发现已覆盖配置浏览器中的未绑定 HTTP(S) 页面及后续创�
 托管 headful 的无窗口恢复已覆盖 Linux 源码/双会话、源码移除后的安装模块与真实 MCP：后台/默认隐藏/可见建页、空窗显示、同进程/profile 的会话 cookie 和剪贴板保留均通过。宿主退出仍回收整个临时 profile；物理桌面、macOS headful 与 Windows 尚待验证。
 
 用户标签页已支持原生 openTabs 元数据和本宿主会话独占 claimTab/getTab/selected，原页面释放保留、跨轮标记、旧句柄拒绝、未确认关闭占有和已有/空闲期子页保护均已接入。macOS/Linux Chrome 158 双会话及源码移除后的安装入口通过接管夹具；Node 为 macOS 193/193、Linux 192/193（一个 macOS 专属跳过）。双系统现有剪贴板、会话选择和完整弹窗恢复回归通过；Linux 安装入口的 headful/原生剪贴板/空窗恢复/MCP 回归通过。跨宿主、原始 CDP 客户端、浏览器全局操作仲裁及物理用户接管仍待实现，完整 parity 目标继续推进。
+
+标签页租约已扩展到同机同 OS 用户的独立宿主进程，endpoint 别名共享浏览器实例命名空间。原子发布、匹配代次释放、创建 nonce 和 opener 后代保护已接入；宿主崩溃后继续占有，等待后续原生动作确认恢复。macOS/Linux 双会话的独立进程与安装后夹具通过接管、原页面内容、popup、handoff、竞争和 SIGKILL/reset 验证；Node 为 macOS 197/197、Linux 196/197（一个平台专属跳过）。npm browser-only 制品和双份模块包含检查通过。未占有的已有/空闲子页会跟随外部 opener 保持拦截；跨机器、全局管理、原始客户端、物理用户接管、Windows 和原生崩溃恢复仍待补齐。

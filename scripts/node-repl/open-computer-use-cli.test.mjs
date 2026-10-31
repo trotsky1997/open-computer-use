@@ -31,7 +31,7 @@ function makePackage() {
   const nativePath = path.join(packageRoot, "dist", "fake-native");
   mkdirSync(scripts, { recursive: true });
   mkdirSync(path.dirname(nativePath), { recursive: true });
-  for (const name of ["open-computer-use-repl.mjs", "open-computer-use-kernel.mjs", "ocu-config.mjs", "browser-cdp.mjs", "browser-playwright.mjs", "browser-downloads.mjs","browser-clipboard.mjs","browser-viewport.mjs","browser-input.mjs", "browser-tabs.mjs", "browser-process.mjs","browser-runtime.mjs","browser-runtime-child.mjs", "browser-debugger.mjs","browser-assets.mjs","browser-webmcp.mjs","browser-content.mjs","browser-chrome.mjs","browser-evaluate.mjs","browser-evaluate-dom.mjs","browser-evaluate-worker.mjs","runtime-dependencies.mjs","browser-drop.mjs"]) {
+  for (const name of ["open-computer-use-repl.mjs", "open-computer-use-kernel.mjs", "ocu-config.mjs", "browser-cdp.mjs", "browser-playwright.mjs", "browser-downloads.mjs","browser-clipboard.mjs","browser-viewport.mjs","browser-input.mjs", "browser-tabs.mjs", "browser-tab-claims.mjs", "browser-process.mjs","browser-runtime.mjs","browser-runtime-child.mjs", "browser-debugger.mjs","browser-assets.mjs","browser-webmcp.mjs","browser-content.mjs","browser-chrome.mjs","browser-evaluate.mjs","browser-evaluate-dom.mjs","browser-evaluate-worker.mjs","runtime-dependencies.mjs","browser-drop.mjs"]) {
     cpSync(path.join(HERE, name), path.join(scripts, name));
   }
   cpSync(path.join(HERE,"chrome-browser-extension"),path.join(scripts,"chrome-browser-extension"),{recursive:true});

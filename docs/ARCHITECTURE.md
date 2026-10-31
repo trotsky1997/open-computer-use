@@ -696,3 +696,16 @@ preexisting and idle-handoff user pages from retroactive adoption, while snapsho
 seeding resolves native descendant ordering before classifying originals. Failed
 close retains ownership until confirmation. Cross-host/raw-client, browser-wide
 operation arbitration and physical takeover remain open.
+
+The tab coordinator now backs its stable session owners with atomic private
+filesystem leases (`browser-tab-claims.mjs`). The CDP browser instance ID keys the
+namespace across same-user/same-machine hosts and endpoint aliases. Complete
+immutable records publish by directory rename; release retires only the matching
+owner/generation after native resource settlement. Inventory filters foreign
+leases. Missing popup leases check the nearest claimed opener; existing direct
+child leases form their own ownership boundary. Malformed records and foreign
+private-directory ownership fail closed. No dead-PID/TTL reclamation is used;
+accepted native work can outlive a host. Fresh browser identity starts a new
+namespace. Raw clients, cross-machine filesystems, browser-wide management and
+physical takeover remain outside this protocol, and stale temporary records can
+outlive a closed browser until OS cleanup.

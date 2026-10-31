@@ -180,3 +180,18 @@ test('claim popup cleanup resolves reverse-ordered native descendants before cla
  live.set('child',{targetId:'child',type:'page',openerId:'user',url:'about:blank'});
  await tabs.end(owner);assert.deepEqual([...live.keys()],['user']);
 });
+
+test('shared tab leases survive uncertain close and release after confirmed cleanup',async()=>{
+ const {BrowserTabClaims}=await import('./browser-tab-claims.mjs'),{mkdtemp,rm}=await import('node:fs/promises'),{tmpdir}=await import('node:os'),path=await import('node:path');
+ const root=await mkdtemp(path.join(tmpdir(),'ocu-claims-tabs-test-'));
+ try{
+  const {tabs,entry,live,setFailed}=fixture(),owner={},other={},foreign=new BrowserTabClaims('/browser/one',root);
+  entry.shared={prepare(){throw Error('Private claim unavailable');}};await assert.rejects(tabs.request(owner,{action:'create'}),/Private claim unavailable/);assert.deepEqual([...live.keys()],['user']);
+  entry.shared=new BrowserTabClaims('/browser/one',root);
+  live.set('pending',{targetId:'pending',type:'page',url:'about:blank#ocu-private-creation'});await assert.rejects(tabs.request(other,{action:'claim',targetId:'pending'}),/Private pending/);assert.ok((await tabs.request(other,{action:'userTargets'})).includes('pending'));live.delete('pending');tabs.browsers.set(entry.endpoint,entry);
+  await tabs.request(owner,{action:'claim',targetId:'user'});setFailed(true);
+  await assert.rejects(tabs.request(owner,{action:'close',targetId:'user'}),/Close outage/);await assert.rejects(tabs.end(owner),/Close outage/);
+  await assert.rejects(foreign.claim(other,'user',true),/another session or host/);
+  setFailed(false);await tabs.end(owner);await foreign.claim(other,'user',true);await foreign.release(other);
+ }finally{await rm(root,{recursive:true,force:true});}
+});

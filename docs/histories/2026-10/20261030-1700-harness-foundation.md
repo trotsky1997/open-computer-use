@@ -2820,3 +2820,34 @@ window disappears between enumeration and inspection; other failures propagate.
 Concurrent session reset now shares the browser dialog observer shutdown; a new
 observer waits for that shutdown before attaching. The native claims controller
 retains simultaneous reset checks after racing claims on both session types.
+
+
+## Same-machine independent-host tab leases
+
+Extended ownership beyond one Node host with a small private filesystem lease
+module. Atomic complete-record publication uses browser instance IDs and stable
+session tokens; endpoint aliases share a namespace. Releases match the original
+generation and run after native resources settle. Native creation checks the
+claim directory first; private creation nonce pages reject foreign binding before
+lease publication. Foreign nearest-opener claims protect unleased popups; existing
+direct child claims preserve their boundary. Unclaimed preexisting/idle children
+remain conservatively fenced until their foreign opener releases.
+
+No host-death or TTL reclamation is used because accepted native work can continue
+after the host exits. Crash/reset retains the claim, while a new browser has a new
+namespace. Temporary records can outlive a closed browser. Cross-machine/raw
+clients, global management arbitration, physical takeover and Windows remain open.
+
+The source and source-removed installed controllers exercise independent hosts,
+endpoint aliases, native content, old handles, created tabs/popups, retention,
+release/races, SIGKILL/reset fencing and new managed browser identity for both JS
+session types on macOS/Linux Chrome 158. Focused checks cover atomic races,
+private/symlink directories, malformed records, owner-only release, direct child
+boundaries, pending nonce targets and uncertain-close retry. Node: macOS 197/197;
+Linux 196/197 with one macOS-only skip. Existing dialog/clipboard flows and Linux
+installed headful visibility/native clipboard/empty-window/MCP checks pass. The
+unowned-headful fixture now uses its own tab to reach clipboard authorization.
+
+Source installer, npm staging, CLI doctor and its copied-runtime fixture include
+the new module. A browser-only npm build/tarball contains both runtime and plugin
+copies. No publication or release was performed.

@@ -233,7 +233,7 @@ fi
 if [[ ! -f "${repl_source_root}/open-computer-use-repl.mjs" ]]; then
   repl_source_root="${plugin_source_root}/scripts"
 fi
-for repl_file in open-computer-use-repl.mjs open-computer-use-kernel.mjs ocu-config.mjs browser-cdp.mjs browser-playwright.mjs browser-downloads.mjs browser-clipboard.mjs browser-viewport.mjs browser-drop.mjs browser-input.mjs browser-tabs.mjs browser-process.mjs browser-runtime.mjs browser-runtime-child.mjs browser-debugger.mjs browser-assets.mjs browser-webmcp.mjs browser-content.mjs browser-chrome.mjs browser-evaluate.mjs browser-evaluate-dom.mjs browser-evaluate-worker.mjs runtime-dependencies.mjs; do
+for repl_file in open-computer-use-repl.mjs open-computer-use-kernel.mjs ocu-config.mjs browser-cdp.mjs browser-playwright.mjs browser-downloads.mjs browser-clipboard.mjs browser-viewport.mjs browser-drop.mjs browser-input.mjs browser-tabs.mjs browser-tab-claims.mjs browser-process.mjs browser-runtime.mjs browser-runtime-child.mjs browser-debugger.mjs browser-assets.mjs browser-webmcp.mjs browser-content.mjs browser-chrome.mjs browser-evaluate.mjs browser-evaluate-dom.mjs browser-evaluate-worker.mjs runtime-dependencies.mjs; do
   if [[ ! -f "${repl_source_root}/${repl_file}" ]]; then
     echo "Missing JS REPL runtime at ${repl_source_root}/${repl_file}" >&2
     exit 1
@@ -296,6 +296,7 @@ cp "${repl_source_root}/browser-process.mjs" "${plugin_install_root}/scripts/bro
 cp "${repl_source_root}/browser-runtime.mjs" "${plugin_install_root}/scripts/browser-runtime.mjs"
 cp "${repl_source_root}/browser-runtime-child.mjs" "${plugin_install_root}/scripts/browser-runtime-child.mjs"
 cp "${repl_source_root}/browser-tabs.mjs" "${plugin_install_root}/scripts/browser-tabs.mjs"
+cp "${repl_source_root}/browser-tab-claims.mjs" "${plugin_install_root}/scripts/browser-tab-claims.mjs"
 mkdir -p "${plugin_install_root}/scripts/chrome-browser-extension"
 for bridge_file in manifest.json bridge.html bridge.js background.mjs management.mjs policy.mjs history.mjs options.html options.js; do
   cp "${repl_source_root}/chrome-browser-extension/${bridge_file}" "${plugin_install_root}/scripts/chrome-browser-extension/${bridge_file}"
