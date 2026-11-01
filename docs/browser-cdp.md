@@ -418,18 +418,32 @@ against a disposable Chrome, with no usable native path. Healthy native handshak
 and initialization-cancellation behavior have subprocess fixture checks. Real
 native desktop behavior and a native-free source installer remain separate work.
 
-## Developer console logs
+## Developer logs
 
 ```js
 await tab.playwright.getByRole("button", {name:"Save"}).click();
 nodeRepl.write(await tab.dev.logs({levels:["warn", "error"], limit:20}));
 ```
 
-`dev.logs({filter?, levels?, limit?})` returns chronological console messages and uncaught JavaScript exceptions with
-`level`, `message`, ISO `timestamp`, `source:{type,targetId}` and a source `url`
+`dev.logs({filter?, levels?, limit?})` returns retained console messages, uncaught JavaScript exceptions and native browser diagnostics with
+`level`, `message`, ISO `timestamp`, `category`, `source:{type,targetId}` and a source `url`
 when Chromium provides one. Root pages, related out-of-process iframes and
 dedicated workers (including nested workers) share the buffer. Reads order
 retained entries by timestamp; equal timestamps keep delivery order.
+`category` is `console`, `exception`, or Chromium's native Log source, such as
+`network`, `security`, `javascript`, `deprecation` or `other`. Native levels
+verbose/info/warning/error map to debug/info/warn/error. When supplied,
+`networkRequestId` retains Chromium's request identity; pair it with the source
+target to correlate raw CDP Network events. Network entries are browser-emitted
+diagnostics. Use raw CDP Network for complete request/response traces and bodies;
+Chromium's Log stream can omit ordinary worker fetch HTTP failures.
+
+Root, related iframe and dedicated-worker agents enable Log beside Runtime.
+Worker-forwarded Log messages are omitted to keep Runtime console/error capture
+from being duplicated. Owned-worker diagnostic identities are checked against
+the captured graph. Unused protocol object handles are released; retained logs
+hold text and metadata. Existing initial-target Runtime/Log replay stays excluded.
+
 `filter` is a case-sensitive message substring. Levels are `debug`, `info`, `log`,
 `warn` and `error`; `warning` is accepted as an alias for `warn`. An omitted limit
 returns the newest 100 matching entries; a non-negative integer selects the bound,
@@ -455,15 +469,16 @@ code: object payloads use Chromium's shallow previews/descriptions and printf
 placeholders are formatted from protocol values.
 
 Retention is bounded to 1,000 entries per session/tab and 16,384 UTF-16 code units per
-rendered message. DOM nodes, object graphs and tables are shallow descriptions. Console
-shared/service-worker messages and network/browser diagnostic logs remain outside
-this implementation. Related child sessions are recursively attached and removed
+rendered message. DOM nodes, object graphs and tables are shallow descriptions. Shared/service-worker
+messages, complete network tracing and broader browser diagnostic-provider
+coverage remain outside this implementation. Related child sessions are recursively attached and removed
 with their detached ancestor; pending child setup is canceled and late events
 from retired sessions are discarded. Retained entries keep their original source. Host process crash recovery
-and headful/Linux/Windows coverage remain open.
+and physical/headful diagnostic coverage plus Windows remain open.
 
 `OPEN_COMPUTER_USE_CDP_URL=http://127.0.0.1:9222 node scripts/run-console-smoke.mjs`
-checks real console levels/formatting/source URLs, filtering, retention, cross-call
+checks root/OOP failed resources, CSP and policy warnings, worker CSP refusal,
+console/exception categories, source URLs, filtering, retention, cross-call
 and navigation capture, session isolation and reset/timeout/close/startup cleanup
 using a disposable Chrome and local page.
 

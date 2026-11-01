@@ -246,3 +246,35 @@ profile recovery, lazy startup and shutdown. Node remained 224/224 and 223/224
 (one Linux platform skip). Eight actual running installed Linux modules and both
 npm runtime copies matched final source byte-for-byte. macOS generic browser and
 raw CDP regressions passed. Full harness parity remains active.
+
+
+### Native browser diagnostics in developer logs
+
+Developer logs now subscribe to native Log streams on root/iframe/worker agents.
+Entries retain browser source categories, normalize severity and expose optional
+network request IDs alongside existing target identity and ordering. Console and
+exception categories distinguish Runtime output. Forwarded worker Log duplicates
+and foreign diagnostic identities are excluded; unused protocol object handles
+are released on their emitting session, including ignored replay/forwarding.
+
+The prior runtime fails native diagnostic collection. Current macOS/Linux source
+and relocated-installed macOS/Linux both-host fixtures cover root failed resources,
+OOP failed-image/CSP/policy-header warnings and worker CSP refusal, plus existing
+console/exception/source/replay/retention/reset/navigation behavior. The WebSocket
+fixture verifies severity, request metadata, foreign/invalid input exclusion and
+handle release. Node: 224/224 macOS, 223/224 Linux (one platform skip); macOS general
+browser and raw CDP regressions pass. Native worker Log accepts enable but omits
+ordinary fetch HTTP 404 diagnostics; complete Network traces, shared/service
+workers, wider diagnostic providers and physical/Windows/remote work remain open.
+No new dependency or CI; full harness parity remains active.
+
+
+Final frozen-code source-relocated Linux installation pipeline passed, including
+both-host browser diagnostics and prior console/exception/source fixtures, claims,
+independent hosts, dialog/navigation/drop budgets, raw CDP, AX/native iframe input,
+standalone/managed MCP, isolated headful multi-window, text/HTML/PNG clipboard/GTK,
+profile recovery, lazy startup and shutdown. Eight actual running installed Linux
+modules and both npm runtime copies matched final source byte-for-byte. macOS
+source/installed both-host diagnostics and general browser/CDP regressions passed;
+Node remained 224/224 macOS and 223/224 Linux (one platform skip). Full harness
+parity remains active.

@@ -2696,3 +2696,46 @@ profile recovery, lazy startup and shutdown. Node remained 224/224 and 223/224
 (one Linux platform skip). Eight actual running installed Linux modules and both
 npm runtime copies matched final source byte-for-byte. macOS generic browser and
 raw CDP regressions passed. Full harness parity remains active.
+
+
+## Browser Log diagnostics in developer logs
+
+Enable the native Log domain on root/OOP page and worker agents, alongside Runtime console
+and exceptions. Preserve target ownership, startup-history exclusion, bounded
+retention, ordering and cancellation. Add category metadata and optional native
+network request identity so browser/network/security diagnostics are distinct.
+Keep dedicated-worker Runtime capture and ignore duplicate worker-forwarded Log
+messages. Release unused protocol object handles without evaluating page code.
+Use native root failed-resource and OOP CSP/failed-image fixtures and preserve
+existing console/exception/rebinding/cleanup flows in both hosts/platforms.
+
+Root, related iframe and worker agents now enable Log beside Runtime. Native
+Log source becomes category; console and exception entries have explicit stable
+categories. Native levels normalize to existing output levels and optional network
+request IDs retain target-scoped identity. Worker-forwarded Log duplicates are
+excluded and forwarded diagnostic worker identities are fenced by the owned graph.
+Unused remote object IDs from console, exception and Log payloads are released on
+the emitting session, including excluded replay and forwarded messages.
+
+The prior runtime fails the native browser-diagnostic fixture. Current macOS/
+Linux source and source-relocated installed macOS/Linux both-host checks cover root
+failed resources, OOP failed images/CSP refusal/Permissions-Policy warnings and
+worker CSP refusal, alongside prior console/exception, sources, replay, bounds,
+reset and navigation cases. A real-WebSocket test verifies category/severity,
+request identity, ignored foreign worker diagnostics, invalid severity and remote
+object release. Node: 224/224 macOS, 223/224 Linux (one platform skip). macOS
+ordinary browser and raw CDP regressions pass. Native probes show worker Log.enable
+is accepted while ordinary worker fetch HTTP 404 emits no Log entry; complete
+Network tracing, shared/service workers and broader platform/provider work stay
+open. No new dependency or CI.
+
+
+Final frozen-code source-relocated Linux installation pipeline passed, including
+both-host browser diagnostics and prior console/exception/source fixtures, claims,
+independent hosts, dialog/navigation/drop budgets, raw CDP, AX/native iframe input,
+standalone/managed MCP, isolated headful multi-window, text/HTML/PNG clipboard/GTK,
+profile recovery, lazy startup and shutdown. Eight actual running installed Linux
+modules and both npm runtime copies matched final source byte-for-byte. macOS
+source/installed both-host diagnostics and general browser/CDP regressions passed;
+Node remained 224/224 macOS and 223/224 Linux (one platform skip). Full harness
+parity remains active.

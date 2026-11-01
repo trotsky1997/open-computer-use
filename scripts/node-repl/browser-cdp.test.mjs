@@ -216,12 +216,13 @@ test('log owner cleanup aborts actual stalled discovery and WebSocket handshake'
  }}finally{for(const socket of sockets)socket.destroy();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}
 });
 
-test('log ancestor detach cancels child setup and rejects late descendant events',async()=>{
- const {createServer}=await import('node:http'),{wsServer}=await import('playwright-core/lib/utilsBundle');let peer,blocked,detach=true;
+test('log capture owns diagnostics, metadata and descendant cancellation',async()=>{
+ const {createServer}=await import('node:http'),{wsServer}=await import('playwright-core/lib/utilsBundle');let peer,blocked,detach=true;const released=[];
  const server=createServer((_request,response)=>{response.setHeader('Content-Type','application/json');response.end(JSON.stringify([{id:'tab',type:'page',webSocketDebuggerUrl:`ws://127.0.0.1:${server.address().port}/socket`}]));}),sockets=new Set(),websockets=new wsServer({noServer:true});
  server.on('connection',socket=>{sockets.add(socket);socket.on('close',()=>sockets.delete(socket));socket.on('error',()=>{});});
  server.on('upgrade',(request,socket,head)=>websockets.handleUpgrade(request,socket,head,client=>{
   peer=client;client.on('message',data=>{const command=JSON.parse(data),emit=value=>client.send(JSON.stringify(value));
+   if(command.method==='Runtime.releaseObject')released.push(command.params.objectId);
    if(command.method==='Target.setAutoAttach'&&!command.sessionId)emit({method:'Target.attachedToTarget',params:{sessionId:'parent',targetInfo:{targetId:'frame',type:'iframe'}}});
    if(command.method==='Runtime.enable'&&command.sessionId==='parent'){
     if(!detach){blocked();return;}
@@ -238,8 +239,14 @@ test('log ancestor detach cancels child setup and rejects late descendant events
   const entry=logs.owners.get(owner).get('tab');assert.equal(entry.children.size,0);
   const event={method:'Runtime.consoleAPICalled',params:{type:'log',timestamp:Date.now(),args:[{value:'retained root'}]}};
   peer.send(JSON.stringify({...event,sessionId:'nested'}));peer.send(JSON.stringify(event));peer.send(JSON.stringify({...event,params:{...event.params,timestamp:Date.now()-5000,args:[{value:'older root'}]}}));
-  const result=await logs.read(owner,'tab');assert.deepEqual(result.map(item=>item.message),['older root','retained root']);assert.deepEqual(result[0].source,{targetId:'tab',type:'page'});
-  result[0].source.targetId='changed';assert.equal((await logs.read(owner,'tab'))[0].source.targetId,'tab');
+  const diagnostic={method:'Log.entryAdded',params:{entry:{source:'network',level:'verbose',text:'diagnostic',timestamp:Date.now()-1000,url:'https://example.test/missing',networkRequestId:'request-owned',args:[{objectId:'diagnostic-object'}]}}};
+  peer.send(JSON.stringify(diagnostic));
+  peer.send(JSON.stringify({...diagnostic,params:{entry:{...diagnostic.params.entry,source:'worker',args:[{objectId:'forwarded-worker-object'}]}}}));
+  peer.send(JSON.stringify({...diagnostic,params:{entry:{...diagnostic.params.entry,workerId:'foreign-worker',args:[]}}}));
+  peer.send(JSON.stringify({...diagnostic,params:{entry:{...diagnostic.params.entry,level:'constructor',args:[]}}}));
+  const result=await logs.read(owner,'tab');assert.deepEqual(result.map(item=>item.message),['older root','diagnostic','retained root']);
+  assert.equal(result[1].category,'network');assert.equal(result[1].level,'debug');assert.equal(result[1].networkRequestId,'request-owned');assert.deepEqual(result[0].source,{targetId:'tab',type:'page'});
+  result[0].source.targetId='changed';assert.equal((await logs.read(owner,'tab'))[0].source.targetId,'tab');assert.deepEqual(released.sort(),['diagnostic-object','forwarded-worker-object']);
   await logs.cleanup(owner);detach=false;const otherOwner={},observed=new Promise(resolve=>blocked=resolve);
   const starting=logs.start(otherOwner,'tab'),rejected=assert.rejects(starting,/session closed/);
   await observed;await logs.cleanup(otherOwner);await rejected;

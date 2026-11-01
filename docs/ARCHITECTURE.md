@@ -516,8 +516,8 @@ AsyncLocalStorage context. Their run queue fences earlier evaluations at reset
 and turn boundaries; idle contexts retain bindings and interrupted async
 contexts are discarded. CPU loops in ordinary source REPL code still require Worker REPL isolation.
 
-BrowserConsoleLogs owns a per-session/tab Runtime observer. Console calls and
-uncaught exception/unhandled-rejection events share bounded log retention, level
+BrowserConsoleLogs owns per-session/tab Runtime and Log observers. Console,
+uncaught exception/unhandled-rejection and browser diagnostic events share bounded retention, level
 filters and shallow protocol descriptions. Startup replay is excluded; owner
 cancellation reaches HTTP discovery, the WebSocket handshake and pending sends.
 Navigation keeps the observer, while reset/close retires it. Related iframe/dedicated-worker descendants attach recursively without pausing
@@ -525,7 +525,10 @@ execution; initial-target replay stays excluded and new-target startup replay is
 retained. Ancestor detachment cancels child initialization and retires descendants;
 late events are ignored. Stored source identities survive detachment, and reads
 order retained entries by timestamp. Shared/service workers, short-lived targets
-that exit before attachment and network/browser diagnostics remain open.
+that exit before attachment, complete network traces and wider diagnostic-provider
+coverage remain open. Categories preserve console/exception/native diagnostic
+identity, with optional network request IDs. Unused remote handles are released;
+worker-forwarded Log duplicates are excluded.
 
 BrowserDebugger owns per-turn raw CDP connections, child-session graphs and bounded
 event cursors. It attaches related targets privately, routes explicit child

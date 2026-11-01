@@ -8,6 +8,15 @@ import {BrowserConsoleLogs} from "./node-repl/browser-cdp.mjs";
 const endpoint = process.env.OPEN_COMPUTER_USE_CDP_URL;
 if (!endpoint) throw new Error("Set OPEN_COMPUTER_USE_CDP_URL to a disposable browser");
 const server = createServer((request,response) => {
+  if(request.url==='/missing-diag'||request.url==='/missing-image-diag'){response.writeHead(404,{'Content-Type':'text/plain'});response.end('Missing diagnostic resource');return;}
+  if(request.url==='/diagnostic-child'){
+    response.setHeader('Content-Type','text/html');response.setHeader('Permissions-Policy','diagnostic-unknown-feature=()');response.setHeader('Content-Security-Policy',"default-src 'none';img-src 'self';script-src 'none'");
+    response.end('<!doctype html><title>Diagnostic child</title><script>self.blocked=true;</script><img src="/missing-image-diag">');return;
+  }
+  if(request.url==='/diagnostic-worker.js'){
+    response.setHeader('Content-Type','text/javascript');response.setHeader('Content-Security-Policy',"connect-src 'none'");
+    response.end("fetch('/blocked-worker-diag').catch(()=>{});");return;
+  }
   if(request.url==='/worker.js'||request.url==='/nested.js'){
     response.setHeader('Content-Type','text/javascript');
     const name=request.url==='/worker.js'?'worker':'nested';
@@ -24,6 +33,7 @@ const server = createServer((request,response) => {
     <button onclick="self.worker=new Worker('/worker.js');self.frame=document.createElement('iframe');frame.src='http://localhost:${server.address().port}/child';document.body.append(frame)">Sources</button>
     <button onclick="worker.postMessage('log')">Worker later</button>
     <button onclick="worker.terminate();frame.remove()">Detach sources</button>
+    <button onclick="fetch('/missing-diag').catch(()=>{});self.diagnosticWorker=new Worker('/diagnostic-worker.js');self.diagnosticFrame=document.createElement('iframe');diagnosticFrame.src='http://localhost:${server.address().port}/diagnostic-child';document.body.append(diagnosticFrame)">Diagnostics</button>
     <a href="/next">Next</a><script>if(location.pathname === "/next")console.log("navigation loaded")</script>`);
 });
 await new Promise(resolve => server.listen(0,"127.0.0.1",resolve));
@@ -76,6 +86,14 @@ try {
   const laterDeadline=Date.now()+5000;while((await run('nodeRepl.write(JSON.stringify(await tab.dev.logs({filter:"source worker later"})));')).length!==1){assert.ok(Date.now()<laterDeadline);await new Promise(resolve=>setTimeout(resolve,10));}
   await run('await tab.playwright.getByRole("button",{name:"Detach sources",exact:true}).click();nodeRepl.write(JSON.stringify(true));');
   assert.equal((await run('nodeRepl.write(JSON.stringify(await tab.dev.logs({filter:"source "})));')).length,7);
+  await run('await tab.playwright.getByRole("button",{name:"Diagnostics",exact:true}).click();nodeRepl.write(JSON.stringify(true));');
+  let diagnostics;const diagnosticDeadline=Date.now()+5000;
+  do{diagnostics=await run('nodeRepl.write(JSON.stringify(await tab.dev.logs({levels:["error","warn"]})));');if(diagnostics.some(log=>log.category==='network'&&log.url?.endsWith('/missing-diag'))&&diagnostics.some(log=>log.category==='network'&&log.url?.endsWith('/missing-image-diag'))&&diagnostics.some(log=>log.category==='security'&&log.url?.endsWith('/diagnostic-child'))&&diagnostics.some(log=>log.level==='warn'&&log.message.includes('diagnostic-unknown-feature'))&&diagnostics.some(log=>log.category==='security'&&log.source.type==='worker'&&log.url?.endsWith('/diagnostic-worker.js')))break;assert.ok(Date.now()<diagnosticDeadline,'Browser diagnostics missing: '+JSON.stringify(diagnostics));await new Promise(resolve=>setTimeout(resolve,10));}while(true);
+  assert.ok(logs.every(log=>log.category==='console'));
+  assert.equal(diagnostics.find(log=>log.category==='network'&&log.url?.endsWith('/missing-diag')).source.targetId,targetId);
+  const childDiagnostics=diagnostics.filter(log=>['security','network'].includes(log.category)&&log.url?.includes('localhost'));
+  assert.ok(childDiagnostics.every(log=>log.source.type==='iframe'&&log.source.targetId!==targetId));
+  assert.ok(diagnostics.filter(log=>log.category==='exception'&&log.source.targetId===targetId).length===2);
   const afterNavigation = await run('await tab.playwright.expectNavigation(()=>tab.playwright.getByRole("link",{name:"Next"}).click()); nodeRepl.write(JSON.stringify(await tab.dev.logs()));');
   assert.equal(afterNavigation.at(-1).message,"navigation loaded");
   assert.equal(afterNavigation.at(-1).url,`${url}next`);
@@ -125,7 +143,7 @@ try {
     await rejected;
     assert.equal(manager.owners.size,0);
   } finally {proxy.closeAllConnections();await new Promise(resolve=>proxy.close(resolve));}
-  console.log(`${Session.name} PASS real Chrome root/OOP/worker/nested-worker console and exceptions, source attribution, child replay exclusion/rebinding/detachment, filtering, bounds, navigation, session isolation and reset/timeout/close/startup cleanup`);
+  console.log(`${Session.name} PASS real Chrome root/OOP/worker/nested-worker console, exceptions and root/OOP network and page/worker CSP diagnostics plus policy warnings, categories/source attribution, child replay exclusion/rebinding/detachment, filtering, bounds, navigation, session isolation and reset/timeout/close/startup cleanup`);
 } finally {
   if (targetId) await fetch(new URL(`/json/close/${targetId}`,endpoint)).catch(()=>{});
   await session.close();
