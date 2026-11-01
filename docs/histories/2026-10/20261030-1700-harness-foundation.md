@@ -3677,3 +3677,37 @@ headful/MCP, ordinary browser/dialog/download, console/service-worker and Window
 suites were not repeated for this parameter-policy change. Consent/URL authority,
 Document-response mediation, OS sandboxing and the intermittent macOS console
 issue remain open; full harness parity stays active. No dependency or CI added.
+
+
+### Raw debugging domains and native Chrome tracing
+
+Aligned the common raw namespace policy to the inspected 22-domain reference
+surface: added Audits, Console, IO, Input, Inspector and Tracing; removed the
+Security exception. Reserved key/drag interception methods and global memory dumps
+remain unavailable. Tracing.start refuses Perfetto configuration, the system
+backend, legacy enable-systrace and TraceConfig systrace/memory-dump settings.
+Safe reference probes confirm the common policy and also show backend-specific
+method differences; no browser-wide trace was collected from the reference user
+profile. No vendor implementation was copied.
+
+The new disposable-profile workflow verifies Audits/Console/Inspector, native raw
+Unicode text insertion and a trusted pointer receiver, real ReportEvents and
+ReturnAsStream tracing, bounded IO reads/JSON data, stream closing and normal
+closed-handle errors. Native connection retirement stops an active trace and
+allows a fresh trace in the retained facade after turn end, so no additional
+host cleanup state was introduced. Category queries may return an empty list;
+the test proves non-empty actual trace output. Tracing can include profile-wide
+data and the fixture owns the entire browser. User/provider/crash cases remain
+separate from this native evidence.
+
+Node: 233/233 macOS, 232/233 Linux (one platform skip). Both engines pass source
+and source-relocated installed tracing/input and Network/Fetch/cookie workflows
+on both platforms. Restricted calls create no capture or transport traffic.
+Existing raw CDP and console regressions pass on both platforms, and ordinary
+browser input/navigation/filechooser regression passes on macOS. The earlier
+intermittent macOS console issue remains open despite this passing run. Ten
+installed modules and both npm runtime copies match source. Full headful/MCP,
+download/service-worker and Windows suites were not repeated. URL/consent
+authority, Document-response mediation, wider transports/platforms and OS
+sandboxing remain open; full harness parity stays active. No dependency or CI
+added.

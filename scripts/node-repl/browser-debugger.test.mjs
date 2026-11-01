@@ -36,6 +36,15 @@ test('CDP validates command, event, child and timeout boundaries before connecti
  for(const method of ['DOM.getFileInfo', 'DOM.setFileInputFiles', 'Network.continueInterceptedRequest', 'Network.getCertificate', 'Network.replayXHR', 'Page.crash', 'Page.disable', 'Page.getNavigationHistory', 'Page.resetNavigationHistory', 'Page.navigate', 'Page.navigateToHistoryEntry', 'Page.setAdBlockingEnabled', 'Page.setBypassCSP', 'Page.setDownloadBehavior', 'Page.setInterceptFileChooserDialog', 'Page.setRPHRegistrationMode', 'Page.setSPCTransactionMode']){assert.throws(()=>cdpCommand(method));await assert.rejects(manager.request(owner,{action:'send',targetId:'tab',method}),/not supported/);await assert.rejects(manager.request(owner,{action:'send',targetId:'tab',method,options:{target:{sessionId:'child'}}}),/not supported/);}
  assert.equal(manager.owners.size,0);assert.deepEqual(sends,[]);
 });
+test('CDP domain matrix and tracing restrictions validate before transport',async()=>{
+ const {manager,owner,sends}=fixture();
+ for(const domain of ['Browser','CacheStorage','Database','Security','Storage','Target','WebAuthn'])await assert.rejects(manager.request(owner,{action:'send',targetId:'tab',method:domain+'.enable'}),/not supported/);
+ for(const method of ['Input.dispatchKeyEvent','Input.dispatchDragEvent','Input.setInterceptDrags','Tracing.requestMemoryDump'])await assert.rejects(manager.request(owner,{action:'send',targetId:'tab',method}),/not supported/);
+ for(const params of [{perfettoConfig:''},{tracingBackend:'system'},{options:'record-until-full, enable-systrace '},{traceConfig:{enableSystrace:true}},{traceConfig:{memoryDumpConfig:{}}}])await assert.rejects(manager.request(owner,{action:'send',targetId:'tab',method:'Tracing.start',params}),/not supported/);
+ assert.equal(manager.owners.size,0);assert.deepEqual(sends,[]);
+ for(const method of ['Audits.enable','Console.enable','IO.read','Input.insertText','Inspector.enable','Tracing.getCategories'])cdpCommand(method);
+ cdpCommand('Tracing.start',{tracingBackend:'chrome',options:'record-until-full',traceConfig:{enableSystrace:false,memoryDumpConfig:null}});
+});
 test('CDP explicit cookie URLs and dynamic parameter shapes validate before dispatch',async()=>{
  const valid={name:'owned',value:'value',url:'http://fixture.test/'};
  const {manager,owner,sends}=fixture();

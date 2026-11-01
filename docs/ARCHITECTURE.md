@@ -548,7 +548,12 @@ worker-forwarded Log duplicates are excluded.
 
 BrowserDebugger owns per-turn raw CDP connections, child-session graphs and bounded
 event cursors. It attaches related targets privately, routes explicit child
-selectors and rotates capture history at main-page origin changes. Network
+selectors and rotates capture history at main-page origin changes. The 22-domain
+raw policy includes native Audits/Console/IO/Input/Inspector/Tracing while keeping
+reserved key/drag methods, memory dumps and system/Perfetto/systrace configurations
+unavailable. Security belongs to the excluded domains. Chrome trace events and
+IO streams use native lifecycle semantics; turn-end active-trace release/rebind
+has disposable-profile evidence. Tracing can include browser-wide data. Network
 persistent-payload enabling is rejected before capture creation; its disable form
 remains available. Extra HTTP headers, device-bound session controls, cookie
 controls and legacy interception/body-stream commands are also refused. Cookie

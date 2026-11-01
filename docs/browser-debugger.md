@@ -65,13 +65,16 @@ with a cursor boundary; older requested history reports truncated. Main-page
 origin changes evict prior history and child-session bindings while retaining a
 monotonic cursor. Navigate with the normal tab API before debugging a new origin.
 
-The current policy supports Accessibility, CSS, DOM, DOMDebugger, DOMSnapshot,
-Debugger, Emulation, Fetch, Log, Network, Overlay, Page, Performance, Profiler,
-Runtime, Security and WebAudio domains. Security is limited to enable/disable.
-Browser/Target/Input, global cookie/cache commands and Network.loadNetworkResource
-are refused. The remaining
+The current policy supports Accessibility, Audits, Console, CSS, Debugger, DOM,
+DOMDebugger, DOMSnapshot, Emulation, Fetch, IO, Input, Inspector, Log, Network,
+Overlay, Page, Performance, Profiler, Runtime, Tracing and WebAudio. Browser,
+CacheStorage, Database, Security, Storage, Target and WebAuthn domains are refused.
+Native method availability still depends on the browser backend/version. Global
+cookie/cache commands and Network.loadNetworkResource are refused. The remaining
 static method exclusions are:
 
+- Input.dispatchKeyEvent, Input.dispatchDragEvent and Input.setInterceptDrags;
+  use higher-level key, chooser and drop APIs.
 - DOM.getFileInfo and DOM.setFileInputFiles; use the file-chooser API for uploads.
 - Network.continueInterceptedRequest, Network.getCertificate and Network.replayXHR.
 - Page.navigate/navigateToHistoryEntry/getNavigationHistory/resetNavigationHistory;
@@ -137,6 +140,21 @@ requires the loaded page. The native fixture covers real response fulfillment an
 continuation with structured headers, plus ordinary reload and isolated-world
 reads. Broader method and URL/header authority policy remains open.
 
+Chrome Tracing supports ReportEvents via readEvents, and ReturnAsStream via the
+tracingComplete stream handle followed by IO.read/close. Tracing.start refuses
+non-null perfettoConfig, the system backend, enable-systrace in legacy options,
+traceConfig.enableSystrace:true and non-null traceConfig.memoryDumpConfig.
+Tracing.requestMemoryDump is refused. Ordinary Chrome tracing remains available.
+Category queries may return an empty list; the native fixture verifies actual
+non-empty trace events and streamed JSON rather than a category count.
+
+Tracing can collect data across the browser profile, beyond the selected tab.
+Use an entirely controlled profile when collecting isolated traces. End a trace
+and close its IO stream explicitly. The native fixture verifies that turn-end
+connection retirement also stops an active trace and permits a fresh capture;
+other browser/provider and host-crash cases remain open. These developer commands
+retain their native semantics and the existing bounded event buffer.
+
 Connections, event buffers, attached sessions and pending reads belong to the
 execution-turn resource owner in both session implementations. Reset, endTurn,
 timeout and close cancel discovery and close captures. Retained facades open fresh
@@ -161,6 +179,7 @@ remain privileged.
 node --test scripts/node-repl/*.test.mjs
 OPEN_COMPUTER_USE_CDP_URL=http://127.0.0.1:9222 node scripts/run-cdp-smoke.mjs
 OPEN_COMPUTER_USE_CDP_URL=http://127.0.0.1:9222 node scripts/run-cdp-network-smoke.mjs
+OPEN_COMPUTER_USE_CDP_URL=http://127.0.0.1:9222 node scripts/run-cdp-tracing-smoke.mjs
 OCU_TEST_CHROME_EXECUTABLE=/path/to/chrome node scripts/run-cdp-dialog-smoke.mjs
 ```
 
@@ -198,3 +217,11 @@ cookie controls and legacy interception/body-stream commands. The disable form
 Protocol field semantics are documented by Chromium's
 [Page protocol](https://github.com/ChromeDevTools/devtools-protocol/blob/master/pdl/domains/Page.pdl)
 and [Fetch protocol](https://github.com/ChromeDevTools/devtools-protocol/blob/master/pdl/domains/Fetch.pdl).
+
+The tracing fixture owns its entire disposable browser profile. Both engines
+cover Audits/Console/Inspector, raw Unicode text and trusted pointer receivers,
+ReportEvents, streamed JSON through IO, stream closing, configuration refusal
+before attachment and active-trace turn cleanup/rebind. An optional first argument
+selects an installed runtime. Chromium documents these flows in the
+[Tracing protocol](https://github.com/ChromeDevTools/devtools-protocol/blob/master/pdl/domains/Tracing.pdl)
+and [IO protocol](https://github.com/ChromeDevTools/devtools-protocol/blob/master/pdl/domains/IO.pdl).
