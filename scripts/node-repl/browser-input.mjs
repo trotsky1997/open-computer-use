@@ -133,7 +133,7 @@ export class BrowserInputs {
       await scoped("DOM.scrollIntoViewIfNeeded",{backendNodeId:element.backendNodeId});
       await record.frames.rendered(frameId);this.check(record);
       const loaderId=(await send("Page.getFrameTree",{},0)).frameTree.frame.loaderId,metrics=await send("Page.getLayoutMetrics",{},0),viewportRevision=await this.revision();this.check(record);
-      if(loaderId!==record.geometry.loaderId||viewportRevision!==record.geometry.viewportRevision||!['clientWidth','clientHeight','scale','zoom','offsetX','offsetY'].every(key=>metrics.cssVisualViewport[key]===record.geometry.viewport[key]))throw Error("Browser pointer document or viewport changed during preparation");
+      if(loaderId!==record.geometry.loaderId||viewportRevision!==record.geometry.viewportRevision||!['clientWidth','clientHeight','scale','zoom'].every(key=>metrics.cssVisualViewport[key]===record.geometry.viewport[key]))throw Error("Browser pointer document or viewport changed during preparation");
       record.geometry={loaderId,viewport:metrics.cssVisualViewport,contentSize:metrics.cssContentSize,viewportRevision};
       await record.frames.refresh();record.frames.match(record.framePath);
       const {model}=await scoped("DOM.getBoxModel",{backendNodeId:element.backendNodeId}),polygon=Array.from({length:4},(_,i)=>({x:model.border[2*i],y:model.border[2*i+1]}));
@@ -150,7 +150,7 @@ export class BrowserInputs {
       try{
         const result=await send("Runtime.callFunctionOn",{objectId,arguments:[{objectId:object.objectId},{value:local}],returnByValue:true,functionDeclaration:`function(hit,point){
           if(!this.isConnected||this.ownerDocument!==document)return false;
-          const contains=node=>{for(;node;node=node.getRootNode().host){if(this===node||this.contains(node))return true;}return false;};
+          const contains=node=>{for(;node;node=([1,3].includes(node.nodeType)?node.assignedSlot:null)??node.parentNode??(node.nodeType===11?node.host:null))if(this===node)return true;return false;};
           return contains(hit)&&contains(this.getRootNode().elementFromPoint(point.x,point.y));
         }`});
         if(result.exceptionDetails||result.result.value!==true)throw Error("Element is covered or not visible; read AX state again");

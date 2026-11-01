@@ -249,7 +249,11 @@ clip through same-process owner quads and each agent viewport, and verify
 native/frame-local hits. Root and remote widget rendering barriers precede
 presses. The same frame
 flattening/hit-test code serves drops, preserving integer drop routing while
-indexed pointer checks retain subpixel precision. Convex native content quads
+indexed pointer checks retain subpixel precision. Native boxes and input points
+use visual viewport CSS coordinates; DOM native hits add layout scroll and visual
+pan, while isolated agent-root DOM checks add visual pan. Same-process frame
+inverses retain native visual points until mapping into the child document.
+Convex native content quads
 support perspective and mirrors; folded, singular and horizon-crossing transforms
 fail explicitly. Broader dynamic/frame/provider races and atomic final dispatch remain
 open; Playwright frame locators and snapshots remain available.
@@ -381,20 +385,23 @@ See [viewport and screenshots](browser-viewport.md) for API and evidence.
 
 Native drop reuses the dialog active-time budget, resuming the remaining time
 after every dialog response. Public Playwright AbortSignals cancel target
-resolution/trial hover; the stage loop also checks cancellation before native
+resolution and visible/stable waits; the stage loop also checks cancellation before native
 dispatch. Expiration awaits the existing host drag-release protocol, retaining
 ownership on failure. The budget still cancels standalone operations without a
 dialog watcher; timeout=0 remains turn/reset/close-cancelable.
 
-BrowserDrops holds an origin-wide native drag lease. Playwright resolves and
-trial-checks a fresh target for each dragEnter/dragOver/drop stage; the host checks
+BrowserDrops holds an origin-wide native drag lease. Playwright resolves a fresh
+target for each dragEnter/dragOver/drop stage. A pristine selector scrolls it into
+view before frame stability waits, then shared native frame hits and isolated
+composed-tree checks validate the exact target; covered targets retry within the
+active-time budget. The host checks
 native document loaders, viewport revision and receiving frame before dispatch.
 Cancellation stops later stages and closes blocked dispatch connections. Cleanup
 dismisses owned dialogs, cancels native dragging, then releases focus; failed
 cancellation retains ownership for retry. Input already dispatched may finish.
 Separate frame targets attach through flat CDP sessions owned by the drag lease.
 Hit testing descends native content quads using child layout viewport dimensions
-and document scroll offsets. Main and receiver loaders are checked again after
+and document scroll plus visual pan offsets. Main and receiver loaders are checked again after
 hit testing. Nested process boundaries and identical-URL separate targets have
 real Chrome evidence. Same-process identities resolve recursively through native
 frame owners and an isolated DOM/shadow path selector, then compare public Core

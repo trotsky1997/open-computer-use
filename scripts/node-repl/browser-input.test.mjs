@@ -117,10 +117,10 @@ test("pressKey validates duration and releases after an admitted navigation with
 
 
 test('AX click preparation owns scrolling and cancellation before any press',async()=>{
- for(const mode of ['normal','cancel','changed','navigation','world-missing','hover-name','hover-covered']) {
+ for(const mode of ['normal','pan','hover-pan','cancel','changed','navigation','world-missing','hover-name','hover-covered']) {
   const endpoint='http://prepare-'+mode+'/',owner={},calls=[];let scrolled=false,hovered=false,ready,release;
   const gate=new Promise(resolve=>{release=resolve;}),started=new Promise(resolve=>{ready=resolve;});
-  const geometry={loaderId:'old',viewport:{clientWidth:320,clientHeight:240,pageY:0},contentSize:{width:320,height:2000},viewportRevision:0};
+  const geometry={loaderId:'old',viewport:{clientWidth:320,clientHeight:240,pageY:0,offsetX:0},contentSize:{width:320,height:2000},viewportRevision:0};
   const input=new BrowserInputs(()=>endpoint,async()=>({close(){},async send(method,args){
    calls.push({method,args});
    if(method==='Page.getFrameTree')return {frameTree:{frame:{id:'root',loaderId:mode==='navigation'&&scrolled?'new':'old',url:endpoint}}};
@@ -129,7 +129,7 @@ test('AX click preparation owns scrolling and cancellation before any press',asy
    if(method==='DOM.getBoxModel')return {model:{border:[10,20,30,20,30,40,10,40]}};
    if(method==='DOM.getNodeForLocation')return {frameId:'root',backendNodeId:9};
    if(method==='DOM.describeNode')return {node:{nodeName:'BUTTON'}};
-   if(method==='Page.getLayoutMetrics')return {cssLayoutViewport:{clientWidth:320,clientHeight:240,pageX:0,pageY:800},cssVisualViewport:{...geometry.viewport,pageY:scrolled?800:0},cssContentSize:geometry.contentSize};
+   if(method==='Page.getLayoutMetrics')return {cssLayoutViewport:{clientWidth:320,clientHeight:240,pageX:0,pageY:800},cssVisualViewport:{...geometry.viewport,pageY:scrolled?800:0,offsetX:mode==='pan'&&scrolled||mode==='hover-pan'&&hovered?20:0},cssContentSize:geometry.contentSize};
    if(method==='Accessibility.getPartialAXTree')return {nodes:[{backendDOMNodeId:9,role:{value:'button'},name:{value:mode==='changed'||mode==='hover-name'&&hovered?'Changed':'Target'}}]};
    if(method==='DOM.scrollIntoViewIfNeeded'){scrolled=true;ready();await gate;}
    if(method==='Page.createIsolatedWorld'){assert.deepEqual(args,{frameId:'root',worldName:'ocu-native-ax'});return mode==='world-missing'?{}:{executionContextId:17};}
@@ -149,9 +149,9 @@ test('AX click preparation owns scrolling and cancellation before any press',asy
    assert.throws(()=>input.request({},{action:'check'}),/already owns/);
    if(mode==='cancel')input.cancel(owner);
    release();
-   if(mode==='normal')await work;else await assert.rejects(work,mode.includes('cancel')?/canceled/:mode==='world-missing'?/isolated world/:mode==='hover-name'?/changed/:mode==='hover-covered'?/covered/:/document|viewport/);
+   if(['normal','pan'].includes(mode))await work;else await assert.rejects(work,mode.includes('cancel')?/canceled/:mode==='world-missing'?/isolated world/:mode==='hover-name'?/changed/:mode==='hover-covered'?/covered/:/document|viewport/);
   }
-  assert.equal(calls.filter(call=>call.args?.type==='mousePressed').length,mode==='normal'?1:0);
+  assert.equal(calls.filter(call=>call.args?.type==='mousePressed').length,['normal','pan'].includes(mode)?1:0);
   assert.equal(calls.filter(call=>call.method==='DOM.scrollIntoViewIfNeeded').length,['changed','world-missing'].includes(mode)?0:1);
   assert.equal(calls.filter(call=>call.method==='Runtime.releaseObject').length,calls.filter(call=>call.method==='DOM.resolveNode').length);
   assert.equal(input.leases.size,0);assert.equal(browserPointerLeases.has(endpoint),false);

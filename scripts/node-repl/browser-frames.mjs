@@ -54,11 +54,19 @@ export function clipFramePolygon(polygon,quad){
  }
  return polygon;
 }
+export async function frameDOMPoint(send,id,point,{agentRoot,executionContextId}){
+ if(agentRoot){const viewport=(await send('Page.getLayoutMetrics')).cssVisualViewport;return {x:point.x+(viewport?.offsetX??0),y:point.y+(viewport?.offsetY??0)};}
+ if(!Number.isInteger(executionContextId)||executionContextId<=0)throw Error('Native frame world unavailable');
+ const {backendNodeId}=await send('DOM.getFrameOwner',{frameId:id}),{model}=await send('DOM.getBoxModel',{backendNodeId});
+ const result=await send('Runtime.evaluate',{contextId:executionContextId,expression:'({clientWidth:innerWidth,clientHeight:innerHeight})',returnByValue:true});
+ if(result.exceptionDetails)throw Error('Native frame viewport unavailable');return childFramePoint(model.content,result.result.value,point);
+}
 export async function hitBrowserFrame(send,agents,point,timeout=10000,roundChildPoints=false) {
  let sessionId;const visited=new Set();
  for(let depth=0;depth<32;depth++) {
-  const scroll=(await send('Page.getLayoutMetrics',{},timeout,sessionId)).cssLayoutViewport;
-  const hit=await send('DOM.getNodeForLocation',{x:Math.floor(point.x+scroll.pageX),y:Math.floor(point.y+scroll.pageY),includeUserAgentShadowDOM:true},timeout,sessionId);
+  // Native boxes/input stay visual; DOM hits also include layout scroll and visual pan.
+  const metrics=await send('Page.getLayoutMetrics',{},timeout,sessionId),scroll=metrics.cssLayoutViewport,visual=metrics.cssVisualViewport;
+  const hit=await send('DOM.getNodeForLocation',{x:Math.floor(point.x+scroll.pageX+(visual?.offsetX??0)),y:Math.floor(point.y+scroll.pageY+(visual?.offsetY??0)),includeUserAgentShadowDOM:true},timeout,sessionId);
   const {node}=await send('DOM.describeNode',{backendNodeId:hit.backendNodeId},timeout,sessionId);
   if(!['IFRAME','FRAME'].includes(node.nodeName)||!node.frameId||node.frameId===hit.frameId)return {...hit,sessionId,point};
   const child=agents.get(node.frameId);if(!child||visited.has(child))throw Error('Native hit testing found an unbound child frame');visited.add(child);
@@ -121,10 +129,8 @@ export class FrameConnections {
   }
  }
  async pointInFrame(id,point,executionContextId){
-  const frame=this.frames.get(id);if(!frame)throw Error('Native frame detached');if(frame.id===frame.agent)return point;
-  const parent=this.frames.get(frame.parentId),send=this.sendFor(parent.id),{backendNodeId}=await send('DOM.getFrameOwner',{frameId:id}),{model}=await send('DOM.getBoxModel',{backendNodeId});
-  const result=await this.sendFor(id)('Runtime.evaluate',{contextId:executionContextId,expression:'({clientWidth:innerWidth,clientHeight:innerHeight})',returnByValue:true});
-  if(result.exceptionDetails)throw Error('Native frame viewport unavailable');return childFramePoint(model.content,result.result.value,point);
+  const frame=this.frames.get(id);if(!frame)throw Error('Native frame detached');
+  return frameDOMPoint(this.sendFor(frame.agent),id,point,{agentRoot:frame.id===frame.agent,executionContextId});
  }
  async validateGeometry(id){
   for(const frame of this.path(id).slice(1)){

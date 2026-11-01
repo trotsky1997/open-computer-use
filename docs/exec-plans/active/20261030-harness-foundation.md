@@ -2522,3 +2522,52 @@ Node: 217/217 macOS, 216/217 Linux with one platform-only skip; the focused inpu
 suite passes the added missing-document-path rejection. macOS generic browser
 regression passes; seven production modules match both packed runtime copies.
 Broader provider/IME/shadow/zoom/DPI and atomic final-dispatch proof remain open.
+
+
+## Panned visual viewport native indexed input and drops
+
+Owned native Chrome probes distinguish input/box-model visual coordinates from
+DOM hit/document coordinates and isolated-world layout coordinates under pinch
+zoom. Device emulation at DPR 2 and a 2x page scale produces nonzero visual
+viewport offsets. Preserve native visual polygons and input dispatch coordinates;
+correct native hit document offsets and root-agent local DOM checks. Verify root,
+same-process and cross-process frame trusted receivers under DPR 1/2/1.25, pinch
+2/1.5 and mixed CSS zoom in source and relocated current-runtime installation.
+Physical mixed-DPI hardware remains outside this emulation evidence.
+
+
+Native document hits now add layout scroll plus visual pan; shared frameDOMPoint
+converts agent-root visual points for pristine DOM checks while same-process
+inverses keep native visual coordinates. Pointer preparation accepts native
+scroll-induced pan and records the new geometry; hover/admitted-point checks keep
+strict pan fencing. Unit coverage distinguishes initial pan from hover pan.
+
+Native drop readiness now uses pristine pre-scrolling, visible/stable waits,
+native agent hit routing and exact isolated composed-tree checks. This removes
+panned trial-hover hit mismatches, scrolls fully clipped child widgets before
+animation waits, and retains active-time readiness retries, abort checks, native
+lease/frame/document fences and cleanup. Agent sessions remain distinct from
+same-process frame IDs; slot assignment and named-document properties are checked.
+
+The fixture uses real touch dispatch, stops movement and checks stable nonzero
+visual offsets before every indexed click/drop. Root/SOP/OOP trusted input under
+DPR 1/2/1.25, page scale 2/1.5 and mixed CSS zoom, plus offscreen preparation-scroll
+input, has native source/installed evidence. The prior runtime fails the panned
+root fixture. Broader browser zoom, physical mixed DPI, headful/Windows and atomic
+final dispatch stay open; these are emulation checks.
+
+
+Final frozen-code evidence: both source and source-relocated installed JS hosts
+pass the complete panned-viewport controller on macOS/Linux Chrome 158. The
+installed drop-budget controller passes both hosts/platforms. Generic native
+drop passes the default 10s matrix on both, including slot/named-document cases;
+macOS generic browser regression passes. Node: 218/218 macOS, 217/218 Linux with
+one platform-only skip. Seven production modules match both packed runtime copies.
+No new dependency/release/CI work; full harness parity remains active.
+
+
+Final ancestry boundary: indexed pointer and drop checks traverse slots, DOM
+parents and only ShadowRoot hosts. Named-document properties cannot extend this
+walk. Both-host source/installed controllers on both platforms pass the root
+named-form occlusion/refusal/recovery fixture with the final code. Node remains
+218/218 and 217/218 (one skip); seven modules in both packed runtimes rechecked.

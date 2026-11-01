@@ -55,3 +55,20 @@ test('nested native hit testing retains subpixel points while drop keeps its int
  assert.equal((await hitBrowserFrame(send,agents,point)).backendNodeId,401);
  assert.equal((await hitBrowserFrame(send,agents,point,10000,true)).backendNodeId,402);
 });
+
+
+test('native visual points add document offsets only for hits and agent-root DOM checks',async()=>{
+ const point={x:5,y:7},send=async(method,args)=>{
+  if(method==='Page.getLayoutMetrics')return {cssLayoutViewport:{pageX:20,pageY:30},cssVisualViewport:{offsetX:100,offsetY:50}};
+  if(method==='DOM.getNodeForLocation'){assert.equal(args.x,125);assert.equal(args.y,87);return {frameId:'root',backendNodeId:1};}
+  if(method==='DOM.describeNode')return {node:{nodeName:'BUTTON'}};
+  if(method==='DOM.getFrameOwner')return {backendNodeId:2};
+  if(method==='DOM.getBoxModel')return {model:{content:[0,0,200,0,200,200,0,200]}};
+  if(method==='Runtime.evaluate')return {result:{value:{clientWidth:200,clientHeight:200}}};
+  throw Error(method);
+ };
+ assert.deepEqual((await hitBrowserFrame(send,new Map(),point)).point,point);
+ const frames=new FrameConnections(send);frames.frames=new Map([['root',{id:'root',agent:'root'}],['same',{id:'same',agent:'root',parentId:'root'}]]);
+ assert.deepEqual(await frames.pointInFrame('root',point,17),{x:105,y:57});
+ const same=await frames.pointInFrame('same',point,17);assert.ok(Math.abs(same.x-point.x)<1e-8&&Math.abs(same.y-point.y)<1e-8);
+});

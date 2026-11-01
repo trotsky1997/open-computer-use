@@ -1,6 +1,7 @@
+import {setTimeout as delay} from 'node:timers/promises';
 import {validateEvaluation,validateLocatorPath,validateTimeoutOptions} from "./browser-evaluate-dom.mjs";
 import {validateDrop} from "./browser-drop.mjs";
-import {flattenFrameTree} from "./browser-frames.mjs";
+import {flattenFrameTree,hitBrowserFrame,frameDOMPoint} from "./browser-frames.mjs";
 import { isAbsolute } from "node:path";
 
 export const PLAYWRIGHT_VERSION = "1.64.1";
@@ -43,7 +44,7 @@ export function createPlaywrightApi(endpoint, targetId, invalidate, focusLease, 
       const page = selected.page;
       focusSession = selected.session;
       // shortcut: pinned Core CDP contexts omit registered engines; use public registration once CDP supports it.
-      if(method==="drop") await page.context()._channel.registerSelectorEngine({selectorEngine:{name:"ocu_frame_owner",source:`(${frameOwnerEngine.toString()})()`,contentScript:true}});
+      if(method==="drop")for(const [name,engine] of [["ocu_frame_owner",frameOwnerEngine],["ocu_drop_hit",dropHitEngine]])await page.context()._channel.registerSelectorEngine({selectorEngine:{name,source:`(${engine.toString()})()`,contentScript:true}});
       page.setDefaultTimeout(10_000);
       const convert = value => {
         if (value && recipes.has(value)) return resolve(recipes.get(value));
@@ -81,7 +82,7 @@ export function createPlaywrightApi(endpoint, targetId, invalidate, focusLease, 
               const work=(async()=>{
                 for(const type of ["dragEnter","dragOver","drop"]){
                   signal.throwIfAborted();
-                  const geometry=await nativeDropPoint(locator,page,focusSession,{...options,signal},dropRequest);
+                  let geometry;while(!geometry){signal.throwIfAborted();geometry=await nativeDropPoint(locator,page,focusSession,{...options,signal},dropRequest);if(!geometry)await delay(50,undefined,{signal});}
                   signal.throwIfAborted();
                   await dropRequest({action:"stage",id,type,...geometry});
                 }
@@ -273,7 +274,11 @@ async function nativeDropPoint(locator,page,session,options,request) {
   const childSessions=[];
   if (!handle) throw new Error("Drop target missing");
   try {
-    await handle.hover({trial:true,timeout:0,signal:options.signal});
+    options.signal?.throwIfAborted();
+    // Offscreen child widgets need scrolling before their animation-frame stability wait.
+    const scrolled=await handle.$("ocu_drop_hit=scroll");if(!scrolled)throw Error("Drop target detached");await scrolled.dispose();
+    await handle.scrollIntoViewIfNeeded({timeout:0,signal:options.signal});
+    await handle.waitForElementState("visible",{timeout:0,signal:options.signal});
     const box = await handle.boundingBox();
     if (!box) throw new Error("Drop target has no visible bounds");
     const viewport = (await session.send("Page.getLayoutMetrics")).cssVisualViewport;
@@ -289,8 +294,7 @@ async function nativeDropPoint(locator,page,session,options,request) {
       } finally {await element.dispose();}
     }
     const point = options.position ? {x:Math.round(box.x+border.x+options.position.x),y:Math.round(box.y+border.y+options.position.y)} : {x:Math.floor((left+right)/2),y:Math.floor((top+bottom)/2)};
-    if (point.x<left || point.x>=right || point.y<top || point.y>=bottom) throw new Error("Drop point outside visible target");
-    await handle.hover({trial:true,timeout:0,signal:options.signal,position:{x:point.x-box.x-border.x,y:point.y-box.y-border.y}});
+    if (point.x<left || point.x>=right || point.y<top || point.y>=bottom){if(options.position)throw new Error("Drop point outside visible target");return;}
     const after = await handle.boundingBox();
     if (!after || ["x","y","width","height"].some(key=>Math.abs(after[key]-box[key])>.25)) throw new Error("Drop target moved; resolve again");
     const frames = flattenFrameTree((await session.send("Page.getFrameTree")).frameTree);
@@ -313,6 +317,14 @@ async function nativeDropPoint(locator,page,session,options,request) {
       for(const item of tree) if(!frames.some(existing=>existing.id===item.id)) frames.push(item);
     }
     const frameId=await bindDropFrame(frame,frames,nativeIds,frameSessions);
+    const agents=new Map([...frameSessions].map(([item,agent])=>[nativeIds.get(item),item===page.mainFrame()?undefined:agent]));
+    const send=(method,params,_timeout,agent=session)=>agent.send(method,params),hit=await hitBrowserFrame(send,agents,point,10000,true);
+    if(hit.frameId!==frameId)return;
+    const scoped=hit.sessionId??session,world=agents.has(frameId)?{}:await scoped.send('Page.createIsolatedWorld',{frameId,worldName:'ocu-native-drop'});
+    const local=await frameDOMPoint((method,params)=>scoped.send(method,params),frameId,hit.point,{agentRoot:agents.has(frameId),executionContextId:world.executionContextId});
+    const matched=await handle.$('ocu_drop_hit='+JSON.stringify(local));
+    if(!matched)return;
+    await matched.dispose();
     const framePath=[];
     for(let current=frame;current;current=current.parentFrame()) framePath.unshift(current.url());
     return {point,frames,framePath,frameTargets,frameId,geometry:{loaderId:frames[0].loaderId,viewport,revision:await request({action:"revision"})}};
@@ -353,6 +365,21 @@ export async function bindDropFrame(frame,frames,nativeIds,sessions) {
   if((await session.send("DOM.getFrameOwner",{frameId:match.id})).backendNodeId!==match.backendNodeId) throw new Error("Native drop frame owner changed");
   nativeIds.set(frame,match.id);
   return match.id;
+}
+
+function dropHitEngine(){
+ const contains=(target,hit)=>{for(let node=hit;node;node=([1,3].includes(node.nodeType)?node.assignedSlot:null)??node.parentNode??(node.nodeType===11?node.host:null))if(node===target)return true;return false;};
+ const query=(root,body)=>{
+  if(root.nodeType!==1||!root.isConnected)return null;
+  if(body==="scroll"){root.scrollIntoView({block:"nearest",inline:"nearest",behavior:"instant"});return root;}
+  const point=JSON.parse(body);
+  for(let target=root;target;){
+   const tree=target.getRootNode(),hit=tree.elementFromPoint(point.x,point.y);
+   if(!hit||!contains(target,hit))return null;target=tree.nodeType===11?tree.host:null;
+  }
+  return root;
+ };
+ return {query,queryAll(root,body){return query(root,body)?[root]:[];}};
 }
 
 function frameOwnerEngine() {

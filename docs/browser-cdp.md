@@ -72,6 +72,12 @@ transforms and covered targets fail explicitly.
 Root indexed clicks use this same native polygon and document-bound hit path,
 including nested closed-shadow targets. External overlays refuse input; fresh
 observations recover after the overlay is removed.
+Native box models and input positions use visual viewport CSS coordinates.
+Native DOM hit queries add document scroll plus visual pan; isolated agent-root
+DOM checks add visual pan. This keeps panned pinch-zoom input aligned while
+preserving the existing pre-press document and viewport checks. Native
+scroll-into-view may pan during preparation; its resulting geometry becomes the
+admitted snapshot, and subsequent pan changes refuse input.
 Held input still uses the host ownership and cancellation/release path. Native
 input can have admitted effects before cancellation; inspect current state.
 

@@ -3204,3 +3204,49 @@ Secondary AX actions still require an appropriate native action transport; the
 current CDP Accessibility surface provides observation commands. Broad shadow/
 provider/IME, mixed zoom/DPI, atomic final dispatch, physical desktop and Windows
 remain open; full harness parity stays active.
+
+
+## Panned visual viewport native input and drop readiness
+
+Owned Chrome probes reproduced visual/document coordinate differences at nonzero
+pinch-pan offsets. Native DOM hit queries now include layout scroll plus visual
+pan. Shared frameDOMPoint converts agent-root visual points to isolated-world
+layout coordinates; same-process frame inverses keep native visual coordinates.
+Pointer preparation accepts scroll-induced pan and records its resulting
+geometry; already selected points retain strict pan checks before pressing.
+
+Native drop replaces trial-hover hit checks with pristine preparation scrolling,
+visible/stable waits, native agent routing and isolated exact composed-tree hits.
+Offscreen child widgets scroll before animation-frame waits. The target check
+handles assigned slots and stops at document roots even with named properties.
+Readiness retries retain the action budget, abort checks, native lease and frame/
+document fences. Existing native stages, file/MIME delivery and cleanup persist.
+
+The owned AX controller now pans with trusted touch dispatch, stops movement and
+asserts stable nonzero offsets before every click/drop. Both JS hosts pass source
+and source-relocated current-runtime installation on macOS/Linux Chrome 158:
+DPR 1/2/1.25, page scale 2/1.5, mixed CSS zoom, root/SOP/OOP trusted clicks and
+panned drops, plus offscreen preparation-scroll input. The prior runtime fails
+the panned root fixture. Existing AX semantics/diffs, closed-shadow/root clipping
+and initial-dialog output checks also pass.
+
+Frozen source generic native drop passes the default 10s budget on both platforms,
+covering slot/named-document targets, native MIME/file/protected data, nested and
+return-process/perspective frames, duplicate/shadow owners, reordering, prompt
+navigation, cover deadlines, modal/reset/timeout/close and cleanup retry. Installed
+both-host drop budget controllers pass repeated prompt pauses, resumed-readiness
+expiry, no late drop, missing targets, unlimited reset and fresh-input recovery.
+Node: 218/218 macOS; 217/218 Linux with one platform-only skip. Seven production
+modules match both packed npm runtime copies. macOS generic browser regression
+also passes. No new dependencies, release or CI work.
+
+These are owned device-emulation checks. Physical mixed-DPI, wider browser zoom/
+provider/headful/Windows, remote identity, secondary AX transport and atomic final
+dispatch remain open; the full harness parity goal stays active.
+
+
+Indexed pointer composed ancestry also stops at document roots and follows
+assigned slots/DOM parents/ShadowRoot hosts. The root occlusion fixture now has a
+named host form; frozen-code source and relocated-installed both-host controllers
+pass on macOS/Linux after this final boundary check. Final Node counts remain
+218/218 and 217/218 with one platform-only skip; packed runtime bytes rechecked.

@@ -13,8 +13,11 @@ host; remote file transfer, directories and in-memory file buffers are unsupport
 Options are timeoutMs (default 10000, zero unlimited) and position:{x,y} in CSS
 pixels relative to the element padding box. Unknown fields fail explicitly.
 
-The pinned Playwright dependency supplies locator resolution and trial hover
-checks. The harness dispatches CDP Input.dispatchDragEvent, producing trusted
+The pinned Playwright dependency supplies locator resolution and visible/stable
+waits. A private isolated selector scrolls offscreen child targets before their
+animation-frame stability wait. Native frame hit testing and an isolated
+composed-tree check validate the exact target, including slotted shadow content;
+covered targets retry within the active-time budget. The harness dispatches CDP Input.dispatchDragEvent, producing trusted
 browser drag events and Chromium DataTransfer/file behavior. The browser controls
 acceptance, MIME normalization, rich editor insertion and protected data access.
 Completion means dispatch finished; inspect the page to verify its own result.
@@ -23,7 +26,7 @@ Each native stage resolves and checks the target again. The host validates main
 and receiving-frame loaders, hit-frame ancestry, viewport metrics and revision.
 Cross-process frame sessions bind the native target/frame identity explicitly.
 Native hit testing descends through iframe content quads into each child layout
-viewport, including document scroll offsets. Nested process boundaries and
+viewport, including document scroll and visual pan offsets. Nested process boundaries and
 identical-URL independently hosted frames are supported. Same-process frames bind
 recursively through DOM.getFrameOwner backend identities. Owner traversal runs
 in an isolated world; a private isolated selector follows element-child and
@@ -33,8 +36,9 @@ objects and temporary handles are released; missing or changed owners fail
 before delivery. The selector registers through a pinned Core context channel
 because public selector registration omits CDP default-context setup in 1.64.1.
 Upgrade that registration when the public CDP path works, and rerun these smokes.
-Scaled/rotated/perspective frame transforms, zoom, headful browsers and other
-platforms need additional evidence. A final native loader/viewport check precedes
+Owned fixtures cover nested perspective frames and panned device emulation at
+DPR 1/2/1.25, page scale 2/1.5 and mixed CSS zoom on macOS/Linux. Wider transforms,
+browser zoom, physical mixed-DPI/headful hardware and Windows need more evidence. A final native loader/viewport check precedes
 each dispatch; document changes fail without replaying the drag.
 
 One session owns native dragging for the browser origin at a time. Action timeout
@@ -44,7 +48,8 @@ deadline so it can be answered in a later call. Each response resumes the
 remaining active-time budget, including across sequential prompts. Readiness
 checks after a response still expire; accepting/dismissing the dialog reports the
 resumed action failure. The pinned Playwright public AbortSignal cancels target
-resolution and trial hover. Cancellation is checked before each native stage,
+resolution and visible/stable waits. Cancellation is checked before preparation
+scrolling and each native stage,
 and native drag cancellation still requires acknowledgement before lease release.
 The overall JS execution deadline still applies. Answering the dialog resumes
 remaining stages. Reset, timeout and
@@ -66,7 +71,8 @@ Unicode MIME and file bytes, native rich editor insertion, same-target iframe
 input, cross-process MIME/file delivery, nested cross-process and same-process
 children with scrolling, identical-URL independently hosted siblings, invalid paths and
 covered-target action timeout, cross-process frame prompt response, dialog response beyond the action deadline,
-same-URL siblings and nested sibling documents, open shadow roots, light/shadow
+same-URL siblings and nested sibling documents, slotted shadow targets with
+named-document properties, open shadow roots, light/shadow
 host paths, main-world DOM getter poisoning, DOM reordering with preserved frame
 contexts, and frame navigation after a prompt without file delivery. Responses
 to dialogs now report a resumed action failure. Checks also cover
@@ -90,10 +96,8 @@ JS hosts pass on macOS and arm64 Linux, including installed payloads after sourc
 relocation. The browser-only installed smoke invokes this controller too.
 
 
-On the arm64 Linux Chrome 158 fixture, restoring a hidden target after expiry can
-make six normal trial checks take about 17 seconds; the recovery assertion uses
-an explicit 30s budget. Deadline assertions keep their 3s/100ms budgets and the
-product default stays 10s. The broader Linux iframe fixture still exceeds that
-default in both the pre-change and current runtime. Linux actionability latency
-and the full Linux MIME/frame matrix remain open; the focused deadline/recovery
-controller covers its stated cases only.
+The deadline controller retains its 3s/100ms deadline assertions and explicit 30s
+recovery allowance; the product default stays 10s. The native frame/MIME/file
+matrix now passes at the default on macOS and arm64 Linux Chrome 158, including
+nested/return-process frames, perspective, duplicate URLs and slotted shadow
+content. Wider provider, hardware and browser-version latency remains open.
