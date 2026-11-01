@@ -1175,10 +1175,12 @@ export async function runServer({ command, args }) {
   const session = new WorkerJavaScriptSession({ native });
   let buffer = "";
   let requestQueue = Promise.resolve();
+  let shuttingDown,shutdownStatus=0;
   const requests=new Map(),report=error=>console.error(asError(error).message);
   const isJavaScript=request=>request.method==='tools/call'&&request.params?.name==='js';
   process.stdin.setEncoding("utf8");
   process.stdin.on("data", chunk => {
+    if(shuttingDown)return;
     buffer += chunk;
     for (;;) {
       const newline = buffer.indexOf("\n");
@@ -1241,15 +1243,20 @@ export async function runServer({ command, args }) {
       respond({ jsonrpc: "2.0", id, error: { code: -32603, message: asError(error).message } });
     }
   }
-  function send(message) { process.stdout.write(`${JSON.stringify(message)}\n`); }
-  let shuttingDown;
+  function send(message) { if(!shuttingDown)process.stdout.write(`${JSON.stringify(message)}\n`); }
   const shutdown = () => {
-    if (!shuttingDown) shuttingDown = session.close().finally(() => browserRuntime.close()).finally(() => native.close());
+    if (!shuttingDown) {
+      for(const state of requests.values())state.cancelled=true;
+      shuttingDown = session.close().finally(() => browserRuntime.close()).finally(() => native.close());
+    }
     return shuttingDown;
   };
   const failedShutdown=error=>{console.error(`Session cleanup failed: ${asError(error).message}`);process.exit(1);};
-  for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) process.on(signal, () => { void shutdown().then(()=>process.exit(0),failedShutdown); });
-  process.stdin.on("end", () => { void requestQueue.then(shutdown,shutdown).catch(failedShutdown); });
+  const stop=code=>{shutdownStatus ||= code;void shutdown().then(()=>requestQueue).then(()=>process.exit(shutdownStatus),failedShutdown);};
+  for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) process.on(signal, () => stop(0));
+  process.stdin.on("end",()=>stop(0));
+  process.stdin.on("error",()=>stop(1));
+  process.stdout.on("error",()=>stop(1));
 }
 
 export class PersistentJavaScriptSession extends WorkerJavaScriptSession {

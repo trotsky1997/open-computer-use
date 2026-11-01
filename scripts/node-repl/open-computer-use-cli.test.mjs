@@ -274,6 +274,19 @@ test('MCP cancels queued/active JS and keeps ping/reset responsive',async t=>{
  assert.equal((await js('nodeRepl.write(7)')).content.at(-1).text,'7');
 });
 
+for(const boundary of ['eof','stdout'])test(`MCP ${boundary} disconnect interrupts execution before exit`,async t=>{
+ const fixture=makePackage();t.after(fixture.cleanup);
+ const adapter=path.join(fixture.packageRoot,'scripts/node-repl/open-computer-use-repl.mjs');
+ const client=new JsonLinePeer({command:process.execPath,args:[adapter,'--',path.join(fixture.packageRoot,'missing-native'),'mcp'],env:{...process.env,OPEN_COMPUTER_USE_CDP_URL:''}});t.after(()=>client.close());await client.initialize();
+ const gate=path.join(fixture.packageRoot,'disconnect-gate'),skipped=gate+'-skipped';
+ const active=client.request('tools/call',{name:'js',arguments:{code:`(await import('node:fs')).writeFileSync(${JSON.stringify(gate)},'ready');while(true){}`,timeout_ms:30000}},0);active.catch(()=>{});
+ const started=Date.now();while(!existsSync(gate)){assert.ok(Date.now()-started<5000);await new Promise(resolve=>setTimeout(resolve,10));}
+ const queued=client.request('tools/call',{name:'js',arguments:{code:`(await import('node:fs')).writeFileSync(${JSON.stringify(skipped)},'unexpected');`}},0);queued.catch(()=>{});
+ if(boundary==='eof')client.child.stdin.end();else{client.child.stdout.destroy();client.request('ping',{},0).catch(()=>{});}
+ const deadline=Date.now()+2000;while(client.child.exitCode===null&&client.child.signalCode===null){assert.ok(Date.now()<deadline,'Disconnect waited for the JS budget');await new Promise(resolve=>setTimeout(resolve,10));}
+ assert.equal(client.child.signalCode,null);assert.equal(client.child.exitCode,boundary==='eof'?0:1);assert.equal(existsSync(skipped),false);assert.doesNotMatch(client.stderr,/Unhandled 'error' event/);
+});
+
 test("browser-only plugin installation is discoverable without native artifacts", async t => {
   const packageRoot=mkdtempSync(path.join(os.tmpdir(),'ocu-install-help-'));t.after(()=>rmSync(packageRoot,{recursive:true,force:true}));
   const output=captureStream(),error=captureStream();

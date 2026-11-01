@@ -3239,3 +3239,37 @@ not repeated for this transport-boundary change. Already-completed native action
 are not rolled back and active cancellation discards the kernel's variables.
 OS sandboxing, URL/consent authority, wider transports/platforms and the intermittent
 macOS console issue remain open. No dependency or CI added; full parity stays active.
+
+## MCP disconnect shutdown scope
+
+MCP stdio shutdown starts by closing client input. Current EOF handling drains JS
+before cleanup, so a busy kernel can outlive its client. Scope: immediate EOF and
+pipe-error shutdown, pending-request fencing/reply suppression, existing session
+cleanup, focused pipe checks and real held-input disconnect evidence in the turn
+fixture. No client-side SIGTERM/SIGKILL fallback may mask the native verification.
+Preserve mark semantics and cleanup-failure reporting. Normal shutdown exits zero;
+transport errors exit nonzero after cleanup. No dependency/CI.
+
+
+### MCP disconnect shutdown
+
+EOF and stdio errors now start session cleanup immediately, cancel pending
+requests and suppress replies. The adapter interrupts the kernel before waiting
+for queued work to retire, then exits after browser/native cleanup. EOF and
+signals exit zero; detected transport errors and cleanup failures exit nonzero.
+This reuses the existing close/reset generation fences and cleanup barriers.
+
+Pre-change pipe tests reproduced EOF waiting for the JS budget and stdout EPIPE
+raising an unhandled error. Both now pass with an active CPU loop and queued
+side-effect probe. Real MCP browser checks disconnect after accepted trusted
+Shift down, observe process exit without client SIGTERM/SIGKILL, verify trusted
+key release and skipped queued input, and reclaim the preserved borrowed tab
+from a fresh owner. Source and source-relocated installed checks pass on macOS
+and Linux, alongside existing turn/cancel/reset and idle-kernel recovery cases.
+
+Node: 236/236 macOS, 235/236 Linux (one platform skip). Ten installed production
+modules and both npm runtime copies match source. Full native desktop/headful,
+Windows and unrelated Network/Tracing/console/download suites were not repeated.
+Completed external effects remain; OS sandboxing, URL/consent authority, broader
+transports/platforms and the intermittent macOS console issue remain open.
+No dependency or CI added; full harness parity stays active.

@@ -119,7 +119,20 @@ try {
  }
  peer.notify('notifications/turn-ended');await peer.request('tools/call',{name:'js',arguments:{code:'nodeRepl.write(true);'}});
  await peer.close();await waitFor(async()=> !(await ids()).has(mcpId));
- console.log(Session.name+' PASS owned tab/popup/grandchild cleanup, user preservation, latest marks, handoff resume, idle JS persistence, stale callbacks, held input/viewport release, close failure/retry, source reset/close and real MCP turn-ended/cancellation/reset interruption, trusted held-key release and recovered media');
+ for(const boundary of ['eof','stdout']){
+  const borrowed=(await browser(send=>send('Target.createTarget',{url:url+boundary}))).targetId;
+  peer=new JsonLinePeer({command:process.execPath,args:[fileURLToPath(runtimeURL('open-computer-use-repl.mjs')),'--','/missing-turn-native','mcp']});await peer.initialize();
+  response=await peer.request('tools/call',{name:'js',arguments:{code:`var tab=await cua.getTab(${JSON.stringify(borrowed)});await tab.playwright.getByLabel('Typing').click();nodeRepl.write(true);`}});assert.equal(response.isError,false,JSON.stringify(response));
+  let replied=false;const held=peer.request('tools/call',{name:'js',arguments:{code:'await tab.pressKey(null,"shift",{durationMs:30000});',timeout_ms:60000}},0);held.then(()=>replied=true,()=>{});
+  await waitFor(async()=> (await events(borrowed)).some(event=>event.type==='keydown'&&event.key==='Shift'&&event.trusted));
+  peer.request('tools/call',{name:'js',arguments:{code:'await tab.typeText(null,"unexpected");'}},0).catch(()=>{});
+  if(boundary==='eof')peer.child.stdin.end();else{peer.child.stdout.destroy();peer.request('ping',{},0).catch(()=>{});}
+  await waitFor(()=>peer.child.exitCode!==null||peer.child.signalCode!==null);assert.equal(peer.child.signalCode,null);assert.equal(peer.child.exitCode,boundary==='eof'?0:1);assert.equal(replied,false);assert.doesNotMatch(peer.stderr,/Unhandled 'error' event/);
+  await waitFor(async()=> (await events(borrowed)).some(event=>event.type==='keyup'&&event.key==='Shift'&&!event.shift&&event.trusted));assert.ok((await ids()).has(borrowed),'Disconnect closed a borrowed user tab');
+  assert.equal(await run(`var disconnected=await cua.getTab(${JSON.stringify(borrowed)});nodeRepl.write(JSON.stringify(await disconnected.playwright.getByLabel('Typing').inputValue()));`),'');
+  await run('await disconnected.close();nodeRepl.write(JSON.stringify(true));');await peer.close();
+ }
+ console.log(Session.name+' PASS owned tab/popup/grandchild cleanup, user preservation, latest marks, handoff resume, idle JS persistence, stale callbacks, held input/viewport release, close failure/retry, source reset/close and real MCP turn-ended/cancellation/reset interruption, trusted held-key release and recovered media, EOF/pipe-error cleanup without client signals and borrowed-tab recovery');
 } finally {
  if(peer)await peer.close();await Promise.allSettled([session.close(),other.close()]);
  for(const target of await targets()) if(target.url.startsWith(url))await browser(send=>send('Target.closeTarget',{targetId:target.id}));

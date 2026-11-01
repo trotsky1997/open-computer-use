@@ -334,3 +334,20 @@ fresh bindings, retained-tab input/media recovery and final cleanup through real
 MCP cancellation/reset. The protocol contracts are described in MCP
 [cancellation](https://modelcontextprotocol.io/specification/2025-06-18/basic/utilities/cancellation)
 and [ping](https://modelcontextprotocol.io/specification/2025-06-18/basic/utilities/ping).
+
+
+## MCP connection shutdown
+
+Closing MCP stdin ends the connection. The adapter immediately suppresses pending
+replies and prevents queued JS from running, stops the active kernel, then waits
+for owned input/browser cleanup and queue retirement before exiting. Await needed
+MCP replies before closing input. Normal EOF exits zero. Detected stdio errors
+initiate shutdown with nonzero status; cleanup failures remain explicit failures.
+Additional input and late output are ignored after shutdown starts.
+
+The disconnect fixture closes input or breaks the output pipe directly, with no
+client-side process signals until the server has exited. It verifies trusted held-
+key release, refusal of queued input, borrowed-tab preservation and a fresh claim
+by another session. Native app actions already completed retain their effects.
+The transport shutdown contract is described in MCP
+[lifecycle](https://modelcontextprotocol.io/specification/2025-06-18/basic/lifecycle#shutdown).

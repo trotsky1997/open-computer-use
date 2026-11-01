@@ -513,7 +513,11 @@ Cancellation of active JS resets its shared kernel, suppresses its response and
 fences older queued work behind resource cleanup. Ping/tools metadata and js_reset
 bypass the JS execution queue; reset acknowledges only after cleanup settles.
 Unknown/late/malformed and non-JS cancellations are ignored. Native cleanup failures
-retain the existing refusal/retry behavior.
+retain the existing refusal/retry behavior. Stdio EOF and input/output pipe errors
+start shutdown immediately, fence pending requests and stop the kernel before
+waiting for queue retirement. Owned resource cleanup completes before exit;
+transport errors retain a nonzero status. Borrowed tabs are released open, with
+fresh-host claim/input recovery verified through real MCP disconnects.
 See [tabs and turn boundaries](browser-tabs.md) for lifecycle and limits.
 
 Thread and process sessions share host request dispatch, serialized execution and
