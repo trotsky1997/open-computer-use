@@ -3304,3 +3304,39 @@ headful multi-window behavior, text/HTML/PNG clipboard with GTK interop, profile
 recovery, lazy launch and shutdown. Eight actual running installed Linux modules
 and both npm runtime copies matched current source byte-for-byte. No new runtime
 dependency or CI. The full harness parity goal remains active.
+
+
+### Related iframe and dedicated-worker developer logs
+
+The tab log observer now passively auto-attaches related iframe and dedicated
+worker targets recursively. It excludes existing-target cached history, accepts
+new-target startup replay and stores source target type/id. Reads order retained
+entries by timestamp and clone source metadata. Ancestor detach cancels child
+setup and retires descendants, fencing late events; owner cleanup still reaches
+all setup and pending requests. Shared/service workers, network/browser logs and
+short-lived targets that exit before passive attachment remain outside coverage.
+
+The old runtime fails related-source collection. Source repeated macOS/Linux
+and relocated-installed macOS both-host fixtures cover root/OOP/worker/nested
+worker console/errors, unrelated-tab isolation, later output, detach, live-child
+reset/rebind replay exclusion and ongoing existing-worker observation. A real
+WebSocket fixture verifies blocked descendant initialization cancellation,
+late-event refusal, ordering and source-copy isolation. Node: 224/224 macOS,
+223/224 Linux (one platform skip). One early isolated-source wait timed out and
+was not reproduced in subsequent repeated runs; no broader timing guarantee is
+claimed. Full harness parity and physical/Windows/remote validation remain open.
+
+
+Owner cancellation during held child setup now rejects root startup after child
+cleanup settles; a real-WebSocket counterfactual verifies the final owner guard.
+
+
+Final guard-inclusive code passed macOS/Linux source and source-relocated
+installed both-host log fixtures. Frozen Linux installation regression passed
+console/root/OOP/worker/nested-worker collection, claims and independent hosts,
+dialog/navigation/drop deadlines, raw CDP, AX/native iframe input, standalone/
+managed MCP, isolated headful multi-window and text/HTML/PNG clipboard/GTK interop,
+profile recovery, lazy startup and shutdown. Node remained 224/224 and 223/224
+(one Linux platform skip). Eight actual running installed Linux modules and both
+npm runtime copies matched final source byte-for-byte. macOS generic browser and
+raw CDP regressions passed. Full harness parity remains active.

@@ -426,7 +426,10 @@ nodeRepl.write(await tab.dev.logs({levels:["warn", "error"], limit:20}));
 ```
 
 `dev.logs({filter?, levels?, limit?})` returns chronological console messages and uncaught JavaScript exceptions with
-`level`, `message`, ISO `timestamp` and a source `url` when Chromium provides one.
+`level`, `message`, ISO `timestamp`, `source:{type,targetId}` and a source `url`
+when Chromium provides one. Root pages, related out-of-process iframes and
+dedicated workers (including nested workers) share the buffer. Reads order
+retained entries by timestamp; equal timestamps keep delivery order.
 `filter` is a case-sensitive message substring. Levels are `debug`, `info`, `log`,
 `warn` and `error`; `warning` is accepted as an alias for `warn`. An omitted limit
 returns the newest 100 matching entries; a non-negative integer selects the bound,
@@ -438,8 +441,11 @@ combine Chromium’s exception text and description, including its supplied stac
 Entries record what Chromium reports as uncaught at that time. A handler added
 later leaves the retained historical entry intact.
 
-Capture starts during tab binding after Runtime.enable has replayed its cached
-history. Older console and exception history is excluded. The host holds the observer across JS
+Initial tab binding enables Runtime on the root and existing related targets,
+excludes their cached replay and waits for setup before starting active capture.
+Older console and exception history from targets present at binding is
+excluded. New targets attached during capture can replay their startup messages.
+Attachment stays passive: a short-lived target can exit before observation starts. The host holds the observer across JS
 calls and main-frame navigation, scoped to the owning JS session and tab. Rebinding a
 live tab in that session reuses capture. A fresh session starts a fresh buffer.
 Reset, timeout and close release listeners, including in-flight discovery and WebSocket handshakes; tab close
@@ -450,8 +456,10 @@ placeholders are formatted from protocol values.
 
 Retention is bounded to 1,000 entries per session/tab and 16,384 UTF-16 code units per
 rendered message. DOM nodes, object graphs and tables are shallow descriptions. Console
-messages and exceptions from workers and out-of-process frames, and network logs
-are outside this implementation. Host process crash recovery
+shared/service-worker messages and network/browser diagnostic logs remain outside
+this implementation. Related child sessions are recursively attached and removed
+with their detached ancestor; pending child setup is canceled and late events
+from retired sessions are discarded. Retained entries keep their original source. Host process crash recovery
 and headful/Linux/Windows coverage remain open.
 
 `OPEN_COMPUTER_USE_CDP_URL=http://127.0.0.1:9222 node scripts/run-console-smoke.mjs`

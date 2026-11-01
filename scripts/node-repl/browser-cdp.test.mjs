@@ -215,3 +215,34 @@ test('log owner cleanup aborts actual stalled discovery and WebSocket handshake'
   finally{clearTimeout(timer);}
  }}finally{for(const socket of sockets)socket.destroy();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}
 });
+
+test('log ancestor detach cancels child setup and rejects late descendant events',async()=>{
+ const {createServer}=await import('node:http'),{wsServer}=await import('playwright-core/lib/utilsBundle');let peer,blocked,detach=true;
+ const server=createServer((_request,response)=>{response.setHeader('Content-Type','application/json');response.end(JSON.stringify([{id:'tab',type:'page',webSocketDebuggerUrl:`ws://127.0.0.1:${server.address().port}/socket`}]));}),sockets=new Set(),websockets=new wsServer({noServer:true});
+ server.on('connection',socket=>{sockets.add(socket);socket.on('close',()=>sockets.delete(socket));socket.on('error',()=>{});});
+ server.on('upgrade',(request,socket,head)=>websockets.handleUpgrade(request,socket,head,client=>{
+  peer=client;client.on('message',data=>{const command=JSON.parse(data),emit=value=>client.send(JSON.stringify(value));
+   if(command.method==='Target.setAutoAttach'&&!command.sessionId)emit({method:'Target.attachedToTarget',params:{sessionId:'parent',targetInfo:{targetId:'frame',type:'iframe'}}});
+   if(command.method==='Runtime.enable'&&command.sessionId==='parent'){
+    if(!detach){blocked();return;}
+    emit({sessionId:'parent',method:'Target.attachedToTarget',params:{sessionId:'nested',targetInfo:{targetId:'worker',type:'worker'}}});
+    emit({method:'Target.detachedFromTarget',params:{sessionId:'parent'}});return;
+   }
+   if(command.sessionId)return;
+   emit({id:command.id,result:{}});
+  });
+ }));
+ await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));const logs=new BrowserConsoleLogs(()=>`http://127.0.0.1:${server.address().port}`),owner={};let timer;
+ try{
+  await Promise.race([logs.start(owner,'tab'),new Promise((_resolve,reject)=>timer=setTimeout(()=>reject(Error('Detached log setup remained pending')),1000))]);
+  const entry=logs.owners.get(owner).get('tab');assert.equal(entry.children.size,0);
+  const event={method:'Runtime.consoleAPICalled',params:{type:'log',timestamp:Date.now(),args:[{value:'retained root'}]}};
+  peer.send(JSON.stringify({...event,sessionId:'nested'}));peer.send(JSON.stringify(event));peer.send(JSON.stringify({...event,params:{...event.params,timestamp:Date.now()-5000,args:[{value:'older root'}]}}));
+  const result=await logs.read(owner,'tab');assert.deepEqual(result.map(item=>item.message),['older root','retained root']);assert.deepEqual(result[0].source,{targetId:'tab',type:'page'});
+  result[0].source.targetId='changed';assert.equal((await logs.read(owner,'tab'))[0].source.targetId,'tab');
+  await logs.cleanup(owner);detach=false;const otherOwner={},observed=new Promise(resolve=>blocked=resolve);
+  const starting=logs.start(otherOwner,'tab'),rejected=assert.rejects(starting,/session closed/);
+  await observed;await logs.cleanup(otherOwner);await rejected;
+
+ }finally{clearTimeout(timer);await logs.cleanup(owner);for(const socket of sockets)socket.destroy();websockets.close();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}
+});

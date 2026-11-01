@@ -213,6 +213,10 @@ export class BrowserConsoleLogs {
     this.owners = new Map();
     this.closedOwners = new WeakSet();
   }
+  retire(entry,sessionId) {
+    const pending=[sessionId];
+    while(pending.length){const id=pending.pop();for(const [key,child] of entry.children)if(child.parent===id)pending.push(key);const child=entry.children.get(id);entry.children.delete(id);child?.abort.abort(new Error("Browser log child detached"));}
+  }
   async start(owner, targetId) {
     if (this.closedOwners.has(owner)) throw new Error("Browser log session closed");
     let tabs = this.owners.get(owner);
@@ -220,7 +224,7 @@ export class BrowserConsoleLogs {
     const previous = tabs.get(targetId);
     if (previous && !previous.error) return previous.ready;
     if(previous){previous.closed=true;previous.abort.abort(new Error("Browser log capture replaced"));previous.connection?.close();}
-    const entry = {logs:[], capturing:false, closed:false, abort:new AbortController()};
+    const entry = {logs:[], children:new Map(), capturing:false, closed:false, abort:new AbortController()};
     tabs.set(targetId, entry);
     entry.ready = (async () => {
       const endpoint = this.endpoint();
@@ -232,14 +236,31 @@ export class BrowserConsoleLogs {
       if(!Array.isArray(targets))throw new Error("Invalid browser target list");
       const target = targets.find(item => item.type === "page" && item.id === targetId);
       if (!target) throw new Error("Tab closed or no longer available");
+      const attach={autoAttach:true,waitForDebuggerOnStart:false,flatten:true,filter:[{type:'iframe'},{type:'worker'},{exclude:true}]};
       const connection = await openConnection(target.webSocketDebuggerUrl, event => {
-        if (entry.closed || !entry.capturing) return;
+        if(entry.closed)return;
+        if(event.method==='Target.attachedToTarget'){
+          const {sessionId,targetInfo}=event.params,parent=event.sessionId;
+          if(parent&&!entry.children.has(parent))return;
+          const child={parent,targetId:targetInfo.targetId,type:targetInfo.type,capturing:entry.capturing,abort:new AbortController()};entry.children.set(sessionId,child);
+          const signal=AbortSignal.any([entry.abort.signal,child.abort.signal]);
+          child.ready=(async()=>{
+            await entry.connection.send('Runtime.enable',{},TIMEOUT,sessionId,signal);child.capturing=true;
+            await entry.connection.send('Target.setAutoAttach',attach,TIMEOUT,sessionId,signal);
+            await Promise.all([...entry.children.values()].filter(item=>item.parent===sessionId).map(item=>item.ready));
+          })().catch(error=>{if(!entry.closed&&entry.children.get(sessionId)===child)entry.error=new Error('Browser log child capture failed; bind the tab again',{cause:error});});
+          return;
+        }
+        if(event.method==='Target.detachedFromTarget'){this.retire(entry,event.params.sessionId);return;}
+        const child=event.sessionId&&entry.children.get(event.sessionId);
+        if(!entry.capturing||event.sessionId&&(!child||!child.capturing))return;
+        const source={targetId:child?.targetId??targetId,type:child?.type??'page'};
         if(event.method==='Runtime.exceptionThrown'){
           const {timestamp,exceptionDetails:details}=event.params??{};
           if(!details||typeof details.text!=='string'||!Number.isFinite(timestamp)||!Number.isFinite(new Date(timestamp).getTime()))return;
           const exception=details.exception,description=exception?.description??exception?.unserializableValue??(exception&&Object.hasOwn(exception,'value')?format(exception.value):undefined);
           const url=details.url||details.stackTrace?.callFrames?.[0]?.url;
-          entry.logs.push({level:'error',message:`${details.text}${description===undefined?'':`: ${description}`}`.slice(0,16_384),timestamp:new Date(timestamp).toISOString(),...(url?{url}:{})});
+          entry.logs.push({source,level:'error',message:`${details.text}${description===undefined?'':`: ${description}`}`.slice(0,16_384),timestamp:new Date(timestamp).toISOString(),...(url?{url}:{})});
           if(entry.logs.length>1000)entry.logs.shift();
           return;
         }
@@ -254,13 +275,17 @@ export class BrowserConsoleLogs {
           return arg.unserializableValue ?? arg.description ?? arg.type;
         });
         const url = stackTrace?.callFrames?.[0]?.url;
-        entry.logs.push({level, message:`${type === "assert" ? "Assertion failed: " : ""}${format(...values)}`.slice(0,16_384), timestamp:new Date(timestamp).toISOString(), ...(url ? {url} : {})});
+        entry.logs.push({source,level, message:`${type === "assert" ? "Assertion failed: " : ""}${format(...values)}`.slice(0,16_384), timestamp:new Date(timestamp).toISOString(), ...(url ? {url} : {})});
         if (entry.logs.length > 1000) entry.logs.shift();
       }, () => { if (!entry.closed) entry.error = new Error("Browser log connection closed; bind the tab again to restart capture"); },entry.abort.signal);
       entry.connection = connection;
       if (entry.closed) { connection.close(); throw new Error("Browser log session closed"); }
       await connection.send("Runtime.enable");
-      // Runtime.enable replays old console entries before its response.
+      // Existing targets replay history; newly attached targets can replay post-binding startup logs.
+      await connection.send('Target.setAutoAttach',attach);
+      await Promise.all([...entry.children.values()].map(child=>child.ready));
+      entry.abort.signal.throwIfAborted();
+      if(entry.error)throw entry.error;
       entry.capturing = true;
     })().catch(error => { entry.error = error; entry.connection?.close(); throw error; });
     entry.ready.catch(() => {});
@@ -276,10 +301,11 @@ export class BrowserConsoleLogs {
     const entry = this.owners.get(owner)?.get(targetId);
     if (!entry || entry.closed) throw new Error("Browser log capture unavailable; bind the tab again");
     await entry.ready;
+    await Promise.all([...entry.children.values()].map(child=>child.ready));
     if (entry.error) throw entry.error;
     await entry.connection.send("Runtime.getIsolateId");
     const levels = options.levels?.map(level => level === "warning" ? "warn" : level);
-    return limit === 0 ? [] : entry.logs.filter(log => (!levels || levels.includes(log.level)) && (options.filter === undefined || log.message.includes(options.filter))).slice(-limit).map(log => ({...log}));
+    return limit === 0 ? [] : entry.logs.filter(log => (!levels || levels.includes(log.level)) && (options.filter === undefined || log.message.includes(options.filter))).sort((a,b)=>Date.parse(a.timestamp)-Date.parse(b.timestamp)).slice(-limit).map(log => ({...log,source:{...log.source}}));
   }
   stop(owner, targetId) {
     const tabs = this.owners.get(owner);
@@ -750,7 +776,7 @@ locator.drop({data?:{mimeType:string},files?:absolutePaths},{position?:{x,y},tim
 Playwright resolves fresh elements and waits for actionability; ambiguous matches fail. Default action timeout is 10 seconds.
 Navigation waits: tab.playwright.expectNavigation(async action, {url?,waitUntil?,timeoutMs?}), waitForURL(url, {waitUntil?,timeoutMs?}), waitForLoadState({state?,timeoutMs?}). expectNavigation installs a main-frame watcher before running the action and returns its result after navigation. Navigation waits yield control on owned dialogs; respond with getJsDialog() in the next call to resume. Known dialogs pause one active-time wait budget (default 10s, timeoutMs:0 unlimited); callback actions stay awaited with their own deadlines and the REPL execution budget. Independent wait-then-input is supported; late scoped inputs/waits are refused after scope end.
 Playwright actions invalidate prior AX and screenshot indices. Read current state afterwards. File chooser events: start tab.playwright.waitForEvent("filechooser", {timeoutMs?}) before clicking, then await the handle and use isMultiple() / setFiles(absolutePaths, {timeoutMs?}). The file handle is one-shot. Downloads: start waitForEvent("download") before clicking, then await download.path({timeoutMs?}) for the completed local artifact. It includes new descendant popups opened during that wait. Bind an existing popup separately to collect its downloads.
-Developer logs: await tab.dev.logs({filter?,levels?,limit?}) returns chronological console entries and uncaught exceptions/unhandled Promise rejections with level/message/timestamp/url. Capture begins at tab binding, continues across calls/navigation, and ends on close/reset/timeout. Levels: debug/info/log/warn/error (warning aliases warn). Default limit 100; retained cap 1000 entries, each at most 16,384 UTF-16 code units. Objects use shallow CDP descriptions; no page getters are executed. Prior console history and out-of-process frame/worker logs are excluded.
+Developer logs: await tab.dev.logs({filter?,levels?,limit?}) returns chronological console entries and uncaught exceptions/unhandled Promise rejections with level/message/timestamp/url and source:{type,targetId}, ordered by timestamp. Related iframe and dedicated-worker descendants share this capture; unrelated pages and shared/service workers are excluded. Capture begins at tab binding, continues across calls/navigation, and ends on close/reset/timeout. Levels: debug/info/log/warn/error (warning aliases warn). Default limit 100; retained cap 1000 entries, each at most 16,384 UTF-16 code units. Objects use shallow CDP descriptions; no page getters are executed. Cached history from targets present at binding is excluded; newly attached targets can replay post-binding startup logs. Short-lived targets can exit before passive attachment.
 paste keeps clipboard writing and native editor input in the clipboard queue under a host input/focus lease. AX targets are validated before preparation and before paste down. Failed release blocks later clipboard API jobs until reset cleanup succeeds. Accepted clipboard writes remain after cancellation; paste down is never replayed.
 JavaScript dialogs: await tab.getJsDialog() returns undefined or a handle with type. alert/beforeunload support dismiss(); confirm supports accept()/dismiss(); prompt supports accept(text)/dismiss(). Actions return when they open a dialog; answer it before further page reads/input. accept()/dismiss() reports failures from the resumed action. Locator, file-chooser and native drop action deadlines pause while their owned dialog waits, then resume remaining active time; timeoutMs:0 still permits session cancellation. Handles are scoped to the observed dialog and owning session. Reset/timeout/close dismiss owned active dialogs. Beforeunload dismiss cancels navigation. Browser/tab discovery returns metadata without waiting for page observers; it starts early dialog observation asynchronously. New page targets resume after their capture session is ready; popup dialogs inherit an active opener action. Created tabs attach observers before loading their URL. A dialog already open before observation starts may prevent page-level CDP initialization; metadata inventory stays available. Playwright connections fail explicitly while a live page observer is not ready. Resolve the dialog through its owning host or existing browser/native controls, then bind again or reset.
 Clipboard: tab.clipboard.read()/readText()/write(items)/writeText(text) uses the browser native process clipboard. Items contain entries [{mimeType,text? ,base64?}] and optional presentationStyle. Exactly one payload per entry; native Chrome validates supported formats. Requires --enable-automation and verified headless Chromium (virtual clipboard) or the host-owned managed headful browser (system/display clipboard shared with apps). The browser must reach the host loopback bridge. Browser clipboard state is shared across tabs/JS sessions and survives js_reset. Internal control tabs are hidden and cleaned up on reset/timeout/close. paste(index,text,{format:"text"|"html"}) writes the selected clipboard backend and dispatches trusted native paste under a host input lease; typeText remains clipboard-independent. Unowned headful clipboard APIs fail explicitly. System clipboard writes are retained and can outlive the host; outside apps may change them.

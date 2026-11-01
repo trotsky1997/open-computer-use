@@ -8,11 +8,22 @@ import {BrowserConsoleLogs} from "./node-repl/browser-cdp.mjs";
 const endpoint = process.env.OPEN_COMPUTER_USE_CDP_URL;
 if (!endpoint) throw new Error("Set OPEN_COMPUTER_USE_CDP_URL to a disposable browser");
 const server = createServer((request,response) => {
+  if(request.url==='/worker.js'||request.url==='/nested.js'){
+    response.setHeader('Content-Type','text/javascript');
+    const name=request.url==='/worker.js'?'worker':'nested';
+    response.end(`console.log('source ${name} startup');setTimeout(()=>{throw new Error('source ${name} error')});${name==='worker'?"self.nested=new Worker('/nested.js');":""}self.onmessage=()=>console.warn('source ${name} later');`);return;
+  }
+  if(request.url==='/child'){
+    response.setHeader('Content-Type','text/html');response.end("<!doctype html><title>Log child</title><script>console.log('source iframe startup');setTimeout(()=>{throw new Error('source iframe error')});</script>");return;
+  }
   response.setHeader("Content-Type","text/html");
   response.end(`<!doctype html><title>Console fixture</title>
     <button onclick="console.debug('debug');console.info('info');console.log('value %s %d','hello',42);console.warn('warning');console.error('failure');console.log('object',{ready:true});">Log</button>
     <button onclick="for(let i=0;i<1005;i++)console.log('line',i);console.log('x'.repeat(20000));">Flood</button>
     <button onclick="setTimeout(()=>{throw new Error('uncaught fixture')});Promise.reject(new TypeError('rejected fixture'));try{throw new Error('caught fixture')}catch{}">Errors</button>
+    <button onclick="self.worker=new Worker('/worker.js');self.frame=document.createElement('iframe');frame.src='http://localhost:${server.address().port}/child';document.body.append(frame)">Sources</button>
+    <button onclick="worker.postMessage('log')">Worker later</button>
+    <button onclick="worker.terminate();frame.remove()">Detach sources</button>
     <a href="/next">Next</a><script>if(location.pathname === "/next")console.log("navigation loaded")</script>`);
 });
 await new Promise(resolve => server.listen(0,"127.0.0.1",resolve));
@@ -40,6 +51,9 @@ try {
   assert.equal(warnings[0].level,"warn");
   assert.equal(await run('var again=await cua.getTab(tab.id); nodeRepl.write(JSON.stringify((await again.dev.logs()).length));'),6);
   assert.deepEqual(await run(`var isolated=await cua.createBrowserTab("cdp",${JSON.stringify(url)},{visible:false}); nodeRepl.write(JSON.stringify(await isolated.dev.logs()));`,30_000,other),[]);
+  await run('await isolated.playwright.getByRole("button",{name:"Sources",exact:true}).click();nodeRepl.write(JSON.stringify(true));',30000,other);
+  const isolatedDeadline=Date.now()+5000;while((await run('nodeRepl.write(JSON.stringify(await isolated.dev.logs({filter:"source "})));',30000,other)).length!==6){assert.ok(Date.now()<isolatedDeadline,'Isolated source logs missing: '+JSON.stringify(await run('nodeRepl.write(JSON.stringify(await isolated.dev.logs({filter:"source "})));',30000,other)));await new Promise(resolve=>setTimeout(resolve,10));}
+  assert.deepEqual(await run('nodeRepl.write(JSON.stringify(await tab.dev.logs({filter:"source "})));'),[]);
   const otherOwner = other.resourceOwners?.get(other.worker)??other.resourceOwner;
   await other.close();
   assert.equal(other.browserLogs.owners.has(otherOwner),false);
@@ -49,6 +63,19 @@ try {
   assert.ok(errors.some(log=>log.message.includes('Error: uncaught fixture')));
   assert.ok(errors.some(log=>log.message.includes('TypeError: rejected fixture')));
   assert.ok(errors.every(log=>log.url===url&&Number.isFinite(Date.parse(log.timestamp))));
+  await run('await tab.playwright.getByRole("button",{name:"Sources",exact:true}).click();nodeRepl.write(JSON.stringify(true));');
+  let sources;const sourceDeadline=Date.now()+5000;
+  do{sources=await run('nodeRepl.write(JSON.stringify(await tab.dev.logs({filter:"source "})));');if(sources.length===6)break;assert.ok(Date.now()<sourceDeadline,'Related source logs missing: '+JSON.stringify(sources));await new Promise(resolve=>setTimeout(resolve,10));}while(true);
+  for(const name of ['iframe','worker','nested']){
+    const messages=sources.filter(log=>log.message.includes(`source ${name} `));assert.equal(messages.length,2);
+    assert.ok(messages.some(log=>log.level==='error'));assert.ok(messages.some(log=>log.level==='log'));
+    assert.ok(messages.every(log=>log.source.type===(name==='iframe'?'iframe':'worker')&&log.source.targetId!==targetId));
+    assert.ok(messages.every(log=>log.url?.endsWith(name==='iframe'?'/child':name==='worker'?'/worker.js':'/nested.js')));
+  }
+  await run('await tab.playwright.getByRole("button",{name:"Worker later",exact:true}).click();nodeRepl.write(JSON.stringify(true));');
+  const laterDeadline=Date.now()+5000;while((await run('nodeRepl.write(JSON.stringify(await tab.dev.logs({filter:"source worker later"})));')).length!==1){assert.ok(Date.now()<laterDeadline);await new Promise(resolve=>setTimeout(resolve,10));}
+  await run('await tab.playwright.getByRole("button",{name:"Detach sources",exact:true}).click();nodeRepl.write(JSON.stringify(true));');
+  assert.equal((await run('nodeRepl.write(JSON.stringify(await tab.dev.logs({filter:"source "})));')).length,7);
   const afterNavigation = await run('await tab.playwright.expectNavigation(()=>tab.playwright.getByRole("link",{name:"Next"}).click()); nodeRepl.write(JSON.stringify(await tab.dev.logs()));');
   assert.equal(afterNavigation.at(-1).message,"navigation loaded");
   assert.equal(afterNavigation.at(-1).url,`${url}next`);
@@ -58,12 +85,16 @@ try {
   assert.equal(bounded.at(-1).message.length,16_384);
   assert.equal((await run('nodeRepl.write(JSON.stringify(await tab.dev.logs()));')).length,100);
   assert.deepEqual(await run('nodeRepl.write(JSON.stringify(await tab.dev.logs({limit:0})));'),[]);
+  await run('await tab.playwright.getByRole("button",{name:"Sources",exact:true}).click();nodeRepl.write(JSON.stringify(true));');
+  const rebindDeadline=Date.now()+5000;while((await run('nodeRepl.write(JSON.stringify(await tab.dev.logs({filter:"source "})));')).length!==6){assert.ok(Date.now()<rebindDeadline,'Pre-reset source logs missing');await new Promise(resolve=>setTimeout(resolve,10));}
   const owner = session.resourceOwners?.get(session.worker)??session.resourceOwner;
   await session.reset();
   assert.equal(session.browserLogs.owners.has(owner),false);
   await assert.rejects(session.browserLogs.start(owner,targetId),/session closed/);
   await run(`var tab=await cua.getTab(${JSON.stringify(targetId)}); nodeRepl.write(JSON.stringify(true));`);
   assert.deepEqual(await run('nodeRepl.write(JSON.stringify(await tab.dev.logs()));'),[]);
+  await run('await tab.playwright.getByRole("button",{name:"Worker later",exact:true}).click();nodeRepl.write(JSON.stringify(true));');
+  const reboundDeadline=Date.now()+5000;while((await run('nodeRepl.write(JSON.stringify(await tab.dev.logs({filter:"source worker later"})));')).length!==1){assert.ok(Date.now()<reboundDeadline,'Existing worker capture did not resume');await new Promise(resolve=>setTimeout(resolve,10));}
   const timedOutOwner = session.resourceOwners?.get(session.worker)??session.resourceOwner;
   const timedOut = await session.run('await new Promise(()=>{})',150);
   assert.equal(timedOut.isError,true);
@@ -94,7 +125,7 @@ try {
     await rejected;
     assert.equal(manager.owners.size,0);
   } finally {proxy.closeAllConnections();await new Promise(resolve=>proxy.close(resolve));}
-  console.log(`${Session.name} PASS real Chrome console/uncaught exception/rejection capture, filtering, bounds, navigation, fresh replay exclusion, session isolation and reset/timeout/close/startup cleanup`);
+  console.log(`${Session.name} PASS real Chrome root/OOP/worker/nested-worker console and exceptions, source attribution, child replay exclusion/rebinding/detachment, filtering, bounds, navigation, session isolation and reset/timeout/close/startup cleanup`);
 } finally {
   if (targetId) await fetch(new URL(`/json/close/${targetId}`,endpoint)).catch(()=>{});
   await session.close();

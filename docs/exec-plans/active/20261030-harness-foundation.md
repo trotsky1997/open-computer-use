@@ -2645,3 +2645,54 @@ headful multi-window behavior, text/HTML/PNG clipboard with GTK interop, profile
 recovery, lazy launch and shutdown. Eight actual running installed Linux modules
 and both npm runtime copies matched current source byte-for-byte. No new runtime
 dependency or CI. The full harness parity goal remains active.
+
+
+## Related iframe and dedicated-worker developer logs
+
+Extend the existing log observer through host-owned flattened auto-attachment to
+related iframe/dedicated-worker targets, recursively. Preserve passive execution
+and exclude cached history for targets present at initial binding; accept replay
+from targets created during active capture so startup logs survive attachment.
+Tag stored entries with target type/id, retire detached descendant sessions, and
+keep child setup under the existing owner cancellation. Verify native OOP iframe,
+worker/nested-worker startup errors and console messages, source isolation,
+detach/navigation/reset and relocated installation in both hosts/platforms.
+
+Implemented passive filtered Target auto-attachment on the tab connection and
+related child sessions. Initial root/child Runtime replay is excluded; targets
+attached during active capture can replay startup output. Entries carry an owned
+target type/id and read in timestamp order with stable delivery-order ties.
+Per-child abort cancels pending setup when an ancestor detaches; its descendant
+graph is retired and late events ignored. Public reads clone source metadata.
+
+The prior runtime fails native related-source collection. macOS source repeated
+fixtures and source-relocated installed both-host checks pass OOP iframe, worker
+and nested-worker startup console/errors, unrelated-tab isolation, later worker
+messages, detached retained history, live-child reset/rebind history exclusion
+and continued existing-worker observation. A native-free WebSocket fixture holds
+child initialization across ancestor detach and verifies prompt cancellation,
+late-event refusal, timestamp ordering and source-copy isolation. Node: 224/224
+macOS, 223/224 Linux (one platform skip). An early isolated-source fixture timeout
+was not reproduced by subsequent repeated macOS/Linux runs; it remains recorded
+as an unclassified timing observation. Short-lived pre-attachment exits,
+shared/service workers, network/browser diagnostics and broader platforms remain
+open. No new dependency or CI.
+
+
+A held-child startup counterfactual also exposed owner cancellation incorrectly
+resolving root startup after child cleanup. The final guard rechecks the owner
+signal after all child setup settles; the same real-WebSocket test now requires
+the startup Promise to reject. The stale-code installation run was explicitly
+stopped after this change, its owned process tree/temp root cleaned, and final
+code validation restarted. This restart followed a code fix.
+
+
+Final guard-inclusive code passed macOS/Linux source and source-relocated
+installed both-host log fixtures. Frozen Linux installation regression passed
+console/root/OOP/worker/nested-worker collection, claims and independent hosts,
+dialog/navigation/drop deadlines, raw CDP, AX/native iframe input, standalone/
+managed MCP, isolated headful multi-window and text/HTML/PNG clipboard/GTK interop,
+profile recovery, lazy startup and shutdown. Node remained 224/224 and 223/224
+(one Linux platform skip). Eight actual running installed Linux modules and both
+npm runtime copies matched final source byte-for-byte. macOS generic browser and
+raw CDP regressions passed. Full harness parity remains active.
