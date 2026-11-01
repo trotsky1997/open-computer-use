@@ -448,3 +448,36 @@ Ten installed modules and both npm runtime copies match source. Full headful/MCP
 and Windows validation were not repeated. Broader Page/Fetch method and
 URL/header authority rules, complete raw-command parity and OS sandboxing remain
 open. No dependency or CI added; full harness parity stays active.
+
+
+### Root Fetch interception scope
+
+Raw root Fetch.enable now requires explicit non-Document resourceType patterns;
+Fetch.enable({patterns:[]}) clears interception and root Fetch.disable is refused.
+Attached children retain native Fetch control behind existing child ownership
+checks. Owned in-app reference probes establish the root policy; installed
+reference inspection establishes the child exception. Unit checks failed before the shared validator change and now verify refusal
+before attachment plus child routing and rejection of a root-ID child selector.
+The native Network fixture adds a real OOP iframe, child enable/disable, navigation
+while typed interception remains active, empty-pattern cleanup and turn-end
+release of an actual paused request. It re-marks its retained tab before the
+second turn end. No browser-managed Document-response mediator is claimed.
+
+Node: 231/231 macOS, 230/231 Linux (one platform skip). Both engines pass the
+Network/Fetch workflow in source and source-relocated installed macOS/Linux
+runtimes. Raw CDP regressions pass on both platforms; ordinary browser regression
+passes on macOS. Installed service-worker checks pass on both platforms. Ten
+installed runtime modules and both npm copies match source. No dependency/CI added.
+
+macOS installed console regression had two intermittent failures: pre-reset source
+logs did not reach the expected set, and a separate run lacked the short-worker
+completion log. The failure messages did not distinguish page execution from
+capture loss. The existing console fixture now reports worker completion/error
+status, a timeout page snapshot and the actual pre-reset source log list. An
+isolated installed repeat with those diagnostics passes both engines; the cause
+remains unresolved and no production logging fix is claimed. Linux's original
+installed console run and updated diagnostic source workflow pass in both engines.
+Preserve this open reliability issue despite the
+passing repeat. Full headful/MCP and Windows checks were not repeated. Broader
+raw authority policy, Document-response mediation and OS sandboxing remain open;
+full harness parity stays active.

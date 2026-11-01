@@ -555,7 +555,12 @@ controls and legacy interception/body-stream commands are also refused. Regular
 request/response/post-body reads retain normal browser buffer behavior. Shared
 parameter validation also refuses binary Fetch response headers, reload script
 injection and universal-access isolated worlds, while preserving structured
-response fulfillment/continuation and ordinary reload/world creation.
+response fulfillment/continuation and ordinary reload/world creation. Root raw
+Fetch interception requires explicit non-Document resource types, clears via an
+empty patterns array and refuses Fetch.disable. Attached children retain native
+Fetch control within their owned target. Closing the turn-owned connection
+releases its paused Fetch requests. Browser-managed Document-response mediation
+remains open.
 Discovery is
 abortable and checked again before dispatch. Cancellation closes pending readers
 and debugger agents. Source and Worker hosts share this controller. Inner command

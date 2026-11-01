@@ -79,6 +79,16 @@ cross-site origin changes with ordinary Chromium buffering.
 This explicit provider policy still needs a broader reference-command matrix;
 matching the method signatures establishes only this implemented surface.
 
+On the tab root, Fetch.enable requires an explicit patterns array and every
+pattern must specify a string resourceType other than Document. An omitted
+pattern array, patterns without a resource type and Document patterns are refused before
+capture creation. Clear raw interception with Fetch.enable({patterns:[]}); root
+Fetch.disable is refused. Attached child targets retain native Fetch enable and
+disable behavior, with the existing attached-target ownership check. This keeps
+root document navigation outside raw interception. The provider currently relies
+on normal browser navigation; a browser-managed Document-response mediator and
+broader raw URL/header authority remain open.
+
 Fetch.fulfillRequest and Fetch.continueResponse accept structured responseHeaders;
 non-null binaryResponseHeaders is refused, including an empty binary string.
 Page.reload accepts ordinary reload options and refuses non-null
@@ -127,7 +137,9 @@ Headful/native desktop, other browser transports, full command-policy parity,
 shared/service worker edge cases and renderer/host-crash recovery remain open.
 
 The managed dialog controller uses a disposable private Chrome profile. An
-optional first argument selects an installed runtime. Both JS hosts cover root
+optional first argument selects an installed runtime. The same fixture covers root Fetch scope,
+real OOP-child enable/disable, navigation with typed interception active, empty-
+pattern cleanup and turn-end release of an actual paused request. Both JS hosts cover root
 and out-of-process iframe sequential prompts, protocol return values, Page stream
 toggles, resumed expiry with retained REPL bindings, timeout-zero reset and an
 actual blocked-handshake socket closing before a fresh capture succeeds.
@@ -138,7 +150,9 @@ port changes and cross-site origin invalidation, fresh requests and turn rebind 
 both engines. It also verifies Page/Fetch parameter refusal before capture,
 ordinary reload/isolated-world reads, and actual structured-header fulfillment
 and continuation after a rejected binary-header attempt. An optional first
-argument selects an installed runtime.
+argument selects an installed runtime. The same fixture covers root Fetch scope,
+real OOP-child enable/disable, navigation with typed interception active, empty-
+pattern cleanup and turn-end release of an actual paused request.
 
 Raw Network policy also denies extra HTTP headers, device-bound session controls,
 cookie controls and legacy interception/body-stream commands. The disable form

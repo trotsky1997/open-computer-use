@@ -29,6 +29,9 @@ test('CDP validates command, event, child and timeout boundaries before connecti
   ['Fetch.continueResponse',{responseHeaders:[]}],['Fetch.fulfillRequest',{responseHeaders:[]}],
   ['Page.reload',{}],['Page.createIsolatedWorld',{grantUniveralAccess:false}]
  ])cdpCommand(method,params);
+ for(const [method,params] of [['Fetch.disable',{}],['Fetch.enable',{}],['Fetch.enable',{patterns:null}],['Fetch.enable',{patterns:[{}]}],['Fetch.enable',{patterns:[{resourceType:'Document'}]}],['Fetch.enable',{patterns:[{resourceType:'Fetch'},null]}]])await assert.rejects(manager.request(owner,{action:'send',targetId:'tab',method,params}),/not supported/);
+ cdpCommand('Fetch.enable',{patterns:[]});cdpCommand('Fetch.enable',{patterns:[{resourceType:'Fetch',requestStage:'Response'}]});
+ cdpCommand('Fetch.disable',{}, {target:{sessionId:'child'}});cdpCommand('Fetch.enable',{}, {target:{targetId:'frame'}});
  assert.equal(manager.owners.size,0);assert.deepEqual(sends,[]);
 });
 test('CDP cursors paginate filters, report eviction and rotate on origin change',async()=>{
@@ -49,6 +52,8 @@ test('CDP child selectors preserve detached history and cancellation releases pe
  manager.append(entry,{method:'Target.attachedToTarget',params:{sessionId:'child',targetInfo:{targetId:'frame',type:'iframe',url:'http://foreign.test/'}}});
  const before=entry.cursor;manager.append(entry,{sessionId:'child',method:'Runtime.consoleAPICalled',params:{}});
  await manager.request(owner,{action:'send',targetId:'tab',method:'Runtime.enable',options:{target:{targetId:'frame'}}});assert.equal(sends.at(-1)[3],'child');
+ await manager.request(owner,{action:'send',targetId:'tab',method:'Fetch.disable',options:{target:{sessionId:'child'}}});assert.equal(sends.at(-1)[0],'Fetch.disable');assert.equal(sends.at(-1)[3],'child');
+ await assert.rejects(manager.request(owner,{action:'send',targetId:'tab',method:'Fetch.disable',options:{target:{targetId:'tab'}}}),/attached|unknown|target/i);
  manager.append(entry,{method:'Target.detachedFromTarget',params:{sessionId:'child'}});
  const history=await manager.request(owner,{action:'events',targetId:'tab',options:{afterSequence:before,target:{targetId:'frame'}}});assert.equal(history.events.length,1);
  await assert.rejects(manager.request(owner,{action:'send',targetId:'tab',method:'Runtime.enable',options:{target:{sessionId:'child'}}}),/detached/);

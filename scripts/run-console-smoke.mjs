@@ -35,7 +35,7 @@ const server = createServer((request,response) => {
     <button onclick="worker.postMessage('log')">Worker later</button>
     <button onclick="worker.terminate();frame.remove()">Detach sources</button>
     <button onclick="fetch('/missing-diag').catch(()=>{});self.diagnosticWorker=new Worker('/diagnostic-worker.js');self.diagnosticFrame=document.createElement('iframe');diagnosticFrame.src='http://localhost:${server.address().port}/diagnostic-child';document.body.append(diagnosticFrame)">Diagnostics</button>
-    <button onclick="Promise.all(Array.from({length:12},()=>new Promise(resolve=>{const w=new Worker('/short-lived.js');w.onmessage=resolve}))).then(()=>console.log('short workers complete'))">Short workers</button>
+    <button onclick="self.shortDone=0;document.querySelector('#short-status').textContent='0/12';Promise.all(Array.from({length:12},()=>new Promise(resolve=>{const w=new Worker('/short-lived.js');w.onmessage=()=>{document.querySelector('#short-status').textContent=(++self.shortDone)+'/12';resolve()};w.onerror=e=>document.querySelector('#short-status').textContent+=' error:'+e.message}))).then(()=>console.log('short workers complete'))">Short workers</button><output id="short-status"></output>
     <a href="/next">Next</a><script>if(location.pathname === "/next")console.log("navigation loaded")</script>`);
 });
 await new Promise(resolve => server.listen(0,"127.0.0.1",resolve));
@@ -99,7 +99,7 @@ try {
   const logOwner=session.resourceOwners?.get(session.worker)??session.resourceOwner,capture=session.browserLogs.owners.get(logOwner).get(targetId);
   await run('await tab.playwright.getByRole("button",{name:"Short workers",exact:true}).click();nodeRepl.write(JSON.stringify(true));');
   let shortResult;const shortDeadline=Date.now()+10000;
-  do{shortResult=await run('try{nodeRepl.write(JSON.stringify({logs:await tab.dev.logs({filter:"short workers complete"})}));}catch(e){nodeRepl.write(JSON.stringify({error:e.message}));}');if(shortResult.logs?.length===1)break;assert.ok(Date.now()<shortDeadline,'Root log capture lost after worker exits: '+JSON.stringify(shortResult));await new Promise(resolve=>setTimeout(resolve,10));}while(true);
+  do{shortResult=await run('try{nodeRepl.write(JSON.stringify({logs:await tab.dev.logs({filter:"short workers complete"})}));}catch(e){nodeRepl.write(JSON.stringify({error:e.message}));}');if(shortResult.logs?.length===1)break;if(Date.now()>=shortDeadline){shortResult.page=await run('nodeRepl.write(JSON.stringify(await tab.playwright.domSnapshot()));');assert.fail('Root log capture lost after worker exits: '+JSON.stringify(shortResult));}await new Promise(resolve=>setTimeout(resolve,10));}while(true);
   assert.equal(session.browserLogs.owners.get(logOwner).get(targetId),capture);assert.equal(capture.error,undefined);
   const afterNavigation = await run('await tab.playwright.expectNavigation(()=>tab.playwright.getByRole("link",{name:"Next"}).click()); nodeRepl.write(JSON.stringify(await tab.dev.logs()));');
   assert.equal(afterNavigation.at(-1).message,"navigation loaded");
@@ -111,7 +111,7 @@ try {
   assert.equal((await run('nodeRepl.write(JSON.stringify(await tab.dev.logs()));')).length,100);
   assert.deepEqual(await run('nodeRepl.write(JSON.stringify(await tab.dev.logs({limit:0})));'),[]);
   await run('await tab.playwright.getByRole("button",{name:"Sources",exact:true}).click();nodeRepl.write(JSON.stringify(true));');
-  const rebindDeadline=Date.now()+5000;while((await run('nodeRepl.write(JSON.stringify(await tab.dev.logs({filter:"source "})));')).length!==6){assert.ok(Date.now()<rebindDeadline,'Pre-reset source logs missing');await new Promise(resolve=>setTimeout(resolve,10));}
+  const rebindDeadline=Date.now()+5000;let rebindLogs;while((rebindLogs=await run('nodeRepl.write(JSON.stringify(await tab.dev.logs({filter:"source "})));')).length!==6){assert.ok(Date.now()<rebindDeadline,`Pre-reset source logs missing: ${JSON.stringify(rebindLogs)}`);await new Promise(resolve=>setTimeout(resolve,10));}
   const owner = session.resourceOwners?.get(session.worker)??session.resourceOwner;
   await session.reset();
   assert.equal(session.browserLogs.owners.has(owner),false);
