@@ -104,8 +104,22 @@ try {
  await waitFor(async()=> (await events(mcpId)).some(event=>event.type==='keydown'));
  peer.notify('notifications/turn-ended');assert.equal((await pending).isError,true);await peer.request('ping');assert.equal((await events(mcpId)).at(-1).shift,false);
  response=await peer.request('tools/call',{name:'js',arguments:{code:'nodeRepl.write(typeof sentinel);'}});assert.equal(response.content.at(-1).text,'undefined');
+ for(const boundary of ['cancel','reset']){
+  response=await peer.request('tools/call',{name:'js',arguments:{code:`var tab=await cua.getTab(${JSON.stringify(mcpId)});await tab.markHandoff();var boundaryMarker=13;await tab.playwright.getByLabel('Typing').click();nodeRepl.write(true);`}});assert.equal(response.isError,false,JSON.stringify(response));
+  const before=(await events(mcpId)).length,requestId=peer.nextId;
+  const held=peer.request('tools/call',{name:'js',arguments:{code:'await tab.markHandoff();await tab.pressKey(null,"shift",{durationMs:30000});',timeout_ms:60000}},0);held.catch(()=>{});
+  await waitFor(async()=> (await events(mcpId)).slice(before).some(event=>event.type==='keydown'&&event.key==='Shift'&&event.trusted));
+  assert.deepEqual(await peer.request('ping',{},1500),{});
+  if(boundary==='cancel')peer.notify('notifications/cancelled',{requestId,reason:'Owned held-input test'});
+  else{assert.equal((await peer.request('tools/call',{name:'js_reset'},5000)).isError,false);assert.equal((await held).isError,true);}
+  response=await peer.request('tools/call',{name:'js',arguments:{code:'nodeRepl.write(typeof boundaryMarker);'}});assert.equal(response.content.at(-1).text,'undefined');
+  await waitFor(async()=> (await events(mcpId)).slice(before).some(event=>event.type==='keyup'&&event.key==='Shift'&&!event.shift&&event.trusted));
+  if(boundary==='cancel')assert.equal(peer.pending.has(String(requestId)),true,'Canceled MCP request received a response');
+  response=await peer.request('tools/call',{name:'js',arguments:{code:`var tab=await cua.getTab(${JSON.stringify(mcpId)});await tab.markHandoff();await tab.playwright.getByLabel('Typing').fill('recovered');nodeRepl.write(await tab.playwright.getByLabel('Typing').inputValue());await tab.getScreenshot();`}});assert.equal(response.isError,false,JSON.stringify(response));assert.ok(response.content.some(item=>item.type==='image'));assert.ok(response.content.some(item=>item.type==='text'&&item.text==='recovered'));
+ }
+ peer.notify('notifications/turn-ended');await peer.request('tools/call',{name:'js',arguments:{code:'nodeRepl.write(true);'}});
  await peer.close();await waitFor(async()=> !(await ids()).has(mcpId));
- console.log(Session.name+' PASS owned tab/popup/grandchild cleanup, user preservation, latest marks, handoff resume, idle JS persistence, stale callbacks, held input/viewport release, close failure/retry, source reset/close and real MCP turn-ended interruption');
+ console.log(Session.name+' PASS owned tab/popup/grandchild cleanup, user preservation, latest marks, handoff resume, idle JS persistence, stale callbacks, held input/viewport release, close failure/retry, source reset/close and real MCP turn-ended/cancellation/reset interruption, trusted held-key release and recovered media');
 } finally {
  if(peer)await peer.close();await Promise.allSettled([session.close(),other.close()]);
  for(const target of await targets()) if(target.url.startsWith(url))await browser(send=>send('Target.closeTarget',{targetId:target.id}));

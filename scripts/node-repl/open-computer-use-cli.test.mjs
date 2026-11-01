@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import {EventEmitter} from "node:events";
-import { chmodSync, cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { PassThrough } from "node:stream";
@@ -250,6 +250,29 @@ test("MCP adapter initializes and preserves JS bindings when the native binary i
   assert.equal(result.content.at(-1).text,'42');
 });
 
+
+test('MCP cancels queued/active JS and keeps ping/reset responsive',async t=>{
+ const fixture=makePackage();t.after(fixture.cleanup);
+ const adapter=path.join(fixture.packageRoot,'scripts/node-repl/open-computer-use-repl.mjs');
+ const client=new JsonLinePeer({command:process.execPath,args:[adapter,'--',path.join(fixture.packageRoot,'missing-native'),'mcp'],env:{...process.env,OPEN_COMPUTER_USE_CDP_URL:''}});t.after(()=>client.close());await client.initialize();
+ const js=code=>client.request('tools/call',{name:'js',arguments:{code,timeout_ms:30000}},0);
+ const waitFile=async file=>{const deadline=Date.now()+5000;while(!existsSync(file)){assert.ok(Date.now()<deadline,'JS did not reach its gate');await new Promise(resolve=>setTimeout(resolve,10));}};
+ const gate=path.join(fixture.packageRoot,'gate'),release=gate+'-release',skipped=gate+'-skipped',cpu=gate+'-cpu',reset=gate+'-reset';
+ assert.equal((await js('var value=41;nodeRepl.write(value)')).isError,false);
+ const first=js(`var fs=await import('node:fs');fs.writeFileSync(${JSON.stringify(gate)},'ready');while(!fs.existsSync(${JSON.stringify(release)}))await new Promise(resolve=>setTimeout(resolve,10));nodeRepl.write(++value);`);await waitFile(gate);
+ const queuedId=client.nextId,queued=js(`value=999;fs.writeFileSync(${JSON.stringify(skipped)},'unexpected');`);queued.catch(()=>{});
+ client.notify('notifications/cancelled',{requestId:queuedId});writeFileSync(release,'go');
+ assert.equal((await first).content.at(-1).text,'42');assert.equal((await js('nodeRepl.write(value)')).content.at(-1).text,'42');assert.equal(existsSync(skipped),false);assert.equal(client.pending.has(String(queuedId)),true);
+ const activeId=client.nextId,active=js(`fs.writeFileSync(${JSON.stringify(cpu)},'ready');while(true){}`);active.catch(()=>{});await waitFile(cpu);
+ assert.deepEqual(await client.request('ping',{},1500),{});assert.deepEqual((await client.request('tools/list',{},1500)).tools.map(tool=>tool.name),['js','js_reset']);
+ client.notify('notifications/cancelled',{requestId:activeId,reason:'Owned test cancellation'});
+ assert.equal((await js('nodeRepl.write(typeof value)')).content.at(-1).text,'undefined');assert.equal(client.pending.has(String(activeId)),true);
+ client.notify('notifications/cancelled',{requestId:activeId});client.notify('notifications/cancelled',{requestId:'unknown'});client.notify('notifications/cancelled',{});
+ const resetting=js(`(await import('node:fs')).writeFileSync(${JSON.stringify(reset)},'ready');while(true){}`);await waitFile(reset);
+ const stale=js(`(await import('node:fs')).writeFileSync(${JSON.stringify(skipped)},'unexpected');`);
+ assert.equal((await client.request('tools/call',{name:'js_reset'},5000)).isError,false);assert.equal((await resetting).isError,true);assert.equal((await stale).isError,true);assert.equal(existsSync(skipped),false);
+ assert.equal((await js('nodeRepl.write(7)')).content.at(-1).text,'7');
+});
 
 test("browser-only plugin installation is discoverable without native artifacts", async t => {
   const packageRoot=mkdtempSync(path.join(os.tmpdir(),'ocu-install-help-'));t.after(()=>rmSync(packageRoot,{recursive:true,force:true}));

@@ -508,6 +508,12 @@ target IDs. Retention marks last one turn. Worker proxy requests carry an async
 turn ID, so retained JS bindings can use fresh resource owners while prior-turn
 callbacks fail. MCP turn-ended notifications interrupt active execution before
 the normal request queue and establish a cleanup barrier for following calls.
+Standard MCP cancelled notifications skip queued JS without changing live bindings.
+Cancellation of active JS resets its shared kernel, suppresses its response and
+fences older queued work behind resource cleanup. Ping/tools metadata and js_reset
+bypass the JS execution queue; reset acknowledges only after cleanup settles.
+Unknown/late/malformed and non-JS cancellations are ignored. Native cleanup failures
+retain the existing refusal/retry behavior.
 See [tabs and turn boundaries](browser-tabs.md) for lifecycle and limits.
 
 Thread and process sessions share host request dispatch, serialized execution and

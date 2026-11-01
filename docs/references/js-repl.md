@@ -309,3 +309,28 @@ separate kernels provide execution/lifecycle control.
 checks a trusted held key accepted by a disposable browser, CPU timeout release,
 fresh variables, retained tab recovery and real screenshot output. An optional
 first argument selects an installed runtime.
+
+
+## MCP request cancellation
+
+The stdio adapter supports the standard MCP notifications/cancelled message with
+the matching requestId. A queued JS call is skipped without executing its code
+or discarding live bindings. Cancelling the active JS call resets the shared
+kernel and releases its turn-owned resources before later JS can run. Variables
+from that kernel are lost and older queued calls are refused. The cancelled
+request receives no response. Unknown, late and malformed cancellation messages
+are ignored; initialize, reset and metadata operations are not cancelled.
+
+Ping and tools/list remain responsive during active JS. js_reset interrupts
+active execution instead of waiting behind it, and acknowledges after resource
+cleanup. A cleanup failure keeps the existing reuse fence until reset succeeds.
+Ordinary JS calls stay serialized. The turn-ended hook retains its existing
+immediate interruption and cleanup-barrier behavior. MCP transport cancellation
+adds no OS sandbox or rollback of actions already completed in native apps.
+
+The pipe test verifies queued/CPU-loop cancellation and responsive control calls;
+the disposable-browser turn fixture verifies accepted trusted held-key release,
+fresh bindings, retained-tab input/media recovery and final cleanup through real
+MCP cancellation/reset. The protocol contracts are described in MCP
+[cancellation](https://modelcontextprotocol.io/specification/2025-06-18/basic/utilities/cancellation)
+and [ping](https://modelcontextprotocol.io/specification/2025-06-18/basic/utilities/ping).

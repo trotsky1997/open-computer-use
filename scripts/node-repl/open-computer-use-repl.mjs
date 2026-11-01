@@ -129,9 +129,9 @@ const SERVER_INSTRUCTIONS = `UI automation through a persistent JavaScript REPL 
 
 On the first call after startup or js_reset, bind the requested running app with await cua.getApp("Example App"), or call await cua.getState() only when an app inventory is actually needed. For explicitly requested Linux/Windows application startup, use await cua.computer.launch_app({app: executableNameOrPath}) (Linux also accepts installed desktop IDs/exact display names) and then bind/observe the app before input. macOS getApp keeps its existing launch behavior. On Linux, prefer a fresh listWindows() and getApp({windowId}) when selecting a particular native window. On macOS, use getApp(name, { initialState: false }) followed by app.query({ text, role }) for targeted lookup without an initial snapshot. App bindings persist across js calls. Batch deterministic actions and the resulting getAXState() in one js call, then verify the returned UI state. Use nodeRepl.write(value) for additional text and await nodeRepl.emitImage(image) for additional images. Ask the user before destructive or externally visible actions such as sending, deleting, or purchasing.`;
 
-const JS_DESCRIPTION = `Run JavaScript in a persistent Node.js REPL with top-level await and an initialized asynchronous cua API for Open Computer Use. Use this for all desktop interactions. Bind an app with let app = await cua.getApp("Example App"); then call await app.click(...), await app.typeText(...), and await app.getAXState(). Top-level bindings persist until js_reset, so prefer top-level var for names that may be assigned again. Batch deterministic actions and the resulting state read in one call to reduce round trips. Use nodeRepl.write(value) for extra text and await nodeRepl.emitImage(image) for extra images. If timeout_ms is omitted, execution times out after 30000 ms.`;
+const JS_DESCRIPTION = `Run JavaScript in a persistent Node.js REPL with top-level await and an initialized asynchronous cua API for Open Computer Use. Use this for all desktop interactions. Bind an app with let app = await cua.getApp("Example App"); then call await app.click(...), await app.typeText(...), and await app.getAXState(). Top-level bindings persist across calls; js_reset, execution timeout or active-call cancellation discards them. Prefer top-level var for names that may be assigned again. Batch deterministic actions and the resulting state read in one call to reduce round trips. Use nodeRepl.write(value) for extra text and await nodeRepl.emitImage(image) for extra images. If timeout_ms is omitted, execution times out after 30000 ms.`;
 
-const RESET_DESCRIPTION = `Reset the persistent Open Computer Use JavaScript session and discard all bindings created by prior js calls. The next js call starts with a freshly initialized cua API. This does not close native apps or erase their state.`;
+const RESET_DESCRIPTION = `Interrupt active JavaScript, release its turn-owned input/browser resources and discard prior JS bindings. Cleanup completes before acknowledgement; failed cleanup fences reuse until a successful retry. The next js call starts with a freshly initialized cua API. Native apps stay open.`;
 
 const COMPUTER_USE_GUIDANCE = `## Open Computer Use JavaScript API
 
@@ -1175,6 +1175,8 @@ export async function runServer({ command, args }) {
   const session = new WorkerJavaScriptSession({ native });
   let buffer = "";
   let requestQueue = Promise.resolve();
+  const requests=new Map(),report=error=>console.error(asError(error).message);
+  const isJavaScript=request=>request.method==='tools/call'&&request.params?.name==='js';
   process.stdin.setEncoding("utf8");
   process.stdin.on("data", chunk => {
     buffer += chunk;
@@ -1183,46 +1185,60 @@ export async function runServer({ command, args }) {
       if (newline < 0) break;
       const line = buffer.slice(0, newline).trim();
       buffer = buffer.slice(newline + 1);
-      if(line) {
-        let event;try {event=JSON.parse(line);}catch {}
-        if(event?.id===undefined && event?.method==='notifications/turn-ended') {
-          native.notify(event.method,event.params ?? {});
-          const boundary=session.endTurn();
-          requestQueue=requestQueue.then(()=>boundary).catch(error=>console.error(asError(error).message));
-        } else {
-          const generation=session.turnGeneration;
-          requestQueue=requestQueue.then(()=>handle(line,generation)).catch(error=>console.error(asError(error).message));
+      if(!line)continue;
+      let request;try{request=JSON.parse(line);}catch{send({jsonrpc:'2.0',id:null,error:{code:-32700,message:'Invalid JSON-RPC payload'}});continue;}
+      if(!request||typeof request!=='object'||Array.isArray(request)||typeof request.method!=='string'){send({jsonrpc:'2.0',id:null,error:{code:-32600,message:'Invalid JSON-RPC request'}});continue;}
+      if(request.id===undefined){
+        if(request.method==='notifications/turn-ended'){
+          native.notify(request.method,request.params??{});
+          const boundary=session.endTurn();requestQueue=requestQueue.then(()=>boundary).catch(report);
+        }else if(request.method==='notifications/cancelled'){
+          const state=requests.get(request.params?.requestId);
+          if(state&&isJavaScript(state.request)&&!state.cancelled){
+            state.cancelled=true;
+            if(state.active&&state.generation===session.turnGeneration){const boundary=session.reset();requestQueue=requestQueue.then(()=>boundary).catch(report);}
+          }
         }
+        continue;
+      }
+      if(typeof request.id!=='string'&&!Number.isSafeInteger(request.id)){send({jsonrpc:'2.0',id:null,error:{code:-32600,message:'Invalid request ID'}});continue;}
+      if(requests.has(request.id)){send({jsonrpc:'2.0',id:request.id,error:{code:-32600,message:'Duplicate in-progress request ID'}});continue;}
+      const state={request,generation:session.turnGeneration,active:false,cancelled:false};requests.set(request.id,state);
+      if(isJavaScript(request))requestQueue=requestQueue.then(()=>dispatch(state)).catch(report);
+      else{
+        const operation=dispatch(state);operation.catch(report);
+        if(request.method==='tools/call'&&request.params?.name==='js_reset')requestQueue=requestQueue.then(()=>operation).catch(report);
       }
     }
   });
-  async function handle(line,generation) {
-    let request;
-    try { request = JSON.parse(line); } catch { return send({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "Invalid JSON-RPC payload" } }); }
+  async function dispatch(state){
+    try{if(!state.cancelled){state.active=true;await handle(state);}}
+    finally{if(requests.get(state.request.id)===state)requests.delete(state.request.id);}
+  }
+  async function handle(state) {
+    const {request,generation}=state;
+    const respond=message=>{if(!state.cancelled)send(message);};
     const { id, method, params = {} } = request;
-    if (id === undefined) {
-      return;
-    }
     try {
-      if (method === "initialize") return send({ jsonrpc: "2.0", id, result: { protocolVersion: "2025-06-18", capabilities: { tools: { listChanged: false } }, serverInfo: { name: "open-computer-use-repl", version: "1" }, instructions: SERVER_INSTRUCTIONS } });
-      if (method === "ping") return send({ jsonrpc: "2.0", id, result: {} });
-      if (method === "tools/list") return send({ jsonrpc: "2.0", id, result: { tools: toolDefinitions() } });
+      if (method === "initialize") return respond({ jsonrpc: "2.0", id, result: { protocolVersion: "2025-06-18", capabilities: { tools: { listChanged: false } }, serverInfo: { name: "open-computer-use-repl", version: "1" }, instructions: SERVER_INSTRUCTIONS } });
+      if (method === "ping") return respond({ jsonrpc: "2.0", id, result: {} });
+      if (method === "tools/list") return respond({ jsonrpc: "2.0", id, result: { tools: toolDefinitions() } });
       if (method === "tools/call") {
-        if (params.name === "js_reset") { await session.reset(); return send({ jsonrpc: "2.0", id, result: { content: [{ type: "text", text: "Open Computer Use JavaScript session reset" }], isError: false } }); }
+        if (params.name === "js_reset") { await session.reset(); return respond({ jsonrpc: "2.0", id, result: { content: [{ type: "text", text: "Open Computer Use JavaScript session reset" }], isError: false } }); }
         if (params.name === "js") {
-          if(generation!==session.turnGeneration) return send({jsonrpc:"2.0",id,result:{isError:true,content:[{type:"text",text:"Error: Execution turn ended"}]}});
+          if(generation!==session.turnGeneration) return respond({jsonrpc:"2.0",id,result:{isError:true,content:[{type:"text",text:"Error: Execution turn ended"}]}});
           const requestedTimeoutMs = params.arguments?.timeout_ms;
           const timeoutMs = Number.isInteger(requestedTimeoutMs) && requestedTimeoutMs > 0
             ? Math.min(requestedTimeoutMs, MAX_TIMEOUT_MS)
             : DEFAULT_TIMEOUT_MS;
           const result = await session.run(params.arguments?.code, timeoutMs, request._meta ?? {});
-          return send({ jsonrpc: "2.0", id, result });
+          return respond({ jsonrpc: "2.0", id, result });
         }
         throw new Error(`Unsupported tool: ${params.name}`);
       }
       throw new Error(`Unsupported method: ${method}`);
     } catch (error) {
-      send({ jsonrpc: "2.0", id, error: { code: -32603, message: asError(error).message } });
+      respond({ jsonrpc: "2.0", id, error: { code: -32603, message: asError(error).message } });
     }
   }
   function send(message) { process.stdout.write(`${JSON.stringify(message)}\n`); }

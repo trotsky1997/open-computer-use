@@ -614,3 +614,35 @@ download/service-worker and Windows suites were not repeated. URL/consent
 authority, Document-response mediation, wider transports/platforms and OS
 sandboxing remain open; full harness parity stays active. No dependency or CI
 added.
+
+
+### MCP request cancellation and responsive controls
+
+The stdio adapter now handles matching notifications/cancelled for pending JS.
+Queued cancellation skips the code, preserves bindings and suppresses the reply.
+Active cancellation resets the shared kernel, suppresses its reply and fences
+older queued work behind the existing cleanup barrier. Late/unknown/malformed
+and initialize/reset/metadata cancellations are ignored. Ping/tools metadata and
+js_reset bypass the JS queue; ordinary JS remains serialized. Request IDs are
+validated and an in-progress duplicate cannot overwrite cancellation state.
+Reset still waits for confirmed resource cleanup and preserves failure/retry
+fencing. Tool descriptions explain interruption and binding loss.
+
+A pre-change real-pipe test reproduced cancelled queued code executing anyway.
+The focused pipe workflow now verifies queued side-effect refusal, preserved
+bindings, CPU-loop cancellation, reply suppression, responsive ping/tools/reset,
+stale queued-call fencing and fresh execution. The real MCP browser fixture
+verifies cancellation and reset after accepted trusted Shift down, trusted release,
+fresh bindings, retained-tab input/image recovery and existing turn-ended behavior.
+It enters a fresh turn before testing final close so handoff marks are cleared
+according to their existing lifecycle contract; no tab-retention logic changed.
+
+Node: 234/234 macOS, 233/234 Linux (one platform skip). Source and source-relocated
+installed real MCP turn/cancel/reset workflows pass on both platforms, including
+held-key cleanup, media recovery, idle-kernel loss and final tab cleanup. Ten
+installed modules and both npm runtime copies match source. Full native desktop/
+headful, Network/Tracing/console/service-worker/download and Windows suites were
+not repeated for this transport-boundary change. Already-completed native actions
+are not rolled back and active cancellation discards the kernel's variables.
+OS sandboxing, URL/consent authority, wider transports/platforms and the intermittent
+macOS console issue remain open. No dependency or CI added; full parity stays active.
