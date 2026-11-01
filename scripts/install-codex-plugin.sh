@@ -233,7 +233,7 @@ fi
 if [[ ! -f "${repl_source_root}/open-computer-use-repl.mjs" ]]; then
   repl_source_root="${plugin_source_root}/scripts"
 fi
-for repl_file in browser-frames.mjs accessibility-state.mjs open-computer-use-repl.mjs open-computer-use-kernel.mjs ocu-config.mjs browser-cdp.mjs browser-playwright.mjs browser-downloads.mjs browser-clipboard.mjs browser-viewport.mjs browser-drop.mjs browser-input.mjs browser-tabs.mjs browser-tab-claims.mjs browser-process.mjs browser-runtime.mjs browser-runtime-child.mjs browser-debugger.mjs browser-assets.mjs browser-webmcp.mjs browser-content.mjs browser-chrome.mjs browser-evaluate.mjs browser-evaluate-dom.mjs browser-evaluate-worker.mjs runtime-dependencies.mjs; do
+for repl_file in browser-frames.mjs accessibility-state.mjs open-computer-use-repl.mjs open-computer-use-kernel.mjs open-computer-use-kernel-supervisor.mjs ocu-config.mjs browser-cdp.mjs browser-playwright.mjs browser-downloads.mjs browser-clipboard.mjs browser-viewport.mjs browser-drop.mjs browser-input.mjs browser-tabs.mjs browser-tab-claims.mjs browser-process.mjs browser-runtime.mjs browser-runtime-child.mjs browser-debugger.mjs browser-assets.mjs browser-webmcp.mjs browser-content.mjs browser-chrome.mjs browser-evaluate.mjs browser-evaluate-dom.mjs browser-evaluate-worker.mjs runtime-dependencies.mjs; do
   if [[ ! -f "${repl_source_root}/${repl_file}" ]]; then
     echo "Missing JS REPL runtime at ${repl_source_root}/${repl_file}" >&2
     exit 1
@@ -289,6 +289,7 @@ if [[ -n "${payload_path}" ]]; then
 fi
 cp "${repl_source_root}/open-computer-use-repl.mjs" "${plugin_install_root}/scripts/open-computer-use-repl.mjs"
 cp "${repl_source_root}/open-computer-use-kernel.mjs" "${plugin_install_root}/scripts/open-computer-use-kernel.mjs"
+cp "${repl_source_root}/open-computer-use-kernel-supervisor.mjs" "${plugin_install_root}/scripts/open-computer-use-kernel-supervisor.mjs"
 mkdir -p "${plugin_install_root}/node_modules"
 node "${repl_source_root}/runtime-dependencies.mjs" "${repo_root}" "${plugin_install_root}"
 cp "${repl_source_root}/browser-input.mjs" "${plugin_install_root}/scripts/browser-input.mjs"

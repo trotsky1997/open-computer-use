@@ -3391,3 +3391,37 @@ checks pass. Node: 224/224 macOS, 223/224 Linux (one platform skip); macOS gener
 browser and both-platform CDP regressions pass. Full headful/MCP regression was
 not repeated for this local error-state change. Short-lived startup observation,
 worker Network completeness and physical/Windows/remote coverage remain open.
+
+
+### Host-enforced process-kernel execution budgets
+
+Moved the public source-session evaluator from the host event loop into a
+supervised Node process. A bounded probe reproduced the old 80ms post-await CPU
+loop blocking past two seconds. Shared thread/process control now applies host
+budgets, queue fencing and resource release; reset/active turn end/close can
+terminate busy kernels. Teardown is memoized, POSIX groups cover ordinary children
+and supervisor loss, and macOS exit-time signal refusal is accepted only after
+confirming no live group member remains. Failed-turn cleanup starts before reset
+records its generation; this fixes reset canceling its own cleanup retry.
+
+Updated kernel bootstrapping, installer staging, CLI support checks and both npm
+runtime copies. The AX delayed-reply fixture now intercepts inside each actual
+kernel through an owned HTTP gate. The turn fixture follows current exclusive
+claims by asserting foreign binding refusal. Public execution-boundary docs were
+updated together.
+
+Final Node: 227/227 macOS, 226/227 Linux (one platform skip). Both-platform actual
+host SIGKILL probes stop busy source kernels/supervisors. Source/relocated-installed
+native CPU timeout fixtures verify trusted key release, fresh variables, retained
+tab/input recovery and PNG output. Source turn fixtures cover idle persistence,
+stale callbacks, popup cleanup, held input/viewport release, cleanup retry and real
+MCP turn-ended interruption. AX/output-owner/zoom/clip/shadow checks pass source on
+both platforms and relocated-installed macOS/Linux; macOS browser/CDP regressions
+pass. Ten npm modules match both packed copies. The final full source-relocated
+Linux installation passes claims, dialog/navigation/drop budgets, raw CDP, iframe
+input, standalone/managed MCP, headful multi-window, native text/HTML/PNG clipboard
+and GTK interop, profile recovery, lazy startup and browser/profile shutdown.
+
+OS sandboxing, Windows process-tree and joint host/supervisor crash coverage,
+browser/clipboard host-crash recovery and wider native/physical work remain open.
+No dependency, CI or release added; the broader parity goal stays active.

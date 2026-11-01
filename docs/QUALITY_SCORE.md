@@ -297,3 +297,34 @@ checks pass. Node: 224/224 macOS, 223/224 Linux (one platform skip); macOS gener
 browser and both-platform CDP regressions pass. Full headful/MCP regression was
 not repeated for this local error-state change. Short-lived startup observation,
 worker Network completeness and physical/Windows/remote coverage remain open.
+
+
+### Host-enforced process-kernel execution budgets
+
+Public source sessions now use a supervised Node process kernel; both engines
+share the parent resource controller and internal evaluator. Parent deadlines
+stop synchronous/post-await CPU loops. Reset, timeout and kernel loss fence queued
+calls; later close supersedes reset. Termination is memoized and POSIX group
+cleanup covers ordinary descendants and supervisor loss. macOS exit-time signal
+refusal requires confirmation that no live group member remains. Reset records
+its generation after starting a failed-turn cleanup retry, so it cannot cancel
+its own retry.
+
+The old source VM blocked an 80ms post-await deadline beyond two seconds in an
+externally bounded probe. Final Node checks: 227/227 macOS, 226/227 Linux (one
+platform skip). Actual host SIGKILL stops the busy source kernel/supervisor on both
+platforms. Source and relocated-installed native fixtures verify trusted held-key
+release on CPU timeout, fresh bindings, retained-tab input recovery and PNG media.
+Native turn fixtures pass idle bindings, stale-callback refusal, accepted-input
+release, popup ownership, cleanup failure/retry and real MCP turn-ended behavior.
+Delayed AX interception now runs in each actual kernel with an owned HTTP gate;
+both engines pass source/relocated-installed AX/output-owner and zoom/clip/shadow
+regressions on macOS/Linux. macOS browser/CDP regression and ten modules matching
+both npm runtime copies pass. The final Linux full source-relocated installation
+run passes, including claims, dialog/navigation/drop budgets, raw CDP, iframe
+input, standalone/managed MCP, headful multi-window, native text/HTML/PNG clipboard
+with GTK interop, profile recovery, lazy startup and shutdown.
+
+No OS sandbox: code retains host-user privileges. Windows process-tree, joint
+host/supervisor loss, browser/clipboard host-crash recovery and broader physical
+work remain open. No dependency or CI added; full parity remains active.

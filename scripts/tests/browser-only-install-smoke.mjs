@@ -91,6 +91,11 @@ if(process.argv[2]==='codex-plugin-config') { (await import('node:fs')).chmodSyn
   }
   const peer=new JsonLinePeer({command:path.resolve(installed,mcp.command),cwd:installed,env});
   try{await peer.initialize();const result=await peer.request('tools/call',{name:'js',arguments:{code}});assert.equal(result.isError,false,JSON.stringify(result.content));assert.ok(result.content.some(item=>item.text==='Installed browser verified'));console.log('PASS installed plugin launcher MCP real browser flow after source checkout removal');}finally{await peer.close();}
+  const kernelBudget=spawn(process.execPath,[path.join(source,'scripts/run-kernel-budget-smoke.mjs'),installed],{env:{...env,OCU_TEST_CHROME_EXECUTABLE:path.resolve(chrome)},stdio:['ignore','pipe','pipe']});let kernelOutput='';
+  kernelBudget.stdout.on('data',chunk=>{kernelOutput+=chunk;});kernelBudget.stderr.on('data',chunk=>{kernelOutput+=chunk;});
+  await new Promise((resolve,reject)=>{kernelBudget.once('error',reject);kernelBudget.once('exit',code=>code===0?resolve():reject(Error(kernelOutput)));});
+  for(const line of kernelOutput.split('\n').filter(line=>line.includes('PASS')))console.log(line);
+  console.log('PASS installed CPU-budget native input release and media recovery after source checkout removal');
   const consoleLogs=spawn(process.execPath,[path.join(source,'scripts/run-console-smoke.mjs'),installed],{env,stdio:['ignore','pipe','pipe']});let consoleOutput='';
   consoleLogs.stdout.on('data',chunk=>{consoleOutput+=chunk;});consoleLogs.stderr.on('data',chunk=>{consoleOutput+=chunk;});
   await new Promise((resolve,reject)=>{consoleLogs.once('error',reject);consoleLogs.once('exit',code=>code===0?resolve():reject(Error(consoleOutput)));});

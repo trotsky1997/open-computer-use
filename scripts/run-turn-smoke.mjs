@@ -28,8 +28,7 @@ try {
  let grandchild;await waitFor(async()=>{grandchild=(await targets()).find(target=>target.url===url+'grandchild');return !!grandchild;});
  const delivered=await run(`var delivered=await cua.createBrowserTab('cdp',${JSON.stringify(url)},{visible:false});await delivered.markHandoff();await delivered.markDeliverable();nodeRepl.write(JSON.stringify(delivered.id));`);
  const handoff=await run(`var handoff=await cua.createBrowserTab('cdp',${JSON.stringify(url)},{visible:false});await handoff.markDeliverable();await handoff.markHandoff();nodeRepl.write(JSON.stringify(handoff.id));`);
- await run(`var observer=await cua.getTab(${JSON.stringify(handoff)});nodeRepl.write(JSON.stringify(true));`,other);
- const denied=await other.run('await observer.markDeliverable();');assert.equal(denied.isError,true);assert.match(denied.content.at(-1).text,/another session/);
+ const denied=await other.run(`await cua.getTab(${JSON.stringify(handoff)});`);assert.equal(denied.isError,true);assert.match(denied.content.at(-1).text,/another session/);
  await session.reset();assert.ok((await ids()).has(temporary),'js_reset lost logical tab ownership');
  await run(`var handoff=await cua.getTab(${JSON.stringify(handoff)});var delivered=await cua.getTab(${JSON.stringify(delivered)});var sentinel=42;setTimeout(()=>{handoff.pressKey(null,'a').then(()=>{},()=>{});handoff.close().catch(()=>{});},200);nodeRepl.write(JSON.stringify(true));`);
  const idleContext=session.worker ?? session.repl;await session.endTurn();assert.equal(session.worker ?? session.repl,idleContext);

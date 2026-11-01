@@ -259,8 +259,9 @@ and its context discarded; earlier queued work and old native/browser callbacks
 are refused. Native shutdown and browser resource releases complete before the
 turn finishes. Marked tabs survive that boundary; marks clear on the next call.
 Cleanup failures keep the session stopped until a retry succeeds. Source timeout
-results also wait for reset cleanup. CPU-bound preemption requires the Worker
-class because an in-process loop blocks the event loop needed to cancel it.
+results also wait for reset cleanup. Both public engines enforce CPU budgets
+from the parent: Worker sessions terminate their thread and source sessions
+terminate their supervised process kernel.
 See [tabs and turn boundaries](../browser-tabs.md) for ownership and limits.
 
 Native macOS app `pressKey(key, {durationMs})` holds the whole key/chord and
@@ -288,3 +289,23 @@ provides AX/semantic actions and verified exposed-window images on a local
 noncomposited X11 display. Basic pointer clicks now verify native recipients;
 other image, drag/held and wider physical routes remain open. See
 [native window binding](../native-window-binding.md) for the provider evidence.
+
+
+## Session execution boundaries
+
+Public Worker sessions run the persistent evaluator in a thread; public source
+(`PersistentJavaScriptSession`) sessions run it in a separate Node process behind
+a small IPC supervisor. Native/browser services and budgets stay in the parent.
+Synchronous loops and loops after await are terminated on execution timeout,
+reset, active turn end or close; the next accepted call receives a fresh namespace
+after successful cleanup. Idle turn boundaries preserve bindings. Queued calls
+from a reset/timed-out/lost kernel cannot execute in the replacement context.
+
+The source supervisor remains outside evaluated code and stops its kernel when
+the parent IPC channel closes. Node code retains the current user's OS privileges;
+separate kernels provide execution/lifecycle control.
+
+`OCU_TEST_CHROME_EXECUTABLE=/path/to/chrome node scripts/run-kernel-budget-smoke.mjs`
+checks a trusted held key accepted by a disposable browser, CPU timeout release,
+fresh variables, retained tab recovery and real screenshot output. An optional
+first argument selects an installed runtime.

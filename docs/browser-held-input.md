@@ -67,7 +67,7 @@ Use disposable Chrome. The live smoke checks trusted events, modifier/key-up
 order, per-press duration, targeted and ordinary-key typing, key-triggered navigation/scroll, prompts held beyond ten seconds,
 release-triggered dialogs, cancellation over draggable targets, pointer/drop exclusivity, reset/timeout/close release,
 failed cleanup with blocked reuse and retry, explicit viewport/cropped-pixel
-coordinates and in-process sessions. Mac headless Chrome evidence is recorded
+coordinates and thread/process sessions. Mac headless Chrome evidence is recorded
 in the task history; headful/hardware keyboard state remains unverified.
 
 ## Host-owned pointer drag

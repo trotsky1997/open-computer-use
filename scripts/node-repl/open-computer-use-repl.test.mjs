@@ -5,6 +5,10 @@ import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import { JsonLinePeer, PersistentJavaScriptSession, WorkerJavaScriptSession, parseListApps, createCuaApi, toolDefinitions, computerUseGuidance, virtualDisplayEnabled } from "./open-computer-use-repl.mjs";
 
+const sessions=new Set();
+function trackedSession(Session,options){const session=new Session(options);sessions.add(session);return session;}
+test.afterEach(async()=>{const pending=[...sessions];sessions.clear();for(const result of await Promise.allSettled(pending.map(session=>session.close())))assert.equal(result.status,"fulfilled",result.reason?.stack);});
+
 function textResult(text, isError = false, image) {
   const content = [{ type: "text", text }];
   if (image) content.push({ type: "image", mimeType: image.mimeType, data: image.data });
@@ -61,7 +65,7 @@ test("cua.listApps returns structured apps for the native text protocol", async 
     native.calls.push(params);
     return textResult("TextEdit — com.apple.TextEdit [running, last-used=2026-09-22, uses=4]");
   };
-  const session = new PersistentJavaScriptSession({ native });
+  const session = trackedSession(PersistentJavaScriptSession, { native });
   const result = await session.run(`
     var apps = await cua.listApps({ emit: false });
     nodeRepl.write(JSON.stringify(apps));
@@ -73,7 +77,7 @@ test("cua.listApps returns structured apps for the native text protocol", async 
 });
 
 test("top-level await and lexical bindings persist until reset", async () => {
-  const session = new PersistentJavaScriptSession({ native: mockNative() });
+  const session = trackedSession(PersistentJavaScriptSession, { native: mockNative() });
   let result = await session.run("var answer = await Promise.resolve(41); nodeRepl.write(answer);");
   assert.equal(result.isError, false);
   assert.equal(result.content.at(-1).text, "41");
@@ -84,12 +88,12 @@ test("top-level await and lexical bindings persist until reset", async () => {
   assert.equal(result.content.at(-1).text, "undefined");
 });
 
-test("in-process reset waits for resource cleanup and retries a failed cleanup before reuse", async () => {
-  const session = new PersistentJavaScriptSession({native:mockNative()});
+test("source reset waits for host cleanup and retries a failed cleanup before reuse", async () => {
+  const native=mockNative(),session = trackedSession(PersistentJavaScriptSession, {native});
   await session.run("var kept=41");
   let release, fail = true;
   const waiting = new Promise(resolve => {release=resolve;});
-  session.disposers.push(async () => {await waiting;if(fail) throw new Error("cleanup outage");});
+  native.endSession=async () => {await waiting;if(fail) throw new Error("cleanup outage");};
   const resetting = session.reset();
   const rejected = assert.rejects(resetting,/cleanup outage/);
   let finished = false;
@@ -107,7 +111,7 @@ test("in-process reset waits for resource cleanup and retries a failed cleanup b
 });
 
 test("return values are not implicitly serialized into MCP output", async () => {
-  const session = new PersistentJavaScriptSession({ native: mockNative() });
+  const session = trackedSession(PersistentJavaScriptSession, { native: mockNative() });
   const result = await session.run("({ huge: 'intermediate-only' })");
   assert.equal(result.isError, false);
   assert.equal(result.content.at(-1).text, "(no output)");
@@ -115,7 +119,7 @@ test("return values are not implicitly serialized into MCP output", async () => 
 
 test("app-bound API composes actions and state in one js call", async () => {
   const native = mockNative();
-  const session = new PersistentJavaScriptSession({ native });
+  const session = trackedSession(PersistentJavaScriptSession, { native });
   const result = await session.run(`
     var app = await cua.getApp("Text");
     await app.click(7, { clickMethod: "accessibility" });
@@ -132,7 +136,7 @@ test("app-bound API composes actions and state in one js call", async () => {
 for (const Session of [PersistentJavaScriptSession, WorkerJavaScriptSession]) {
   test(`${Session.name}: selective observation is explicit and legacy calls keep their arguments`, async t => {
     const native = mockNative();
-    const session = new Session({ native });
+    const session = trackedSession(Session, { native });
     t.after(() => session.close?.());
     const result = await session.run(`
       var selectiveApp = await cua.getApp("Text", { initialState: false });
@@ -174,7 +178,7 @@ test("app-bound API forwards explicitly enabled background-operation options", a
   });
   if (process.platform !== "darwin") { t.skip("virtual displays are macOS-only"); return; }
   const native = mockNative();
-  const session = new PersistentJavaScriptSession({ native });
+  const session = trackedSession(PersistentJavaScriptSession, { native });
   const result = await session.run(`
     var backgroundApp = await cua.getApp("Text");
     await backgroundApp.getAXState({ emit: false, textLimit: "max", maxTreeNodes: 42, maxTreeDepth: 7, windowPlacement: "agent_display" });
@@ -219,7 +223,7 @@ test("app-bound API forwards explicitly enabled background-operation options", a
 });
 
 test("tool errors are catchable in JavaScript", async () => {
-  const session = new PersistentJavaScriptSession({ native: mockNative() });
+  const session = trackedSession(PersistentJavaScriptSession, { native: mockNative() });
   const result = await session.run(`
     var badApp = await cua.getApp("Text");
     try { await badApp.typeText("fail"); } catch (error) { nodeRepl.write("caught: " + error.message); }
@@ -229,7 +233,7 @@ test("tool errors are catchable in JavaScript", async () => {
 });
 
 test("thrown errors settle the call and keep bindings", async () => {
-  const session = new PersistentJavaScriptSession({ native: mockNative() });
+  const session = trackedSession(PersistentJavaScriptSession, { native: mockNative() });
   await session.run("var kept = 1;");
   let result = await session.run("nodeRepl.write('before'); null[1];", 1000);
   assert.equal(result.isError, true);
@@ -243,7 +247,7 @@ test("thrown errors settle the call and keep bindings", async () => {
 
 for (const Session of [PersistentJavaScriptSession, WorkerJavaScriptSession]) {
   test(`${Session.name}: a late throw from a finished call does not reach the next call`, async () => {
-    const session = new Session({ native: mockNative() });
+    const session = trackedSession(Session, { native: mockNative() });
     try {
       let result = await session.run(`var kept = 1; setTimeout(() => { throw new Error("late"); }, 20);
         setTimeout(() => nodeRepl.write("late write"), 20);`, 1000);
@@ -259,7 +263,7 @@ for (const Session of [PersistentJavaScriptSession, WorkerJavaScriptSession]) {
 }
 
 test("screenshots emit binary image content", async () => {
-  const session = new PersistentJavaScriptSession({ native: mockNative() });
+  const session = trackedSession(PersistentJavaScriptSession, { native: mockNative() });
   const result = await session.run(`
     var imageApp = await cua.getApp("Text");
     var imageBytes = await imageApp.getScreenshot();
@@ -291,7 +295,7 @@ test("JsonLinePeer initializes and correlates native MCP responses", async () =>
 });
 
 test("worker session terminates CPU-bound code and recovers with a fresh kernel", async () => {
-  const session = new WorkerJavaScriptSession({ native: mockNative() });
+  const session = trackedSession(WorkerJavaScriptSession, { native: mockNative() });
   let result = await session.run("while (true) {}", 100);
   assert.equal(result.isError, true);
   assert.match(result.content[0].text, /timed out/);
@@ -302,7 +306,7 @@ test("worker session terminates CPU-bound code and recovers with a fresh kernel"
 });
 
 test("worker session returns a structured error for invalid source input", async () => {
-  const session = new WorkerJavaScriptSession({ native: mockNative() });
+  const session = trackedSession(WorkerJavaScriptSession, { native: mockNative() });
   const result = await session.run(undefined, 5_000);
   assert.equal(result.isError, true);
   assert.match(result.content[0].text, /non-empty JavaScript source/);
@@ -313,7 +317,7 @@ test("worker session returns a structured error for invalid source input", async
 });
 
 test("worker session serializes concurrent callers", async () => {
-  const session = new WorkerJavaScriptSession({ native: mockNative() });
+  const session = trackedSession(WorkerJavaScriptSession, { native: mockNative() });
   const first = session.run("await new Promise(resolve => setTimeout(resolve, 40)); var order = ['first']; nodeRepl.write(order.join(','));", 5_000);
   const second = session.run("order.push('second'); nodeRepl.write(order.join(','));", 5_000);
   assert.equal((await first).content.at(-1).text, "first");
@@ -358,7 +362,7 @@ test("worker reset and timeout end the native GUI lease", async () => {
   const native = mockNative();
   let ended = 0;
   native.endSession = () => { ended += 1; };
-  const session = new WorkerJavaScriptSession({ native });
+  const session = trackedSession(WorkerJavaScriptSession, { native });
   try {
     await session.reset();
     assert.equal(ended, 1);
@@ -371,7 +375,7 @@ test("worker reset and timeout end the native GUI lease", async () => {
 
 test("reset drops old worker native requests before a replacement kernel starts", async () => {
   const native = mockNative();
-  const session = new WorkerJavaScriptSession({ native });
+  const session = trackedSession(WorkerJavaScriptSession, { native });
   try {
     const old = session.worker;
     const resetting = session.reset();
@@ -391,7 +395,7 @@ test("lightweight app binding queries and acts across persistent JS calls withou
     native.calls.push(params);
     return textResult(JSON.stringify({ matches: [{ index: 1000001, title: "Send" }], truncated: false, stop_reason: "complete", visited_nodes: 3, window_id: 12 }));
   };
-  const session = new PersistentJavaScriptSession({ native });
+  const session = trackedSession(PersistentJavaScriptSession, { native });
   let result = await session.run(`var queriedApp = await cua.getApp("Text", { initialState: false }); var found = await queriedApp.query({ text: "Send", role: "button", exact: true, maxNodes: 50, windowId: 12 }); nodeRepl.write(found);`);
   assert.equal(result.isError, false, result.content.at(-1).text);
   assert.deepEqual(native.calls.map(c => c.name), ["query"]);
@@ -403,7 +407,7 @@ test("lightweight app binding queries and acts across persistent JS calls withou
 });
 
 test("query rejects invalid options and preserves native errors", async () => {
-  const native = mockNative(), session = new PersistentJavaScriptSession({ native });
+  const native = mockNative(), session = trackedSession(PersistentJavaScriptSession, { native });
   await session.run(`var queriedApp = await cua.getApp("Text", { initialState: false });`);
   for (const options of [`{}`, `{text: "Send", windowId: -1}`, `{text: "Send", windowId: 4294967296}`, `{text: "Send", exact: 1}`, `{text: 3}`, `{role: "button", maxNodes: 1.5}`, `{text: "Send", typo: true}`]) {
     const result = await session.run(`await queriedApp.query(${options});`);
@@ -417,7 +421,7 @@ test("query rejects invalid options and preserves native errors", async () => {
 });
 
 test("query returns truncation metadata and rejects malformed native responses", async () => {
-  const native = mockNative(), session = new PersistentJavaScriptSession({ native });
+  const native = mockNative(), session = trackedSession(PersistentJavaScriptSession, { native });
   native.request = async () => textResult(JSON.stringify({ matches: [], truncated: true, stop_reason: "timeout" }));
   const result = await session.run(`var queriedApp = await cua.getApp("Text", { initialState: false }); nodeRepl.write(JSON.stringify(await queriedApp.query({role: "button"})));`);
   assert.equal(result.isError, false);
@@ -431,7 +435,7 @@ test("query returns truncation metadata and rejects malformed native responses",
 
 for (const Session of [PersistentJavaScriptSession, WorkerJavaScriptSession]) {
   test(`${Session.name}: selectText forwards all selection modes without a snapshot`, async t => {
-    const native = mockNative(), session = new Session({ native });
+    const native = mockNative(), session = trackedSession(Session, { native });
     t.after(() => session.close?.());
     let result = await session.run(`var selectionApp = await cua.getApp("Text", { initialState: false }); await selectionApp.selectText(1000001, "中文🙂", {prefix: "before ", suffix: " after"});`);
     assert.equal(result.isError, false, result.content.at(-1).text);
@@ -445,7 +449,7 @@ for (const Session of [PersistentJavaScriptSession, WorkerJavaScriptSession]) {
   });
 
   test(`${Session.name}: selectText rejects invalid inputs before native calls`, async t => {
-    const native = mockNative(), session = new Session({ native });
+    const native = mockNative(), session = trackedSession(Session, { native });
     t.after(() => session.close?.());
     await session.run(`var selectionApp = await cua.getApp("Text", { initialState: false });`);
     for (const args of [`-1,"x"`, `1.5,"x"`, `true,"x"`, `"bad","x"`, `[],"x"`, `0,""`, `0,3`, `0,"x",null`, `0,"x",[]`, `0,"x",{prefix:2}`, `0,"x",{suffix:null}`, `0,"x",{selectionType:"after"}`, `0,"x",{selectionType:""}`, `0,"x",{selection:"text"}`, `0,"x",{typo:true}`]) {
@@ -456,7 +460,7 @@ for (const Session of [PersistentJavaScriptSession, WorkerJavaScriptSession]) {
   });
 
   test(`${Session.name}: selectText preserves native verification and platform failures`, async t => {
-    const native = mockNative(), session = new Session({ native });
+    const native = mockNative(), session = trackedSession(Session, { native });
     t.after(() => session.close?.());
     await session.run(`var selectionApp = await cua.getApp("Text", { initialState: false });`);
     const request = native.request.bind(native);
@@ -490,7 +494,7 @@ test("disabled virtual displays reject stale JS options before native dispatch",
     else process.env.OPEN_COMPUTER_USE_VIRTUAL_DISPLAY_ENABLED = previous;
   });
   const native = mockNative();
-  const session = new PersistentJavaScriptSession({ native });
+  const session = trackedSession(PersistentJavaScriptSession, { native });
   const result = await session.run(`
     var app = await cua.getApp("Text", { initialState: false });
     await app.getAXState({ windowPlacement: "agent_display" });
@@ -558,7 +562,7 @@ test("unseen observations, screenshots, option changes and failures preserve dif
 
 for (const Session of [PersistentJavaScriptSession, WorkerJavaScriptSession]) {
   test(`${Session.name}: AX diff history resets with the JavaScript session`, async t => {
-    const session = new Session({ native: mockNative() });
+    const session = trackedSession(Session, { native: mockNative() });
     t.after(() => session.close?.());
     await session.run('var app = await cua.getApp("Text", { initialState: false }); await app.getAXState();');
     let result = await session.run('await app.getAXState();');
@@ -577,7 +581,7 @@ for (const Session of [PersistentJavaScriptSession,WorkerJavaScriptSession]) {
       if(method==='tools/list') {schemas++;return {tools:[{name:'click',inputSchema:{properties:supported?{key:{},duration_ms:{}}:{}}}]};}
       return original(method,params);
     };
-    const session=new Session({native});
+    const session=trackedSession(Session, {native});
     try {
       assert.equal((await session.run('var app=await cua.getApp("Text");')).isError,false);
       for(const options of [{key:''},{key:1},{durationMs:-1},{durationMs:Infinity},{clickCount:0},{clickMethod:123},{mouseButton:'bad'},{typo:true}]) assert.equal((await session.run(`await app.click(7,${options.durationMs===Infinity?'{durationMs:Infinity}':JSON.stringify(options)});`)).isError,true);
@@ -615,7 +619,7 @@ for(const Session of [PersistentJavaScriptSession,WorkerJavaScriptSession]) {
      if(method==='tools/list') {schemas++;return {tools:[{name:'press_key',inputSchema:{properties:supported?{duration_ms:{type:'number'}}:{}}}]};}
      timeout=budget;return request(method,params);
    };
-   const session=new Session({native});
+   const session=trackedSession(Session, {native});
    try {
      assert.equal((await session.run('var app=await cua.getApp("Text",{initialState:false});')).isError,false);
      for(const options of ['null','[]','{durationMs:-1}','{durationMs:Infinity}','{durationMs:"10"}','{keyMethod:1}','{typo:true}']) assert.equal((await session.run(`await app.pressKey('a',${options});`)).isError,true);
@@ -651,7 +655,7 @@ for (const Session of [PersistentJavaScriptSession, WorkerJavaScriptSession]) {
   test(`${Session.name}: native coordinate scroll requires advertised schema and validates targets`, async t => {
     const native=mockNative(),request=native.request.bind(native);let supported=false,schemas=0;
     native.request=async(method,params)=>{if(method==='tools/list'){schemas++;return {tools:[{name:'scroll',inputSchema:{properties:supported?{x:{},y:{}}:{}}}]};}return request(method,params);};
-    const session=new Session({native});t.after(()=>session.close());
+    const session=trackedSession(Session, {native});t.after(()=>session.close());
     assert.equal((await session.run(`var app=await cua.getApp('Text',{initialState:false});await app.scroll(7,'DOWN',0.5);`)).isError,false);
     assert.deepEqual(native.calls.at(-1).arguments,{app:'Text',element_index:7,direction:'down',pages:0.5});assert.equal(schemas,0);
     for(const code of [`await app.scroll([], 'down');`,`await app.scroll([1,Infinity],'down');`,`await app.scroll(-1,'down');`,`await app.scroll(7,'invalid');`,`await app.scroll(7,'down',0);`,`await app.scroll(7,'down',NaN);`])assert.equal((await session.run(code)).isError,true);
@@ -670,4 +674,37 @@ test("native pipe errors reject pending requests and end the lease without escap
   child.exitCode=0;child.stdin.destroy(Object.assign(new Error('write EPIPE'),{code:'EPIPE'}));
   await assert.rejects(pending,error=>error.code==='EPIPE');assert.equal(peer.pending.size,0);assert.equal(peer.closed,true);assert.ok(peer.ending instanceof Promise);
   await assert.rejects(peer.request('ping'),/closed/);await peer.close();
+});
+
+
+test('source process budgets stop CPU work, lifecycle boundaries and kernel exits',()=>{
+ const source=`import assert from 'node:assert/strict';import {execFileSync} from 'node:child_process';import {PersistentJavaScriptSession} from ${JSON.stringify(new URL('./open-computer-use-repl.mjs',import.meta.url).href)};
+ const s=new PersistentJavaScriptSession({native:{async request(){throw Error('unused')}}});
+ const warm=async()=>{const r=await s.run('var marker=17;nodeRepl.write(process.pid)',5000);assert.equal(r.isError,false);assert.notEqual(Number(r.content.at(-1).text),process.pid);if(process.platform!=='win32')console.log(JSON.stringify({group:Number(execFileSync('ps',['-p',String(s.worker.pid),'-o','pgid='],{encoding:'utf8'}).trim())}));return Number(r.content.at(-1).text);};
+ const fresh=async()=>{const r=await s.run('nodeRepl.write(typeof marker)',5000);assert.equal(r.isError,false);assert.equal(r.content.at(-1).text,'undefined');};
+ try{
+  for(const code of ['while(true){}','await Promise.resolve();while(true){}']){await warm();const running=s.run(code,80),queued=s.run('nodeRepl.write(99)',5000),r=await running;assert.equal((await queued).isError,true);assert.equal(r.isError,true);assert.match(r.content.at(-1).text,/timed out/);await fresh();}
+  for(const boundary of ['reset','endTurn']){await warm();const running=s.run('await Promise.resolve();while(true){}',30000);await new Promise(r=>setTimeout(r,30));await s[boundary]();assert.equal((await running).isError,true);await fresh();}
+  const exiting=s.run('process.exit(23)',5000),stale=s.run('nodeRepl.write(99)',5000),exit=await exiting;assert.equal((await stale).isError,true);assert.equal(exit.isError,true);assert.match(exit.content.at(-1).text,/code 23/);await fresh();
+  if(process.platform!=='win32'){await warm();const busy=s.run('while(true){}',30000);await new Promise(r=>setTimeout(r,30));s.worker.disconnect();assert.equal((await busy).isError,true);await fresh();}
+  if(process.platform!=='win32'){const pid=await warm(),busy=s.run('while(true){}',30000);await new Promise(r=>setTimeout(r,30));s.worker.kill('SIGKILL');assert.equal((await busy).isError,true);const live=()=>{try{const state=execFileSync('ps',['-p',String(pid),'-o','stat='],{encoding:'utf8'}).trim();return state&&!state.startsWith('Z');}catch{return false;}};for(let i=0;i<100&&live();i++)await new Promise(r=>setTimeout(r,10));assert.equal(Boolean(live()),false);await fresh();}
+  await warm();const running=s.run('while(true){}',30000);await new Promise(r=>setTimeout(r,30));await s.close();assert.equal((await running).isError,true);assert.equal((await s.run('nodeRepl.write(1)')).isError,true);
+ }finally{await s.close();}`;
+ const result=spawnSync(process.execPath,['--input-type=module','-e',source],{encoding:'utf8',timeout:20000,detached:process.platform!=='win32'});
+ if(result.status!==0&&process.platform!=='win32'){const groups=[result.pid,...result.stdout.split('\n').filter(line=>line.startsWith('{')).map(line=>JSON.parse(line).group)];for(const pid of groups)if(pid>1){try{process.kill(-pid,'SIGKILL');}catch{}}}
+ assert.equal(result.status,0,result.stderr||String(result.error));
+});
+
+for(const Session of [PersistentJavaScriptSession,WorkerJavaScriptSession])test(`${Session.name}: reset fences queued code and a later close`,async()=>{
+ const native=mockNative(),session=trackedSession(Session,{native});await session.run('nodeRepl.write(1)',5000);
+ const running=session.run('await new Promise(()=>{})',5000),queued=session.run('nodeRepl.write("late")',5000);
+ await new Promise(setImmediate);await session.reset();assert.equal((await running).isError,true);assert.equal((await queued).isError,true);
+ assert.equal((await session.run('nodeRepl.write(42)',5000)).content.at(-1).text,'42');
+ let failed=false;native.endSession=()=>{if(!failed){failed=true;throw Error('Retry turn cleanup');}};
+ await assert.rejects(session.endTurn(),/Retry turn cleanup/);await session.reset();native.endSession=undefined;
+ assert.equal((await session.run('nodeRepl.write(42)',5000)).content.at(-1).text,'42');
+ let release;native.endSession=()=>new Promise(resolve=>release=resolve);const kernel=session.worker,resetting=session.reset(),rejected=assert.rejects(resetting,/superseded/);
+ const closing=session.close();release();native.endSession=undefined;await rejected;await closing;assert.equal(session.worker,kernel);assert.equal((await session.run('nodeRepl.write(1)')).isError,true);
+ const kill=process.kill;process.kill=function(pid,...args){if(kernel.pid&&pid===-kernel.pid)throw Error('Repeated termination signaled a retired process group');return Reflect.apply(kill,process,[pid,...args]);};
+ try{await kernel.terminate();}finally{process.kill=kill;}
 });

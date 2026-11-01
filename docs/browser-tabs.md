@@ -53,14 +53,15 @@ async evaluations reject and discard their REPL context. Timeouts wait for reset
 cleanup before returning; failed cleanup blocks reuse and can be retried with
 `reset()` or `endTurn()`. Source-session reset keeps logical tab ownership.
 
-In-process execution cannot preempt a CPU loop that blocks its own event loop,
-and discarding a REPL does not stop arbitrary Node.js promises or timers. Use
-`WorkerJavaScriptSession` when termination is required. Managed input is canceled
-and its releases acknowledged before the source turn finishes. Standalone
+Both public session types enforce active-call budgets outside the evaluator.
+The thread or process kernel can be terminated even during a synchronous or
+post-await CPU loop. Managed input is canceled and its releases acknowledged
+before the source turn finishes. The process supervisor also stops a busy kernel
+on host IPC loss; Node code retains host-user privileges. Standalone
 `createBrowserApi` disposal still ends that API's lifetime and closes unmarked
-created tabs after resource cleanup. User takeover, exclusive claims,
-extension/in-app transports, crash recovery and headful/cross-platform behavior
-remain open.
+created tabs after resource cleanup. User takeover, cross-machine claims,
+broader browser/clipboard host-crash recovery and physical/headful platform
+coverage remain open.
 
 ## Verification
 

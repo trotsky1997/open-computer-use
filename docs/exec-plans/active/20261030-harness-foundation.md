@@ -2768,3 +2768,44 @@ platform skip; macOS ordinary browser and both-platform raw CDP regressions pass
 This log-error state change uses focused installation regression; the full
 headful/MCP pipeline was not rerun. Short-lived pre-attachment startup-log loss,
 complete worker Network diagnostics and broader platform/provider work stay open.
+
+
+## Bounded source-session kernel execution
+
+The [public computer-use guide](https://developers.openai.com/api/docs/guides/tools-computer-use)
+sets the direction for persistent environments, execution limits and cancellation.
+An external owned probe confirmed that the old source VM still blocked after two
+seconds on an 80ms post-await CPU loop. Source sessions now run in a supervised
+Node process; the existing thread controller and internal evaluator are shared.
+The supervisor stays outside evaluated code and kills a busy kernel on host IPC
+loss. Native/browser ownership and execution budgets stay in the parent.
+
+Reset, timeout and kernel failure fence queued calls. Later close supersedes an
+unfinished reset. Memoized termination prevents cleanup retries from signaling a
+retired process group; POSIX group cleanup covers ordinary descendants and abrupt
+supervisor loss. macOS transient signal refusal requires confirmation that no live
+group member remains. Reset starts a failed-turn cleanup retry before recording
+its generation, fixing cancellation of its own retry.
+
+Installer/CLI/package support now includes the supervisor. The delayed AX-reply
+fixture intercepts inside each actual kernel with an owned HTTP gate; the older
+turn fixture asserts current foreign-binding refusal. Both public execution
+boundaries are documented consistently.
+
+Final Node checks: 227/227 macOS, 226/227 Linux (one platform skip). Both-platform
+actual host SIGKILL probes stop busy source kernels/supervisors. Native source and
+relocated-installed CPU fixtures verify accepted trusted-key release, fresh
+variables, retained-tab input recovery and PNG media. Source turn tests cover idle
+bindings, stale callbacks, accepted held-input/viewport release, popup ownership,
+cleanup retry and real MCP turn-ended interruption. AX/output-owner/zoom/clip/
+shadow checks pass source and relocated-installed on both platforms. macOS
+browser/CDP regression and ten modules matching both npm copies pass. The final
+Linux full source-relocated installation passes claims, dialog/navigation/drop
+budgets, raw CDP, iframe input, standalone/managed MCP, headful multi-window, native
+text/HTML/PNG clipboard with GTK interop, profile recovery, lazy startup and
+browser/profile shutdown.
+
+Node code retains host-user privileges. OS sandboxing, Windows process-tree,
+joint host/supervisor crashes, browser/clipboard host-crash recovery and broader
+physical/native work remain open. No new dependency, CI or release is planned for
+this change; full harness parity remains active.

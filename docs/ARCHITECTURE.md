@@ -325,10 +325,10 @@ installation retain their existing artifact requirements.
 Browser console observers are host-owned per Worker/tab and use a persistent CDP
 Runtime connection. Internal browser/logs requests start/read/stop capture. They
 exclude the initial Runtime.enable history replay, retain bounded shallow messages
-across calls/navigation, and close with Worker teardown or tab close. Direct
-in-process REPL sessions await resource disposal during reset/close; run() waits
-for the pending cleanup barrier. Failed cleanup prevents evaluation and can be
-retried by reset.
+across calls/navigation, and close with Worker teardown or tab close. Source
+sessions now run their evaluator in a child process behind a responsive supervisor; thread and process sessions share the parent resource controller.
+Reset/close waits for kernel exit and resource disposal. Failed cleanup prevents
+evaluation and can be retried by reset.
 
 JavaScript dialogs use one shared host CDP Page observer per endpoint/tab, with
 session ownership and observed-dialog identities. Action watch/wait/end requests
@@ -510,11 +510,14 @@ callbacks fail. MCP turn-ended notifications interrupt active execution before
 the normal request queue and establish a cleanup barrier for following calls.
 See [tabs and turn boundaries](browser-tabs.md) for lifecycle and limits.
 
-Worker and in-process sessions now share host request dispatch and ordered
-resource release. Source evaluations carry a resource owner through the existing
-AsyncLocalStorage context. Their run queue fences earlier evaluations at reset
-and turn boundaries; idle contexts retain bindings and interrupted async
-contexts are discarded. CPU loops in ordinary source REPL code still require Worker REPL isolation.
+Thread and process sessions share host request dispatch, serialized execution and
+ordered resource release. The internal REPL evaluator runs in a Worker thread or
+a source-session child process. A source supervisor relays IPC without evaluating
+model code, so host IPC loss can kill a busy evaluator. Host budgets terminate
+synchronous and post-await CPU loops. Reset, timeout, kernel loss and turn
+boundaries fence queued calls; later close/endTurn prevents automatic restart.
+Idle turns retain bindings while interrupted contexts are discarded. Node code
+keeps the host user’s privileges; this execution boundary adds no OS sandbox.
 
 BrowserConsoleLogs owns per-session/tab Runtime and Log observers. Console,
 uncaught exception/unhandled-rejection and browser diagnostic events share bounded retention, level

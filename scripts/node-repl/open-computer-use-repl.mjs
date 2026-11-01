@@ -15,7 +15,7 @@ import {BrowserDrops} from "./browser-drop.mjs";
 import { BrowserViewport } from "./browser-viewport.mjs";
 
 import { AsyncLocalStorage } from "node:async_hooks";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { existsSync, realpathSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -761,7 +761,8 @@ export function createCuaApi(native, activeOutput, onDispose, {tabRequest,platfo
   return Object.freeze(api);
 }
 
-export class PersistentJavaScriptSession {
+// Internal evaluator; public session controllers enforce budgets outside this event loop.
+export class JavaScriptKernel {
   constructor({ native }) {
     this.native = native;
     Object.assign(this,HOST_BROWSER_SERVICES);
@@ -989,8 +990,10 @@ export class WorkerJavaScriptSession {
     this.#start();
   }
 
+  _createKernel() {return new Worker(new URL("./open-computer-use-kernel.mjs", import.meta.url),{execArgv:[]});}
+
   #start() {
-    const worker = new Worker(new URL("./open-computer-use-kernel.mjs", import.meta.url),{execArgv:[]});
+    const worker = this._createKernel();
     this.worker = worker;
     this.#newOwner(worker);
     worker.on("message", message => void this.#onMessage(worker, message));
@@ -1028,9 +1031,10 @@ export class WorkerJavaScriptSession {
 
   async #workerFailed(worker, error) {
     if (this.invalidatedWorkers.has(worker) || this.turnEnding) return;
+    this.turnGeneration++;
     try {
       await this.#stop(worker);
-      if (this.worker === worker) this.#start();
+      if (this.worker === worker && !this.closed && !this.turnEnding && !this.turnEnded) this.#start();
     } catch (cleanupError) { error = new Error(`${asError(error).message}; browser cleanup failed: ${asError(cleanupError).message}`); }
     this.#failWorker(worker, error);
   }
@@ -1048,7 +1052,7 @@ export class WorkerJavaScriptSession {
     }
     if (message.type === "native_request") {
       const owner=this.resourceOwners.get(worker);
-      if(this.turnEnding || message.turnId!==owner.id) {
+      if(this.turnEnding || this.turnEnded || message.turnId!==owner.id) {
         worker.postMessage({type:'native_response',id:message.id,error:'Execution turn ended'});return;
       }
       try {
@@ -1073,15 +1077,21 @@ export class WorkerJavaScriptSession {
     }
   }
 
-  async reset() {
-    if(this.turnEnding) await this.endTurn();
-    const old = this.worker;
-    try {
-      await this.#stop(old);
-      if (this.worker === old) this.#start();
-      this.browserTabs.begin(this);this.turnEnded=false;this.turnBarrier=undefined;this.closed=false;
-    } catch (error) { this.#failWorker(old, error); throw error; }
-    this.#failWorker(old, new Error("JavaScript session reset"));
+  reset() {
+    const ending=this.turnEnding?this.endTurn():undefined;
+    const generation=++this.turnGeneration;
+    const operation=(async()=>{
+      await ending;
+      const old = this.worker;
+      try {
+        await this.#stop(old);
+        if(generation!==this.turnGeneration)throw new Error('JavaScript reset superseded by a later lifecycle boundary');
+        if (this.worker === old) this.#start();
+        this.browserTabs.begin(this);this.turnEnded=false;this.turnBarrier=undefined;this.closed=false;
+      } catch (error) { this.#failWorker(old, error); throw error; }
+      this.#failWorker(old, new Error("JavaScript session reset"));
+    })();
+    this.turnBarrier=operation;operation.catch(()=>{});return operation;
   }
 
   async close() {this.closed=true;if(this.endingTurn) await this.endingTurn;await this.endTurn({final:true});}
@@ -1093,6 +1103,8 @@ export class WorkerJavaScriptSession {
         if(this.closed) throw new Error('JavaScript session closed');
         if(generation!==this.turnGeneration) throw new Error('Execution turn ended');
         await this.turnBarrier;
+        if(this.closed)throw new Error('JavaScript session closed');
+        if(generation!==this.turnGeneration)throw new Error('Execution turn ended');
         if(this.turnEnded) {
           this.browserTabs.begin(this);
           if(this.invalidatedWorkers.has(this.worker)) this.#start();else this.#newOwner(this.worker);
@@ -1112,11 +1124,11 @@ export class WorkerJavaScriptSession {
       const timer = setTimeout(async () => {
         const pending = this.pending.get(id);
         if (!pending || pending.worker !== worker) return;
-        this.pending.delete(id);
+        this.pending.delete(id);this.turnGeneration++;
         let error = `js execution timed out after ${timeoutMs} ms; session reset`;
         try {
           await this.#stop(worker);
-          if (this.worker === worker) this.#start();
+          if (this.worker === worker && !this.closed && !this.turnEnding && !this.turnEnded) this.#start();
         } catch (cleanupError) { error += `; browser cleanup failed: ${asError(cleanupError).message}; session stopped`; }
         resolve({ content: [{ type: "text", text: `Error: ${error}` }], isError: true });
       }, timeoutMs);
@@ -1211,6 +1223,38 @@ export async function runServer({ command, args }) {
   const failedShutdown=error=>{console.error(`Session cleanup failed: ${asError(error).message}`);process.exit(1);};
   for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) process.on(signal, () => { void shutdown().then(()=>process.exit(0),failedShutdown); });
   process.stdin.on("end", () => { void requestQueue.then(shutdown,shutdown).catch(failedShutdown); });
+}
+
+export class PersistentJavaScriptSession extends WorkerJavaScriptSession {
+  _createKernel() {
+    const child=spawn(process.execPath,[fileURLToPath(new URL('./open-computer-use-kernel-supervisor.mjs',import.meta.url))],{stdio:['ignore','ignore','ignore','ipc'],serialization:'advanced',windowsHide:true,detached:process.platform!=='win32'});
+    child.postMessage=message=>child.send(message,error=>{if(error)child.emit('error',error);});
+    const stopGroup=async()=>{
+      if(process.platform==='win32'||!child.pid)return;
+      try{process.kill(-child.pid,'SIGKILL');}catch(error){
+        if(error.code==='ESRCH')return;
+        // macOS can refuse signals while killed group members finish exiting.
+        if(process.platform==='darwin'&&error.code==='EPERM'){
+          for(let attempt=0;attempt<20;attempt++){
+            const live=execFileSync('ps',['-axo','pgid=,stat='],{encoding:'utf8',timeout:1000}).split('\n').some(line=>{const [group,state]=line.trim().split(/\s+/);return Number(group)===child.pid&&state&&!state.startsWith('Z');});
+            if(!live)return;
+            await new Promise(resolve=>setTimeout(resolve,10));
+          }
+        }
+        throw error;
+      }
+    };
+    let termination;
+    child.terminate=()=>termination??=(async()=>{
+      if(!child.pid)return;
+      if(child.exitCode!==null||child.signalCode!==null)return stopGroup();
+      const exited=new Promise(resolve=>child.once('exit',resolve));
+      if(process.platform==='win32'){if(child.connected)child.disconnect();}
+      else await stopGroup();
+      await exited;
+    })();
+    return child;
+  }
 }
 
 export function toolDefinitions() {

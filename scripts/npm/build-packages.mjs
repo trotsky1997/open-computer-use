@@ -466,6 +466,7 @@ function copyInstallerScripts(packageRoot) {
     "browser-playwright.mjs",
     "open-computer-use-repl.mjs",
     "open-computer-use-kernel.mjs",
+    "open-computer-use-kernel-supervisor.mjs",
   ]) {
     cpSync(
       path.join(repoRoot, "scripts", "node-repl", scriptName),
@@ -534,6 +535,8 @@ function copyInstallerScripts(packageRoot) {
     path.join(repoRoot, "scripts", "node-repl", "open-computer-use-kernel.mjs"),
     path.join(packageRoot, "plugins", "open-computer-use", "scripts", "open-computer-use-kernel.mjs")
   );
+
+  cpSync(path.join(repoRoot,"scripts/node-repl/open-computer-use-kernel-supervisor.mjs"),path.join(packageRoot,"plugins/open-computer-use/scripts/open-computer-use-kernel-supervisor.mjs"));
 
   for (const scriptName of [
     "install-claude-mcp.sh",

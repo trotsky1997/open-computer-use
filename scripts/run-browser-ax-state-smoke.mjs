@@ -7,8 +7,8 @@ import {pathToFileURL} from 'node:url';
 import {createServer} from 'node:http';
 const runtime=await import(process.argv[2]?pathToFileURL(path.join(process.argv[2],'scripts/open-computer-use-repl.mjs')).href:'./node-repl/open-computer-use-repl.mjs');
 const binary=process.env.OCU_TEST_CHROME_EXECUTABLE;assert.ok(binary,'Set OCU_TEST_CHROME_EXECUTABLE');
-const scratch=await mkdtemp(path.join(tmpdir(),'ocu-ax-state-')),saved={...process.env},native={async request(){throw Error('Desktop unused');}};let manager;
-const server=createServer((_request,response)=>{response.setHeader('Content-Type','text/html');if(_request.url.startsWith('/scaled-frame')){const name=_request.url.includes('name=Same')?'Same':'Cross';response.end(`<!doctype html><style>body{zoom:${name==='Same'?1.25:.8}}input{position:fixed;left:20px;top:20px;width:40px;height:30px;margin:0}</style><input type="checkbox" aria-label="Scaled ${name}"><output></output><script>for(const type of ['dragenter','dragover','drop'])document.querySelector('input').addEventListener(type,e=>{e.preventDefault();if(type==='drop')document.body.dataset.scaledDrop=JSON.stringify({trusted:e.isTrusted,text:e.dataTransfer.getData('text/plain')});});document.querySelector('input').addEventListener('click',e=>document.querySelector('output').textContent=JSON.stringify({trusted:e.isTrusted,checked:e.target.checked,x:e.clientX,y:e.clientY}));</script>`);return;}response.end(`<title>Owned AX states</title><button onclick="alert('Owned alert')">Alert</button><h1>State fixture</h1><a href="#details">Same document</a><label><input type="checkbox">Remember</label><button disabled>Unavailable</button><button aria-pressed="mixed">Toggle</button><button aria-expanded="false" onclick="this.setAttribute('aria-expanded',this.getAttribute('aria-expanded')!=='true')">Details</button><input aria-label="Required" required readonly aria-invalid="true" aria-describedby="description"><span id="description">Use a valid code</span><select aria-label="Plan"><option>Basic</option><option selected>Pro</option></select>${Array.from({length:45},(_,i)=>`<p>Unchanged context ${i}</p>`).join('')}`);});await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));const url=`http://127.0.0.1:${server.address().port}/`;
+const scratch=await mkdtemp(path.join(tmpdir(),'ocu-ax-state-')),saved={...process.env},native={async request(){throw Error('Desktop unused');}};let manager,heldResolve,release;
+const server=createServer((_request,response)=>{if(_request.url==='/ax-held'){release=()=>response.end('released');heldResolve();return;}response.setHeader('Content-Type','text/html');if(_request.url.startsWith('/scaled-frame')){const name=_request.url.includes('name=Same')?'Same':'Cross';response.end(`<!doctype html><style>body{zoom:${name==='Same'?1.25:.8}}input{position:fixed;left:20px;top:20px;width:40px;height:30px;margin:0}</style><input type="checkbox" aria-label="Scaled ${name}"><output></output><script>for(const type of ['dragenter','dragover','drop'])document.querySelector('input').addEventListener(type,e=>{e.preventDefault();if(type==='drop')document.body.dataset.scaledDrop=JSON.stringify({trusted:e.isTrusted,text:e.dataTransfer.getData('text/plain')});});document.querySelector('input').addEventListener('click',e=>document.querySelector('output').textContent=JSON.stringify({trusted:e.isTrusted,checked:e.target.checked,x:e.clientX,y:e.clientY}));</script>`);return;}response.end(`<title>Owned AX states</title><button onclick="alert('Owned alert')">Alert</button><h1>State fixture</h1><a href="#details">Same document</a><label><input type="checkbox">Remember</label><button disabled>Unavailable</button><button aria-pressed="mixed">Toggle</button><button aria-expanded="false" onclick="this.setAttribute('aria-expanded',this.getAttribute('aria-expanded')!=='true')">Details</button><input aria-label="Required" required readonly aria-invalid="true" aria-describedby="description"><span id="description">Use a valid code</span><select aria-label="Plan"><option>Basic</option><option selected>Pro</option></select>${Array.from({length:45},(_,i)=>`<p>Unchanged context ${i}</p>`).join('')}`);});await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));const url=`http://127.0.0.1:${server.address().port}/`;
 async function run(session,code){const result=await session.run(code,30000);assert.equal(result.isError,false,result.content.at(-1)?.text);return result;}
 function value(result){return JSON.parse(result.content.at(-1).text);}
 function state(result){return result.content.findLast(item=>item.type==='text' && /^Accessibility state|^\s*\[-?\d+\]/m.test(item.text))?.text;}
@@ -54,13 +54,15 @@ try{
    await run(session,'await tab.getAXState();await tab.playwright.getByRole("link",{name:"Same document",exact:true}).click();');assert.doesNotMatch(state(await run(session,'await tab.getAXState();')),/Accessibility state/);
    await run(session,'await tab.getAXState();');await run(session,`await tab.goto(${JSON.stringify(url+'next')});await tab.playwright.waitForLoadState({state:'load'});`);assert.doesNotMatch(state(await run(session,'await tab.getAXState();')),/Accessibility state/);
    // Hold a real AX reply until the next JS call owns dialog response output.
-   if(Session===runtime.PersistentJavaScriptSession){
-    const WebSocket=globalThis.WebSocket;let replyId,replySocket,release,heldResolve;
+   {
     const held=new Promise(resolve=>{heldResolve=resolve;});
-    globalThis.WebSocket=class extends WebSocket{
-     send(payload){const message=JSON.parse(payload);if(message.method==='Accessibility.getFullAXTree' && replyId===undefined){replyId=message.id;replySocket=this;}return super.send(payload);}
-     addEventListener(type,listener,options){return super.addEventListener(type,type==='message'?event=>{const message=JSON.parse(event.data);if(this===replySocket && message.id===replyId && !message.method && !release){release=()=>listener.call(this,event);heldResolve();}else listener.call(this,event);}:listener,options);}
-    };
+    const intercept=`(()=>{const WebSocket=globalThis.WebSocket;let replyId,replySocket,held=false;
+     globalThis.__ocuRestoreAxSocket=()=>{globalThis.WebSocket=WebSocket;delete globalThis.__ocuRestoreAxSocket;};
+     globalThis.WebSocket=class extends WebSocket{
+      send(payload){const message=JSON.parse(payload);if(message.method==='Accessibility.getFullAXTree'&&replyId===undefined){replyId=message.id;replySocket=this;}return super.send(payload);}
+      addEventListener(type,listener,options){return super.addEventListener(type,type==='message'?event=>{const message=JSON.parse(event.data);if(this===replySocket&&message.id===replyId&&!message.method&&!held){held=true;fetch(${JSON.stringify(url+'ax-held')}).then(()=>listener.call(this,event));}else listener.call(this,event);}:listener,options);}
+     };})();`;
+    await run(session,`(await import('node:vm')).runInThisContext(${JSON.stringify(intercept)});`);
     try{
      const id=value(await run(session,'nodeRepl.write(JSON.stringify(tab.id));'));
      const binding=session.run('var rebound=await cua.getTab(tab.id);nodeRepl.write("bound");');
@@ -73,7 +75,7 @@ try{
      release();const resumed=await response;assert.equal(resumed.isError,false,'Initial AX output escaped its original JS call: '+JSON.stringify(resumed.content));await opening;
      assert.doesNotMatch(state(await run(session,'await rebound.getAXState();')),/Accessibility state/);
      console.log(`${Session.name} PASS initial AX delayed-native-reply/dialog response across JS output owners`);
-    }finally{globalThis.WebSocket=WebSocket;release?.();}
+    }finally{release?.();release=undefined;await run(session,"(await import('node:vm')).runInThisContext('globalThis.__ocuRestoreAxSocket?.()');");}
    }
    const id=value(await run(session,'nodeRepl.write(JSON.stringify(tab.id));'));
    await rootEval(session,id,`{const named=document.createElement('form');named.name='host';document.body.append(named);const log=document.createElement('output');log.id='owned-point-events';document.body.append(log);const events=[];

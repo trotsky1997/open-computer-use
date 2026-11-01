@@ -665,7 +665,8 @@ tabs, releases temporary focus and stops the loopback server. Cleanup failure
 retains ownership and prevents session reuse until reset succeeds. Paste-triggered
 dialogs use the existing owned-dialog boundary. Source consumers of createBrowserApi
 must register its `onDispose` callbacks and await them during shutdown, as the
-in-process REPL and smoke scripts do.
+standalone smoke scripts do. Public thread/process sessions own cleanup through
+their parent controller.
 
 `OPEN_COMPUTER_USE_CDP_URL=http://127.0.0.1:9222 node scripts/run-clipboard-smoke.mjs`
 checks real text/HTML/PNG reads and writes, trusted copy/cut/paste, sanitization,
