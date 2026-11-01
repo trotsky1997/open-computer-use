@@ -71,8 +71,8 @@ Runtime, Security and WebAudio domains. Security is limited to enable/disable.
 Browser/Target/Input, global cookie/cache commands, Network cookie-write methods, cookie URL or
 domain overrides, Network.loadNetworkResource and non-HTTP navigation are refused.
 Ordinary Network.enable buffer settings and enableDurableMessages:false remain
-available. Enabling durable messages and Network.configureDurableMessages are
-refused before connecting: renderer-independent response storage can retain old
+available. Enabling durable messages through Network.enable or a non-null
+maxTotalBufferSize in Network.configureDurableMessages is refused before connecting: renderer-independent response storage can retain old
 origin data after navigation. Read response/post bodies before navigating; the
 native fixture confirms old IDs are unavailable after same-site port and
 cross-site origin changes with ordinary Chromium buffering.
@@ -124,3 +124,7 @@ The network fixture verifies refusal of both durable-payload paths before captur
 creation, ordinary request/response metadata, POST and response bodies, same-site
 port changes and cross-site origin invalidation, fresh requests and turn rebind in
 both engines. An optional first argument selects an installed runtime.
+
+Raw Network policy also denies extra HTTP headers, device-bound session controls,
+cookie controls and legacy interception/body-stream commands. The disable form
+`Network.configureDurableMessages({})` remains available.

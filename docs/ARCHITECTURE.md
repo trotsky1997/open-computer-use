@@ -549,7 +549,9 @@ worker-forwarded Log duplicates are excluded.
 BrowserDebugger owns per-turn raw CDP connections, child-session graphs and bounded
 event cursors. It attaches related targets privately, routes explicit child
 selectors and rotates capture history at main-page origin changes. Network
-persistent-payload configuration is rejected before capture creation; regular
+persistent-payload enabling is rejected before capture creation; its disable form
+remains available. Extra HTTP headers, device-bound session controls, cookie
+controls and legacy interception/body-stream commands are also refused. Regular
 request/response/post-body reads retain normal browser buffer behavior.
 Discovery is
 abortable and checked again before dispatch. Cancellation closes pending readers

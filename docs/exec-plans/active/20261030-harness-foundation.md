@@ -2890,3 +2890,39 @@ No dependency or CI added.
 
 Chromium describes renderer-independent durable bodies in the
 [Network protocol](https://github.com/ChromeDevTools/devtools-protocol/blob/master/pdl/domains/Network.pdl).
+
+## Network command-policy refinement scope
+
+Scope: shared facade/host command validator, its existing unit fixture, native
+Network smoke, runtime documentation and packaged runtime verification. Preserve
+ordinary metadata/body reads and durable-message disable calls. Deny the seven
+unsupported Network header/interception/device-session commands observed in the
+installed reference policy. An owned reference page rejects extra HTTP headers;
+a disposable native counterexample carries the injected header across origins.
+The same reference and disposable Chromium accept configureDurableMessages({}).
+Broader domain/parameter policy remains a separate open parity item.
+
+
+### Network command-policy refinement
+
+The shared facade/host validator now rejects extra HTTP headers, device-bound
+session controls, cookie controls and legacy interception/body-stream commands
+(seven Network methods). An owned native counterexample carried an injected
+header across origins; the installed reference policy rejects that header
+command. Reference behavior and disposable Chromium both accept the empty
+configureDurableMessages disable form. The validator now rejects its non-null
+maxTotalBufferSize enabling parameter (including zero), preserves disable calls,
+and uses the native boolean-true rule for Network.enable. Invalid native argument
+types continue to produce protocol errors. Prior blanket configure refusal is
+superseded by this parameter-sensitive rule. No vendor implementation was copied.
+
+Node: 231/231 macOS, 230/231 Linux (one platform skip). Existing unit checks assert
+rejected calls create no debugger entry or transport traffic. Both engines pass
+source and source-relocated installed macOS/Linux Network metadata/body/POST,
+absent injected headers across origins, disable support and turn rebind checks.
+Existing service-worker and console fixtures pass in both installed platforms;
+raw CDP regressions pass on both platforms and ordinary browser regression on
+macOS. Ten installed modules and both npm runtime copies match source. Full
+headful/MCP and Windows checks were not repeated. Broader raw-command/parameter
+policy and OS sandboxing remain open; full harness parity stays active. No new
+dependency or CI was added.

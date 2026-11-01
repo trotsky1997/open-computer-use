@@ -6,7 +6,7 @@ import {pathToFileURL} from 'node:url';
 const {WorkerJavaScriptSession,PersistentJavaScriptSession}=await import(process.argv[2]?pathToFileURL(path.join(process.argv[2],'scripts/open-computer-use-repl.mjs')).href:'./node-repl/open-computer-use-repl.mjs');
 const endpoint=process.env.OPEN_COMPUTER_USE_CDP_URL;assert.ok(endpoint,'Set OPEN_COMPUTER_USE_CDP_URL to disposable Chrome');
 const servers=['A','B'].map(name=>createServer((request,response)=>{
- response.setHeader('Cache-Control','no-store');
+ assert.equal(request.headers['x-owned-probe'],undefined);response.setHeader('Cache-Control','no-store');
  if(request.url==='/data'){
   const chunks=[];request.on('data',chunk=>chunks.push(chunk));request.on('end',()=>{response.setHeader('Content-Type','text/plain; charset=utf-8');response.setHeader('x-fixture-origin',name);response.end(name+':'+Buffer.concat(chunks).toString());});return;
  }
@@ -30,7 +30,9 @@ try{
    await run(`var tab=await cua.createBrowserTab('cdp',${JSON.stringify(origins[0]+'/')},{visible:false});await tab.markHandoff();var cdp=await tab.capabilities.get('cdp');nodeRepl.write(JSON.stringify(tab.id));`);
    for(const options of ['{enableDurableMessages:true}','{enableDurableMessages:true,maxTotalBufferSize:10485760}'])await denied(`await cdp.send('Network.enable',${options});`,/not supported/);
    await denied("await cdp.send('Network.configureDurableMessages',{maxTotalBufferSize:10485760});",/not supported/);
+   for(const method of ['Network.deleteDeviceBoundSession','Network.enableDeviceBoundSessions','Network.getResponseBodyForInterception','Network.setCookieControls','Network.setExtraHTTPHeaders','Network.setRequestInterception','Network.takeResponseBodyForInterceptionAsStream'])await denied(`await cdp.send(${JSON.stringify(method)},{headers:{'X-Owned-Probe':'owned-A'}});`,/not supported/);
    assert.equal(session.browserCdp.owners.has(session.resourceOwners.get(session.worker)),false,'Rejected commands opened a debugger capture');
+   assert.deepEqual(await run('nodeRepl.write(JSON.stringify(await cdp.send("Network.configureDurableMessages",{})));'),{});
    await run('await cdp.send("Network.enable",{maxTotalBufferSize:10485760,maxPostDataSize:1024,enableDurableMessages:false});nodeRepl.write(JSON.stringify(true));');await load('A');
    for(const destination of [origins[1]+'/',origins[0].replace('127.0.0.1','localhost')+'/']){
     await run(`await tab.goto(${JSON.stringify(destination)});nodeRepl.write(JSON.stringify(true));`);
@@ -41,7 +43,7 @@ try{
    await session.endTurn();assert.equal(session.browserCdp.owners.size,0);
    await run(`await cdp.send('Network.enable',{maxPostDataSize:1024});nodeRepl.write(JSON.stringify(true));`);await load('A');
    await run('await tab.close();nodeRepl.write(JSON.stringify(true));');
-   console.log(Session.name+' PASS ordinary Network request/response/post bodies, persistent-mode refusal before attachment, same-site/cross-site origin invalidation and turn rebind');
+   console.log(Session.name+' PASS ordinary Network request/response/post bodies, header/interception/session and persistent-mode refusal before attachment, durable disable, same-site/cross-site origin invalidation and turn rebind');
   }finally{await session.close();}
  }
 }finally{for(const server of servers)server.closeAllConnections();await Promise.all(servers.map(server=>new Promise(resolve=>server.close(resolve))));}

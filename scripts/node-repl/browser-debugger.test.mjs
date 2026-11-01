@@ -9,15 +9,18 @@ function fixture() {
  return {manager,owner:{},sends,setUrl(value){url=value;},get closed(){return closed;}};
 }
 test('CDP validates command, event, child and timeout boundaries before connecting',async()=>{
- for(const method of ['Browser.close','Target.setAutoAttach','Input.dispatchKeyEvent','Network.getAllCookies','Network.configureDurableMessages','Network.setCookies','Security.setIgnoreCertificateErrors','invalid'])assert.throws(()=>cdpCommand(method));
+ for(const method of ['Browser.close','Target.setAutoAttach','Input.dispatchKeyEvent','Network.getAllCookies','Network.setCookies','Security.setIgnoreCertificateErrors','invalid'])assert.throws(()=>cdpCommand(method));
  for(const options of [{limit:0},{limit:1001},{methods:[]},{methods:['invalid']},{afterSequence:-1},{afterSequence:1.1},{target:{sessionId:'x',targetId:'y'}},{target:{}},{timeoutMs:Infinity},{unknown:true}])assert.throws(()=>cdpOptions(options,true));
  assert.throws(()=>cdpCommand('Runtime.evaluate',[]));assert.throws(()=>cdpCommand('Network.getCookies',{urls:['http://elsewhere.test/']}));
  assert.throws(()=>cdpCommand('Page.navigate',{url:'file:///tmp/fixture'}));
  cdpCommand('Runtime.evaluate',{expression:'document.title'});
  assert.throws(()=>cdpCommand('Network.enable',{enableDurableMessages:true}));
  cdpCommand('Network.enable',{maxTotalBufferSize:10485760,enableDurableMessages:false});
+ cdpCommand('Network.configureDurableMessages',{});
+ cdpCommand('Network.configureDurableMessages',{maxResourceBufferSize:1024});
  const {manager,owner,sends}=fixture();
- for(const [method,params] of [['Network.enable',{enableDurableMessages:true}],['Network.configureDurableMessages',{maxTotalBufferSize:10485760}]])await assert.rejects(manager.request(owner,{action:'send',targetId:'tab',method,params}),/not supported/);
+ for(const method of ['Network.deleteDeviceBoundSession','Network.enableDeviceBoundSessions','Network.getResponseBodyForInterception','Network.setCookieControls','Network.setExtraHTTPHeaders','Network.setRequestInterception','Network.takeResponseBodyForInterceptionAsStream'])await assert.rejects(manager.request(owner,{action:'send',targetId:'tab',method}),/not supported/);
+ for(const [method,params] of [['Network.enable',{enableDurableMessages:true}],['Network.configureDurableMessages',{maxTotalBufferSize:10485760}],['Network.configureDurableMessages',{maxTotalBufferSize:0}]])await assert.rejects(manager.request(owner,{action:'send',targetId:'tab',method,params}),/not supported/);
  assert.equal(manager.owners.size,0);assert.deepEqual(sends,[]);
 });
 test('CDP cursors paginate filters, report eviction and rotate on origin change',async()=>{

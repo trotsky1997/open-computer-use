@@ -397,3 +397,28 @@ smoke includes the new Network workflow. Full headful/MCP regression was not
 repeated for this command-policy change. Broader raw-command policy, complete
 network tracing and platform/crash coverage remain open; parity stays active.
 No dependency or CI added.
+
+
+### Network command-policy refinement
+
+The shared facade/host validator now rejects extra HTTP headers, device-bound
+session controls, cookie controls and legacy interception/body-stream commands
+(seven Network methods). An owned native counterexample carried an injected
+header across origins; the installed reference policy rejects that header
+command. Reference behavior and disposable Chromium both accept the empty
+configureDurableMessages disable form. The validator now rejects its non-null
+maxTotalBufferSize enabling parameter (including zero), preserves disable calls,
+and uses the native boolean-true rule for Network.enable. Invalid native argument
+types continue to produce protocol errors. Prior blanket configure refusal is
+superseded by this parameter-sensitive rule. No vendor implementation was copied.
+
+Node: 231/231 macOS, 230/231 Linux (one platform skip). Existing unit checks assert
+rejected calls create no debugger entry or transport traffic. Both engines pass
+source and source-relocated installed macOS/Linux Network metadata/body/POST,
+absent injected headers across origins, disable support and turn rebind checks.
+Existing service-worker and console fixtures pass in both installed platforms;
+raw CDP regressions pass on both platforms and ordinary browser regression on
+macOS. Ten installed modules and both npm runtime copies match source. Full
+headful/MCP and Windows checks were not repeated. Broader raw-command/parameter
+policy and OS sandboxing remain open; full harness parity stays active. No new
+dependency or CI was added.
