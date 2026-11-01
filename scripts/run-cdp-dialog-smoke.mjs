@@ -31,10 +31,13 @@ try{
     await new Promise(resolve=>setTimeout(resolve,750));assert.equal(await run(session,'nodeRepl.write(JSON.stringify(rawDone));'),false);
     await run(session,"await(await tab.getJsDialog()).dismiss();nodeRepl.write(JSON.stringify(true));");assert.equal(await run(session,'nodeRepl.write(JSON.stringify((await rawPending).result.value));'),42);
    }
-   await run(session,`await cdp.send('Page.disable');await cdp.send('Page.disable',{}, {target:{sessionId:${JSON.stringify(child.sessionId)}}});var unobservedDone=false,unobservedError,unobserved=cdp.send('Runtime.evaluate',{expression:"prompt('Unobserved clock');99",returnByValue:true,userGesture:true},{timeoutMs:200}).finally(()=>unobservedDone=true);unobserved.catch(error=>unobservedError=error.message);nodeRepl.write(JSON.stringify(true));`);
+   for(const target of [undefined,{sessionId:child.sessionId}]){
+    const refused=await session.run(`await cdp.send('Page.disable',{},${JSON.stringify(target?{target}:{})});`);assert.equal(refused.isError,true);assert.match(refused.content.at(-1).text,/not supported/);
+   }
+   await run(session,`var protectedDone=false,protectedPending=cdp.send('Runtime.evaluate',{expression:"prompt('Protected clock');99",returnByValue:true,userGesture:true},{timeoutMs:200}).finally(()=>protectedDone=true);protectedPending.catch(()=>{});nodeRepl.write(JSON.stringify(true));`);
    await dialog(session,id);await run(session,'var held=await tab.getJsDialog();nodeRepl.write(JSON.stringify(held.type));');await new Promise(resolve=>setTimeout(resolve,400));
-   const unobserved=await run(session,'nodeRepl.write(JSON.stringify({done:unobservedDone,error:unobservedError}));');assert.equal(unobserved.done,true);assert.match(unobserved.error,/timed out/);
-   await run(session,`await held.dismiss();await cdp.send('Page.enable');await cdp.send('Page.enable',{}, {target:{sessionId:${JSON.stringify(child.sessionId)}}});nodeRepl.write(JSON.stringify(true));`);
+   assert.equal(await run(session,'nodeRepl.write(JSON.stringify(protectedDone));'),false);
+   await run(session,'await held.dismiss();nodeRepl.write(JSON.stringify(true));');assert.equal(await run(session,'nodeRepl.write(JSON.stringify((await protectedPending).result.value));'),99);
    await run(session,`var rawMarker=17,rawPending=cdp.send('Runtime.evaluate',{expression:"prompt('Raw expiry');new Promise(resolve=>setTimeout(()=>resolve(99),1500))",awaitPromise:true,returnByValue:true,userGesture:true},{timeoutMs:200});rawPending.catch(()=>{});nodeRepl.write(JSON.stringify(true));`);
    await dialog(session,id);await run(session,'var claimed=await tab.getJsDialog();nodeRepl.write(JSON.stringify(claimed.type));');await new Promise(resolve=>setTimeout(resolve,400));
    await run(session,'await claimed.dismiss();nodeRepl.write(JSON.stringify(true));');const expired=await session.run('await rawPending;');assert.equal(expired.isError,true);assert.match(expired.content.at(-1).text,/CDP Runtime.evaluate timed out/);assert.equal(await run(session,'nodeRepl.write(JSON.stringify(rawMarker));'),17);
@@ -47,7 +50,7 @@ try{
     const started=performance.now();await session.reset();assert.ok(performance.now()-started<5000,'Reset waited for the handshake deadline');await until(()=>socket.destroyed,'Canceled handshake socket retained');assert.equal(debuggerApi.owners.size,0);
    }finally{debuggerApi.open=original;upgraded=undefined;socket?.destroy();}
    assert.equal(await run(session,`var tab=await cua.getTab(${JSON.stringify(id)});await tab.markHandoff();var cdp=await tab.capabilities.get('cdp');nodeRepl.write(JSON.stringify((await cdp.send('Runtime.evaluate',{expression:'3',returnByValue:true})).result.value));`),3);
-   console.log(`${Session.name} PASS raw root/OOP repeated-dialog clocks, Page stream toggles, protocol results, resumed expiry/context retention, unlimited reset, blocked-handshake cancellation and fresh capture`);
+   console.log(`${Session.name} PASS raw root/OOP repeated-dialog clocks, Page-disable refusal with retained observation, protocol results, resumed expiry/context retention, unlimited reset, blocked-handshake cancellation and fresh capture`);
   }finally{await session.close();}
  }
 }finally{await manager?.close();for(const socket of sockets)socket.destroy();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));await rm(scratch,{recursive:true,force:true});for(const key of ['OPEN_COMPUTER_USE_CDP_URL','OPEN_COMPUTER_USE_BROWSER_EXECUTABLE','OPEN_COMPUTER_USE_BROWSER_MODE']){if(saved[key]===undefined)delete process.env[key];else process.env[key]=saved[key];}}

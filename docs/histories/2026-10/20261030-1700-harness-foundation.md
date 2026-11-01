@@ -3608,3 +3608,41 @@ ordinary-browser/headful/MCP suites were not repeated for these two raw-method
 restrictions. Windows, broader raw authority and Document-response mediation,
 OS sandboxing and the intermittent macOS console issue remain open. No dependency
 or CI added; full harness parity stays active.
+
+
+### Remaining static raw-method policy
+
+Added the remaining 17 installed-reference static/mapped exclusions in supported
+domains: DOM file info/upload; Network legacy continue, certificate and replay;
+Page crash, disable, navigation/history, CSP/ad/download/picker and registration/
+payment controls. Safe owned reference probes confirm the relevant methods;
+no crash/global-download mutation was sent to the reference browser. An executable
+comparison rejects every inspected static/mapped reference exclusion. Dynamic
+URL/header authority and wider parameter/provider rules remain open.
+
+Facade and host reject these methods for root and child selectors before capture
+or transport. Direct tab navigation, Playwright file choosers and download events
+retain trusted native paths. Deleted unreachable disabled-Page stream state;
+root/OOP dialog clocks still pause, expire after resumption and cancel on reset.
+The native dialog fixture now verifies disable refusal leaves observation active.
+Current documentation distinguishes direct tab navigation from raw CDP navigation
+and removes an accidentally duplicated fixture description.
+
+Native verification uncovered two old fixture assumptions. The Network fixture
+now waits for navigation load before reading the next origin; goto acknowledges
+the native command before load. The download fixture now gives its Worker a
+separate owned unclaimed test page instead of trying to borrow a tab still claimed
+by the direct API; it closes that page explicitly. This preserves the intended
+cross-reset download checks without weakening exclusive claims.
+
+Node: 231/231 macOS, 230/231 Linux (one platform skip), with final focused boundary
+checks on both. Source and source-relocated installed Network/static-policy and
+managed root/OOP dialog workflows pass in both engines on macOS/Linux. Existing
+raw CDP regressions pass on both platforms; ordinary browser navigation/filechooser
+regression passes on macOS. Download content, timeout/cancellation, reset/close,
+policy restore outage/retry and chooser-triggered download workflows pass on both
+platforms. Ten installed modules and both npm runtime copies match source. Full
+headful/MCP, console/service-worker and Windows suites were not repeated for this
+policy change. OS sandboxing, dynamic raw authority, Document-response mediation
+and the intermittent macOS console issue remain open; full harness parity stays
+active. No dependency or CI added.

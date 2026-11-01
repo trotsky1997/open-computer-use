@@ -567,7 +567,11 @@ and debugger agents. Source and Worker hosts share this controller. Inner comman
 deadlines preserve REPL bindings; only the actual JS execution-budget timer
 requests a reset. Raw sends retain their protocol Promise/result semantics.
 Command clocks pause across dialogs observed by active Page streams on root or
-attached child sessions; disable/detach/origin rotation retire their source state.
+attached child sessions; detach/origin rotation retire their source state. Raw
+Page.disable, navigation/history, file-info/upload and policy/lifecycle controls
+are refused. Trusted high-level tab/chooser/download paths retain their native
+connections. Disabled-Page bookkeeping was removed because raw clients can no
+longer turn off the host-owned stream.
 Bootstrap and event-read waits retain separate limits. Owner abort reaches the
 WebSocket handshake and pending sends; individual deadline abort removes only
 that response waiter, with late replies ignored. Page script effects require

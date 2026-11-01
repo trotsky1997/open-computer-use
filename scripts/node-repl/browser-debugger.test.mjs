@@ -33,6 +33,7 @@ test('CDP validates command, event, child and timeout boundaries before connecti
  for(const [method,params] of [['Fetch.disable',{}],['Fetch.enable',{}],['Fetch.enable',{patterns:null}],['Fetch.enable',{patterns:[{}]}],['Fetch.enable',{patterns:[{resourceType:'Document'}]}],['Fetch.enable',{patterns:[{resourceType:'Fetch'},null]}]])await assert.rejects(manager.request(owner,{action:'send',targetId:'tab',method,params}),/not supported/);
  cdpCommand('Fetch.enable',{patterns:[]});cdpCommand('Fetch.enable',{patterns:[{resourceType:'Fetch',requestStage:'Response'}]});
  cdpCommand('Fetch.disable',{}, {target:{sessionId:'child'}});cdpCommand('Fetch.enable',{}, {target:{targetId:'frame'}});
+ for(const method of ['DOM.getFileInfo', 'DOM.setFileInputFiles', 'Network.continueInterceptedRequest', 'Network.getCertificate', 'Network.replayXHR', 'Page.crash', 'Page.disable', 'Page.getNavigationHistory', 'Page.resetNavigationHistory', 'Page.navigate', 'Page.navigateToHistoryEntry', 'Page.setAdBlockingEnabled', 'Page.setBypassCSP', 'Page.setDownloadBehavior', 'Page.setInterceptFileChooserDialog', 'Page.setRPHRegistrationMode', 'Page.setSPCTransactionMode']){assert.throws(()=>cdpCommand(method));await assert.rejects(manager.request(owner,{action:'send',targetId:'tab',method}),/not supported/);await assert.rejects(manager.request(owner,{action:'send',targetId:'tab',method,options:{target:{sessionId:'child'}}}),/not supported/);}
  assert.equal(manager.owners.size,0);assert.deepEqual(sends,[]);
 });
 test('CDP cursors paginate filters, report eviction and rotate on origin change',async()=>{
@@ -102,13 +103,13 @@ test('CDP owner cancellation aborts pending connection setup before dispatch',as
  const signal=await started;await manager.cleanup(owner);await canceled;assert.equal(signal.aborted,true);assert.equal(sends.length,0);assert.equal(manager.owners.size,0);
 });
 
-test('CDP dialog clocks retain other sources and clear disabled/detached Page streams',async()=>{
+test('CDP dialog clocks retain observed sources, reject disabling and clear detached streams',async()=>{
  const {manager,owner}=fixture(),entry=await manager.entry(owner,'tab');
  manager.append(entry,{method:'Target.attachedToTarget',params:{sessionId:'child',targetInfo:{targetId:'frame',type:'iframe'}}});
  manager.append(entry,{method:'Page.javascriptDialogOpening'});manager.append(entry,{method:'Page.javascriptDialogOpening',sessionId:'child'});
  manager.append(entry,{method:'Page.javascriptDialogClosed'});assert.equal(entry.dialogs.size,1);
- await manager.request(owner,{action:'send',targetId:'tab',method:'Page.disable',options:{target:{sessionId:'child'}}});assert.equal(entry.dialogs.size,0);
- manager.append(entry,{method:'Page.javascriptDialogOpening',sessionId:'child'});assert.equal(entry.dialogs.size,0);
+ await assert.rejects(manager.request(owner,{action:'send',targetId:'tab',method:'Page.disable',options:{target:{sessionId:'child'}}}),/not supported/);assert.equal(entry.dialogs.size,1);
+ manager.append(entry,{method:'Page.javascriptDialogClosed',sessionId:'child'});assert.equal(entry.dialogs.size,0);
  await manager.request(owner,{action:'send',targetId:'tab',method:'Page.enable',options:{target:{sessionId:'child'}}});manager.append(entry,{method:'Page.javascriptDialogOpening',sessionId:'child'});assert.equal(entry.dialogs.size,1);
  manager.append(entry,{method:'Target.detachedFromTarget',params:{sessionId:'child'}});assert.equal(entry.dialogs.size,0);manager.append(entry,{method:'Page.javascriptDialogOpening',sessionId:'child'});assert.equal(entry.dialogs.size,0);
  await manager.cleanup(owner);

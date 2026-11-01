@@ -1,5 +1,9 @@
 const domains=new Set(['Accessibility','CSS','DOM','DOMDebugger','DOMSnapshot','Debugger','Emulation','Fetch','Log','Network','Overlay','Page','Performance','Profiler','Runtime','Security','WebAudio']);
-const blocked=new Set(['Page.addScriptToEvaluateOnLoad','Page.addScriptToEvaluateOnNewDocument','Network.getAllCookies','Network.clearBrowserCookies','Network.clearBrowserCache','Network.loadNetworkResource','Network.setCookie','Network.setCookies','Network.deleteCookies','Network.deleteDeviceBoundSession','Network.enableDeviceBoundSessions','Network.getResponseBodyForInterception','Network.setCookieControls','Network.setExtraHTTPHeaders','Network.setRequestInterception','Network.takeResponseBodyForInterceptionAsStream']);
+const blocked=new Set([
+ 'DOM.getFileInfo','DOM.setFileInputFiles',
+ 'Network.clearBrowserCache','Network.clearBrowserCookies','Network.continueInterceptedRequest','Network.deleteCookies','Network.deleteDeviceBoundSession','Network.enableDeviceBoundSessions','Network.getAllCookies','Network.getCertificate','Network.getResponseBodyForInterception','Network.loadNetworkResource','Network.replayXHR','Network.setCookie','Network.setCookieControls','Network.setCookies','Network.setExtraHTTPHeaders','Network.setRequestInterception','Network.takeResponseBodyForInterceptionAsStream',
+ 'Page.addScriptToEvaluateOnLoad','Page.addScriptToEvaluateOnNewDocument','Page.crash','Page.disable','Page.getNavigationHistory','Page.navigate','Page.navigateToHistoryEntry','Page.resetNavigationHistory','Page.setAdBlockingEnabled','Page.setBypassCSP','Page.setDownloadBehavior','Page.setInterceptFileChooserDialog','Page.setRPHRegistrationMode','Page.setSPCTransactionMode',
+]);
 const methodName=value=>typeof value==='string' && /^[A-Za-z][A-Za-z0-9]*\.[A-Za-z][A-Za-z0-9]*$/u.test(value);
 const object=value=>value!==null && typeof value==='object' && !Array.isArray(value);
 function target(value) {
@@ -33,22 +37,21 @@ export function cdpCommand(method,params={},options={}) {
  if(!options.target&&method==='Fetch.disable')throw Error('This method is not supported through raw CDP; use Fetch.enable with empty patterns to clear interception');
  if(!options.target&&method==='Fetch.enable'&&(!Array.isArray(params.patterns)||params.patterns.some(pattern=>!object(pattern)||typeof pattern.resourceType!=='string'||pattern.resourceType==='Document')))throw Error('These patterns are not supported through raw CDP; specify explicit non-Document resourceType patterns');
  if(method.startsWith('Network.') && /Cookies?$/u.test(method) && Object.keys(params).some(key=>['url','urls','domain'].includes(key)))throw Error('Use the page-origin cookie command without URL/domain overrides');
- if(method==='Page.navigate' && !/^https?:$/u.test(new URL(params.url).protocol))throw Error('Raw CDP navigation requires HTTP(S)');
 }
 export const CDP_DOCUMENTATION=`Tab capability cdp exposes send(method,params?,{target?,timeoutMs?}) and readEvents({afterSequence?,limit?,methods?,target?,timeoutMs?}). Navigate to HTTP(S) first. target selects an attached child by {sessionId} or {targetId}; omit it for the tab. Read without a cursor to capture the current position, perform an action, then read afterSequence. Continue with each returned cursor while hasMore; truncated reports eviction or a changed page origin. limits are 1...1000. Events carry method, params, sequence and source. Child selectors come from Target.attachedToTarget events, including cross-origin descendants. Buffering is bounded and private to this session/turn. Reset/turn-end/close closes debugger connections and pending reads. A retained facade opens a fresh capture in a later turn. send invalidates higher-level AX/pixel captures; observe again before normal input. Ordinary Network buffering and enableDurableMessages:false are supported. Durable payload retention is unavailable because its data can outlive origin changes; Network.configureDurableMessages accepts only the disable form without maxTotalBufferSize; read response bodies before navigation.
-Command deadlines default to 10s of time outside JavaScript dialogs reported by active Page streams in this capture. Zero leaves only the surrounding execution budget. Store a background send Promise before handling a dialog with tab.getJsDialog(), then await that Promise to obtain its protocol result. Page.disable and child detachment retire that source's paused state; Page.enable restores future observation. Capture bootstrap, event-read waits and dialogs predating observation are outside this command clock. Reset/turn end abort connection setup and pending response waits; timed-out late responses are ignored while the capture remains usable.
-Permitted domains: ${[...domains].join(', ')}. Browser/Target/Input and global cookie/cache commands are unavailable. Target attachment is host-owned. Security only exposes enable/disable. Network cookie writes, cookie controls, device-bound session controls, extra HTTP headers, legacy request interception/body streams, cookie URL/domain overrides and non-HTTP navigation are unavailable. On the tab root, Fetch.enable requires an explicit patterns array with non-Document resourceType on every pattern. Use patterns:[] to clear raw interception; Fetch.disable is unavailable on the root. Attached child targets retain native Fetch enable/disable control. Fetch response commands require structured responseHeaders; binaryResponseHeaders is unavailable. Page.reload cannot inject scriptToEvaluateOnLoad, and Page.createIsolatedWorld cannot grantUniveralAccess:true (the protocol spells it this way). Persistent Page script registration (addScriptToEvaluateOnLoad/addScriptToEvaluateOnNewDocument) is unavailable because hooks survive navigation across origins. Ordinary per-document evaluation, reload and isolated worlds remain available. Other CDP methods return browser protocol errors normally. Raw commands may mutate content, pause execution, intercept requests or change browser state; debugger disconnection does not roll back arbitrary script effects, timers, promises or persistent state. Use higher-level APIs for ordinary interaction. Broader command-policy parity and renderer/crash recovery remain open.`;
+Command deadlines default to 10s of time outside JavaScript dialogs reported by active Page streams in this capture. Zero leaves only the surrounding execution budget. Store a background send Promise before handling a dialog with tab.getJsDialog(), then await that Promise to obtain its protocol result. Page event streams are host-owned; raw Page.disable is unavailable. Child detachment and origin rotation retire their paused state. Capture bootstrap, event-read waits and dialogs predating observation are outside this command clock. Reset/turn end abort connection setup and pending response waits; timed-out late responses are ignored while the capture remains usable.
+Permitted domains: ${[...domains].join(', ')}. Browser/Target/Input and global cookie/cache commands are unavailable. Target attachment is host-owned. Security only exposes enable/disable. Network cookie writes/controls, device-bound sessions, extra HTTP headers, legacy interception/body streams, certificate reads, XHR replay and cookie URL/domain overrides are unavailable. Raw Page navigation/history, crash, event disabling, CSP/ad/download/file-chooser controls and registration/payment modes are unavailable. Use tab.goto/back/forward, file-chooser setFiles and download event APIs. DOM.getFileInfo and DOM.setFileInputFiles are unavailable. On the tab root, Fetch.enable requires an explicit patterns array with non-Document resourceType on every pattern. Use patterns:[] to clear raw interception; Fetch.disable is unavailable on the root. Attached child targets retain native Fetch enable/disable control. Fetch response commands require structured responseHeaders; binaryResponseHeaders is unavailable. Page.reload cannot inject scriptToEvaluateOnLoad, and Page.createIsolatedWorld cannot grantUniveralAccess:true (the protocol spells it this way). Persistent Page script registration (addScriptToEvaluateOnLoad/addScriptToEvaluateOnNewDocument) is unavailable because hooks survive navigation across origins. Ordinary per-document evaluation, reload and isolated worlds remain available. Other CDP methods return browser protocol errors normally. Raw commands may mutate content, pause execution, intercept requests or change browser state; debugger disconnection does not roll back arbitrary script effects, timers, promises or persistent state. Use higher-level APIs for ordinary interaction. Broader command-policy parity and renderer/crash recovery remain open.`;
 
 export class BrowserDebugger {
  constructor(endpoint,open) {this.endpoint=endpoint;this.open=open;this.owners=new Map();this.closedOwners=new WeakSet();this.sequence=0;}
  dialog(entry,sessionId,opened){
   const source=sessionId??'';
-  if(opened&&!entry.disabledPages.has(source))entry.dialogs.add(source);else if(!opened)entry.dialogs.delete(source);
+  if(opened)entry.dialogs.add(source);else entry.dialogs.delete(source);
   for(const command of entry.commands)command.update();
  }
  epoch(entry,url) {
   let origin;try {const parsed=new URL(url);if(['http:','https:'].includes(parsed.protocol))origin=parsed.origin;}catch {}
-  if(entry.origin!==origin) {entry.dialogs.clear();for(const source of entry.disabledPages)if(source)entry.disabledPages.delete(source);for(const command of entry.commands)command.update();entry.epoch=(entry.epoch ?? 0)+1;
+  if(entry.origin!==origin) {entry.dialogs.clear();for(const command of entry.commands)command.update();entry.epoch=(entry.epoch ?? 0)+1;
    for(const [sessionId,child] of entry.children) if(child.attached) {
     child.attached=false;
     void entry.connection?.send('Target.detachFromTarget',{sessionId}).catch(error=>{if(!entry.closed && !error.cdpError)entry.error=error;});
@@ -64,7 +67,7 @@ export class BrowserDebugger {
    entry.children.set(params.sessionId,{targetId:params.targetInfo.targetId,attached:true,parent,epoch:entry.epoch});
    void entry.connection.send('Target.setAutoAttach',{autoAttach:true,waitForDebuggerOnStart:false,flatten:true},10000,params.sessionId).catch(error=>{if(!entry.closed && entry.children.get(params.sessionId)?.attached)entry.error=error;});
   } else if(event.method==='Target.detachedFromTarget') {
-   const child=entry.children.get(params.sessionId);if(child)child.attached=false;entry.disabledPages.delete(params.sessionId);this.dialog(entry,params.sessionId,false);
+   const child=entry.children.get(params.sessionId);if(child)child.attached=false;this.dialog(entry,params.sessionId,false);
   } else if(event.method==='Page.frameNavigated' && !event.sessionId && !params.frame?.parentId) this.epoch(entry,params.frame?.url);
   if(!entry.origin)return;
   const child=event.sessionId && entry.children.get(event.sessionId);
@@ -95,7 +98,7 @@ export class BrowserDebugger {
   let entries=this.owners.get(owner);if(!entries){entries=new Map();this.owners.set(owner,entries);}
   const key=`${endpoint}|${targetId}`;let entry=entries.get(key);
   if(!entry) {
-   entry={endpoint,targetId,events:[],bytes:0,floor:this.sequence,cursor:this.sequence,children:new Map(),waiters:new Set(),commands:new Set(),dialogs:new Set(),disabledPages:new Set(),abort:new AbortController()};entries.set(key,entry);
+   entry={endpoint,targetId,events:[],bytes:0,floor:this.sequence,cursor:this.sequence,children:new Map(),waiters:new Set(),commands:new Set(),dialogs:new Set(),abort:new AbortController()};entries.set(key,entry);
    entry.ready=(async()=>{
     const page=await this.current(endpoint,targetId,entry.abort.signal);if(entry.closed)throw Error('CDP session closed');
     this.epoch(entry,page.url);
@@ -128,8 +131,6 @@ export class BrowserDebugger {
   entry.commands.add(command);command.update();
   try{
    const sessionId=this.session(entry,args.options?.target),result=await entry.connection.send(args.method,args.params??{},0,sessionId,signal);
-   if(args.method==='Page.disable'){entry.disabledPages.add(sessionId??'');this.dialog(entry,sessionId,false);}
-   if(args.method==='Page.enable')entry.disabledPages.delete(sessionId??'');
    return result;
   }
   finally{clearTimeout(timer);entry.commands.delete(command);}

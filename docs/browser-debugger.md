@@ -37,8 +37,8 @@ rolled back. CPU/renderer and host-crash recovery need broader work.
 
 Command deadlines count time outside JavaScript dialogs reported by active
 `Page` event streams in this capture. Multiple root/child sources share the pause;
-`Page.disable` and child detachment retire that source, while `Page.enable`
-restores future observation. Detached late events cannot pause commands again.
+`Page` observation is host-owned and raw `Page.disable` is refused. Child
+detachment and origin rotation retire their source state. Detached late events cannot pause commands again.
 Capture discovery/bootstrap, event-read waits and dialogs predating observation
 remain outside this clock. Other developer capabilities retain their own clocks.
 
@@ -69,7 +69,20 @@ The current policy supports Accessibility, CSS, DOM, DOMDebugger, DOMSnapshot,
 Debugger, Emulation, Fetch, Log, Network, Overlay, Page, Performance, Profiler,
 Runtime, Security and WebAudio domains. Security is limited to enable/disable.
 Browser/Target/Input, global cookie/cache commands, Network cookie-write methods, cookie URL or
-domain overrides, Network.loadNetworkResource and non-HTTP navigation are refused.
+domain overrides and Network.loadNetworkResource are refused. The remaining
+static method exclusions are:
+
+- DOM.getFileInfo and DOM.setFileInputFiles; use the file-chooser API for uploads.
+- Network.continueInterceptedRequest, Network.getCertificate and Network.replayXHR.
+- Page.navigate/navigateToHistoryEntry/getNavigationHistory/resetNavigationHistory;
+  use tab.goto/back/forward for supported navigation.
+- Page.crash, Page.disable, Page.setAdBlockingEnabled, Page.setBypassCSP,
+  Page.setDownloadBehavior, Page.setInterceptFileChooserDialog,
+  Page.setRPHRegistrationMode and Page.setSPCTransactionMode. Download and file
+  selection use the high-level event/chooser APIs.
+
+These restrictions apply to both root and child targets before capture creation.
+Other unsupported domains and previously listed exclusions remain in force.
 Ordinary Network.enable buffer settings and enableDurableMessages:false remain
 available. Enabling durable messages through Network.enable or a non-null
 maxTotalBufferSize in Network.configureDurableMessages is refused before connecting: renderer-independent response storage can retain old
@@ -141,12 +154,11 @@ Headful/native desktop, other browser transports, full command-policy parity,
 shared/service worker edge cases and renderer/host-crash recovery remain open.
 
 The managed dialog controller uses a disposable private Chrome profile. An
-optional first argument selects an installed runtime. The same fixture covers root Fetch scope,
-real OOP-child enable/disable, navigation with typed interception active, empty-
-pattern cleanup and turn-end release of an actual paused request. Both JS hosts cover root
-and out-of-process iframe sequential prompts, protocol return values, Page stream
-toggles, resumed expiry with retained REPL bindings, timeout-zero reset and an
-actual blocked-handshake socket closing before a fresh capture succeeds.
+optional first argument selects an installed runtime. Both JS hosts cover root
+and OOP-iframe sequential prompts, protocol results, Page-disable refusal with
+continued dialog observation, resumed expiry with retained REPL bindings,
+timeout-zero reset and an actual blocked-handshake socket closing before a fresh
+capture succeeds.
 
 The network fixture verifies refusal of both durable-payload paths before capture
 creation, ordinary request/response metadata, POST and response bodies, same-site
@@ -156,7 +168,9 @@ ordinary reload/isolated-world reads, and actual structured-header fulfillment
 and continuation after a rejected binary-header attempt. An optional first
 argument selects an installed runtime. The same fixture covers root Fetch scope,
 real OOP-child enable/disable, navigation with typed interception active, empty-
-pattern cleanup and turn-end release of an actual paused request.
+pattern cleanup, static method refusal before attachment, persistent script
+refusal/absent hooks across origins, and turn-end release of an actual paused
+request.
 
 Raw Network policy also denies extra HTTP headers, device-bound session controls,
 cookie controls and legacy interception/body-stream commands. The disable form

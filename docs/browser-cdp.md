@@ -177,7 +177,7 @@ confirm the original browser has exited. Native confirmation that the target has
 closed also permits retirement. An unidentified/remote browser's lost transport
 can still require external recovery.
 
-Raw navigation reuses tab claims, viewport synchronization and turn-owned tool
+Direct tab navigation reuses tab claims, viewport synchronization and turn-owned tool
 discovery. Admitted actions promote passive observation when a binding is reused
 across turns, allowing a later unclaimed dialog to be dismissed during owner
 cleanup. Confirmed original-browser exit retires its saved dialog state without
@@ -556,7 +556,7 @@ sequential prompts. Readiness and resumed work still have a deadline, and
 retrying an uncertain action. The pinned Playwright public AbortSignal cancels
 expired work; connection/focus cleanup must still acknowledge completion.
 `timeoutMs: 0` disables the action deadline while turn/reset/close cancellation
-remains active. Raw navigation methods use the same active-time budget with host-owned stop/receipt
+remains active. Direct tab navigation methods use the same active-time budget with host-owned stop/receipt
 settlement. Navigation waits use the same dialog active-time policy. Connection setup and
 other raw CDP commands retain their separate policies.
 
@@ -811,7 +811,7 @@ readiness refusal, fresh binding recovery and closed-target isolation in both JS
 hosts. The installed browser-only smoke also runs it after source relocation.
 
 
-Raw navigation regression: run `node scripts/run-navigation-budget-smoke.mjs`
+Direct tab navigation regression: run `node scripts/run-navigation-budget-smoke.mjs`
 with `OCU_TEST_CHROME_EXECUTABLE` pointing to owned Chrome for Testing. Both JS
 hosts verify >10s beforeunload waits, history/reload responses, deferred native
 errors, stalled HTTP deadlines, held stop receipts, failed-stop retention/retry,

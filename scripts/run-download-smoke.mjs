@@ -38,9 +38,10 @@ try {
   assert.equal(await download.path(),file);
   await assert.rejects(tab.playwright.waitForEvent("download",{timeoutMs:100}),/timed out/);
   let workerFile;
+  const workerTab=await (await fetch(new URL(`/json/new?${encodeURIComponent(`http://127.0.0.1:${server.address().port}/`)}`,process.env.OPEN_COMPUTER_USE_CDP_URL),{method:"PUT"})).json();
   const worker=new WorkerJavaScriptSession({native:{async request(){throw new Error("Native not used");}}});
   try {
-    let result=await worker.run(`var t=await cua.getTab(${JSON.stringify(tab.id)}); var p=t.playwright.waitForEvent("download",{timeoutMs:5000}); await t.playwright.getByRole("link",{name:"Fast download"}).click(); var d=await p;`);
+    let result=await worker.run(`var t=await cua.getTab(${JSON.stringify(workerTab.id)}); var p=t.playwright.waitForEvent("download",{timeoutMs:5000}); await t.playwright.getByRole("link",{name:"Fast download"}).click(); var d=await p;`);
     assert.equal(result.isError,false,JSON.stringify(result.content));
     result=await worker.run('nodeRepl.write(await d.path({timeoutMs:5000}));');
     assert.equal(result.isError,false,JSON.stringify(result.content));
@@ -49,13 +50,13 @@ try {
     result=await worker.run('var p=t.playwright.waitForEvent("download",{timeoutMs:5000}); await t.playwright.getByRole("link",{name:"Slow download"}).click(); var d=await p; await d.path({timeoutMs:0});',1500);
     assert.equal(result.isError,true,JSON.stringify(result.content));
     assert.match(result.content.at(-1).text,/timed out/);
-    result=await worker.run(`var t=await cua.getTab(${JSON.stringify(tab.id)}); var p=t.playwright.waitForEvent("download",{timeoutMs:5000}); await t.playwright.getByRole("link",{name:"Fast download"}).click(); var d=await p; nodeRepl.write(await d.path());`);
+    result=await worker.run(`var t=await cua.getTab(${JSON.stringify(workerTab.id)}); var p=t.playwright.waitForEvent("download",{timeoutMs:5000}); await t.playwright.getByRole("link",{name:"Fast download"}).click(); var d=await p; nodeRepl.write(await d.path());`);
     assert.equal(result.isError,false,JSON.stringify(result.content));
     assert.deepEqual(readFileSync(result.content.at(-1).text),payload);
     result=await worker.run('await t.playwright.waitForEvent("download",{timeoutMs:0});',500);
     assert.equal(result.isError,true);
     assert.equal(worker.browserDownloads.active.size,0);
-    result=await worker.run(`var t=await cua.getTab(${JSON.stringify(tab.id)}); var p=t.playwright.waitForEvent("download",{timeoutMs:5000}); var clicking=t.playwright.getByRole("link",{name:"Slow download"}).click(); clicking.catch(()=>{}); var d=await p; nodeRepl.write("began");`);
+    result=await worker.run(`var t=await cua.getTab(${JSON.stringify(workerTab.id)}); var p=t.playwright.waitForEvent("download",{timeoutMs:5000}); var clicking=t.playwright.getByRole("link",{name:"Slow download"}).click(); clicking.catch(()=>{}); var d=await p; nodeRepl.write("began");`);
     assert.equal(result.isError,false,JSON.stringify(result.content));
     assert.equal(result.content.at(-1).text,"began");
     assert.equal(worker.browserDownloads.active.size,1);
@@ -65,7 +66,7 @@ try {
     assert.equal(worker.browserDownloads.active.size,0);
     assert.equal(activeTransfer.ended,true);
     assert.equal(activeTransfer.completed,false);
-    result=await worker.run(`var t=await cua.getTab(${JSON.stringify(tab.id)}); var p=t.playwright.waitForEvent("download",{timeoutMs:5000}); var clicking=t.playwright.getByRole("link",{name:"Slow download"}).click(); clicking.catch(()=>{}); var d=await p;`);
+    result=await worker.run(`var t=await cua.getTab(${JSON.stringify(workerTab.id)}); var p=t.playwright.waitForEvent("download",{timeoutMs:5000}); var clicking=t.playwright.getByRole("link",{name:"Slow download"}).click(); clicking.catch(()=>{}); var d=await p;`);
     assert.equal(result.isError,false,JSON.stringify(result.content));
     const originalSend=worker.browserDownloads.send;
     try {
@@ -86,20 +87,20 @@ try {
         if(method === "Browser.setDownloadBehavior" && params.behavior === "default") throw new Error("Injected background restore outage");
         return normalSend.call(this,record,method,params);
       };
-      result=await worker.run(`var t=await cua.getTab(${JSON.stringify(tab.id)}); var p=t.playwright.waitForEvent("download",{timeoutMs:5000}); await t.playwright.getByRole("link",{name:"Fast download"}).click(); var d=await p; nodeRepl.write(await d.path());`);
+      result=await worker.run(`var t=await cua.getTab(${JSON.stringify(workerTab.id)}); var p=t.playwright.waitForEvent("download",{timeoutMs:5000}); await t.playwright.getByRole("link",{name:"Fast download"}).click(); var d=await p; nodeRepl.write(await d.path());`);
       assert.equal(result.isError,true);
       assert.equal((await worker.run('nodeRepl.write(99)')).isError,true);
       assert.equal(worker.browserDownloads.active.size,1);
     } finally {worker.browserDownloads.send=normalSend;}
     await worker.reset();
     assert.equal(worker.browserDownloads.active.size,0);
-    const waiting=worker.run(`var t=await cua.getTab(${JSON.stringify(tab.id)}); await t.playwright.waitForEvent("download",{timeoutMs:0});`,10000);
+    const waiting=worker.run(`var t=await cua.getTab(${JSON.stringify(workerTab.id)}); await t.playwright.waitForEvent("download",{timeoutMs:0});`,10000);
     for(let i=0;i<100 && worker.browserDownloads.active.size===0;i++) await new Promise(resolve=>setTimeout(resolve,20));
     assert.equal(worker.browserDownloads.active.size,1);
     await worker.close();
     assert.equal((await waiting).isError,true);
     assert.equal(worker.browserDownloads.active.size,0);
-  } finally {await worker.close();}
+  } finally {await worker.close();await fetch(new URL(`/json/close/${workerTab.id}`,process.env.OPEN_COMPUTER_USE_CDP_URL));}
   assert.deepEqual(readFileSync(workerFile),payload);
   const choosing=tab.playwright.waitForEvent("filechooser",{timeoutMs:5000});
   await tab.playwright.getByLabel("Generate file").click();

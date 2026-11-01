@@ -35,6 +35,7 @@ try{
    for(const [method,params] of [['Fetch.continueResponse',{requestId:'absent',binaryResponseHeaders:''}],['Fetch.fulfillRequest',{requestId:'absent',responseCode:200,binaryResponseHeaders:''}],['Page.reload',{scriptToEvaluateOnLoad:''}],['Page.createIsolatedWorld',{frameId:'absent',grantUniveralAccess:true}]])await denied(`await cdp.send(${JSON.stringify(method)},${JSON.stringify(params)});`,/not supported/);
    for(const [method,params] of [['Fetch.disable',{}],['Fetch.enable',{}],['Fetch.enable',{patterns:[{}]}],['Fetch.enable',{patterns:[{resourceType:'Document'}]}]])await denied(`await cdp.send(${JSON.stringify(method)},${JSON.stringify(params)});`,/not supported/);
    for(const method of ['Page.addScriptToEvaluateOnLoad','Page.addScriptToEvaluateOnNewDocument'])await denied(`await cdp.send(${JSON.stringify(method)},{source:'self.__ownedPersistentHook=true'});`,/not supported/);
+   for(const method of ['DOM.getFileInfo', 'DOM.setFileInputFiles', 'Network.continueInterceptedRequest', 'Network.getCertificate', 'Network.replayXHR', 'Page.crash', 'Page.disable', 'Page.getNavigationHistory', 'Page.resetNavigationHistory', 'Page.navigate', 'Page.navigateToHistoryEntry', 'Page.setAdBlockingEnabled', 'Page.setBypassCSP', 'Page.setDownloadBehavior', 'Page.setInterceptFileChooserDialog', 'Page.setRPHRegistrationMode', 'Page.setSPCTransactionMode'])await denied(`await cdp.send(${JSON.stringify(method)},{});`,/not supported/);
    assert.equal(session.browserCdp.owners.has(session.resourceOwners.get(session.worker)),false,'Rejected commands opened a debugger capture');
    assert.deepEqual(await run('nodeRepl.write(JSON.stringify(await cdp.send("Network.configureDurableMessages",{})));'),{});
    await run('await cdp.send("Network.enable",{maxTotalBufferSize:10485760,maxPostDataSize:1024,enableDurableMessages:false});nodeRepl.write(JSON.stringify(true));');
@@ -42,7 +43,7 @@ try{
    assert.deepEqual(await run('var childTarget={target:{sessionId:child.params.sessionId}};await cdp.send("Fetch.enable",{},childTarget);nodeRepl.write(JSON.stringify(await cdp.send("Fetch.disable",{},childTarget)));'),{});
    await load('A');
    for(const destination of [origins[1]+'/',origins[0].replace('127.0.0.1','localhost')+'/']){
-    await run(`await tab.goto(${JSON.stringify(destination)});nodeRepl.write(JSON.stringify(true));`);
+    await run(`await tab.playwright.expectNavigation(()=>tab.goto(${JSON.stringify(destination)}),{url:${JSON.stringify(destination)},waitUntil:'load'});nodeRepl.write(JSON.stringify(true));`);
     assert.equal(await run('nodeRepl.write(JSON.stringify((await cdp.send("Runtime.evaluate",{expression:"self.__ownedPersistentHook===true",returnByValue:true})).result.value));'),false);
     await denied('await cdp.send("Network.getResponseBody",{requestId});',/No resource with given identifier/i);
     await denied('await cdp.send("Network.getRequestPostData",{requestId});',/No (?:resource|post data|data)/i);
@@ -69,7 +70,7 @@ try{
    await until(async()=>await run('nodeRepl.write(JSON.stringify(await tab.playwright.locator("output").innerText()));')==='A:owned post','Turn end did not release paused request');
 
    await run('await tab.close();nodeRepl.write(JSON.stringify(true));');
-   console.log(Session.name+' PASS ordinary Network request/response/post bodies, header/interception/session and persistent-mode refusal before attachment, durable disable, same-site/cross-site origin invalidation and turn rebind; Page/Fetch parameter refusal, ordinary reload/isolated worlds and structured response fulfillment/continuation; root Fetch scope, navigation while enabled, clear and pending-request turn cleanup; persistent Page script refusal and absent hooks across origins');
+   console.log(Session.name+' PASS ordinary Network request/response/post bodies, header/interception/session and persistent-mode refusal before attachment, durable disable, same-site/cross-site origin invalidation and turn rebind; Page/Fetch parameter refusal, ordinary reload/isolated worlds and structured response fulfillment/continuation; root Fetch scope, navigation while enabled, clear and pending-request turn cleanup; persistent Page script refusal and absent hooks across origins; static raw-method policy');
   }finally{await session.close();}
  }
 }finally{for(const server of servers)server.closeAllConnections();await Promise.all(servers.map(server=>new Promise(resolve=>server.close(resolve))));}
