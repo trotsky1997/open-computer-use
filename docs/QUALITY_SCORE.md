@@ -184,3 +184,29 @@ standalone/managed MCP, isolated headful multi-window behavior, text/HTML/PNG
 clipboard and GTK interop, profile recovery, lazy startup and shutdown. Eight
 modules in the actual running Linux installation also matched frozen source
 byte-for-byte. Full harness parity remains active.
+
+
+### Uncaught browser errors and cancelable log startup
+
+Developer logs now include page Runtime.exceptionThrown events: uncaught errors
+and unhandled Promise rejections share existing filters, bounds, timestamps and
+source URLs with console output. Native descriptions supply error/stack text
+without executing page getters. Runtime startup replay stays excluded; owner
+reset also cancels actual blocked discovery and WebSocket handshakes.
+
+The old runtime fails the uncaught-error/rejection fixture. Chrome 158 source
+macOS/Linux and source-relocated installed macOS/Linux both-host checks pass exception
+and console capture, caught-error exclusion, filtering/caps, navigation, cached
+history exclusion, session isolation and reset/timeout/close. Node: 223/223 macOS,
+222/223 Linux (one platform skip); macOS general browser and CDP regressions pass.
+OOP/worker exceptions, network/browser logs, physical/Windows/remote coverage and
+full harness parity remain open. No new dependency or CI.
+
+
+Final frozen-code source-relocated Linux installation pipeline passed: both-host
+console/exception fixtures, tab claims, independent hosts, dialog/navigation/drop
+budgets, raw CDP, AX and native iframe input, standalone/managed MCP, isolated
+headful multi-window behavior, text/HTML/PNG clipboard with GTK interop, profile
+recovery, lazy launch and shutdown. Eight actual running installed Linux modules
+and both npm runtime copies matched current source byte-for-byte. No new runtime
+dependency or CI. The full harness parity goal remains active.

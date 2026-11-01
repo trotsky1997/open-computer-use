@@ -91,6 +91,11 @@ if(process.argv[2]==='codex-plugin-config') { (await import('node:fs')).chmodSyn
   }
   const peer=new JsonLinePeer({command:path.resolve(installed,mcp.command),cwd:installed,env});
   try{await peer.initialize();const result=await peer.request('tools/call',{name:'js',arguments:{code}});assert.equal(result.isError,false,JSON.stringify(result.content));assert.ok(result.content.some(item=>item.text==='Installed browser verified'));console.log('PASS installed plugin launcher MCP real browser flow after source checkout removal');}finally{await peer.close();}
+  const consoleLogs=spawn(process.execPath,[path.join(source,'scripts/run-console-smoke.mjs'),installed],{env,stdio:['ignore','pipe','pipe']});let consoleOutput='';
+  consoleLogs.stdout.on('data',chunk=>{consoleOutput+=chunk;});consoleLogs.stderr.on('data',chunk=>{consoleOutput+=chunk;});
+  await new Promise((resolve,reject)=>{consoleLogs.once('error',reject);consoleLogs.once('exit',code=>code===0?resolve():reject(Error(consoleOutput)));});
+  for(const line of consoleOutput.split('\n').filter(line=>line.includes('PASS')))console.log(line);
+  console.log('PASS installed console and uncaught exception logs after source checkout removal');
   const discovery=spawn(process.execPath,[path.join(source,'scripts/run-webmcp-browser-discovery-smoke.mjs'),installed],{env,stdio:['ignore','pipe','pipe']});
   let discoveryOutput='';discovery.stdout.on('data',chunk=>{discoveryOutput+=chunk;});discovery.stderr.on('data',chunk=>{discoveryOutput+=chunk;});
   await new Promise((resolve,reject)=>{discovery.once('error',reject);discovery.once('exit',code=>code===0?resolve():reject(Error(discoveryOutput)));});

@@ -199,3 +199,19 @@ test('CDP abort owns handshake and lifetime while a canceled command leaves the 
   await assert.rejects(connection.send('Page.enable'),/closed/);
  }finally{for(const socket of sockets)socket.destroy();websockets.close();await new Promise(resolve=>server.close(resolve));}
 });
+
+
+test('log owner cleanup aborts actual stalled discovery and WebSocket handshake',async()=>{
+ const {createServer}=await import('node:http');let observe,mode='discovery';const sockets=new Set();
+ const server=createServer((request,response)=>{if(mode==='discovery'){observe();return;}response.setHeader('Content-Type','application/json');response.end(JSON.stringify([{id:'tab',type:'page',webSocketDebuggerUrl:`ws://127.0.0.1:${server.address().port}/blocked`}]));});
+ server.on('connection',socket=>{sockets.add(socket);socket.on('close',()=>sockets.delete(socket));socket.on('error',()=>{});});
+ server.on('upgrade',(_request,socket)=>{socket.on('end',()=>socket.end());socket.resume();observe();});
+ await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+ try{for(mode of ['discovery','handshake']){
+  const logs=new BrowserConsoleLogs(()=>`http://127.0.0.1:${server.address().port}`),owner={};let timer;
+  const observed=new Promise(resolve=>observe=resolve),started=logs.start(owner,'tab'),rejected=assert.rejects(started,/session closed/);
+  await observed;
+  try{await Promise.race([logs.cleanup(owner),new Promise((_resolve,reject)=>timer=setTimeout(()=>reject(Error(`Log ${mode} cleanup blocked`)),1000))]);await rejected;assert.equal(logs.owners.size,0);await assert.rejects(logs.start(owner,'tab'),/session closed/);}
+  finally{clearTimeout(timer);}
+ }}finally{for(const socket of sockets)socket.destroy();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}
+});

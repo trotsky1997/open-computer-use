@@ -2609,3 +2609,39 @@ standalone/managed MCP, isolated headful multi-window behavior, text/HTML/PNG
 clipboard and GTK interop, profile recovery, lazy startup and shutdown. Eight
 modules in the actual running Linux installation also matched frozen source
 byte-for-byte. Full harness parity remains active.
+
+
+## Browser uncaught exception logs and cancellable observer startup
+
+Extend the existing developer log observer with Runtime.exceptionThrown for
+uncaught page errors and unhandled Promise rejections. Preserve the existing
+level/message/timestamp/url shape, filtering, bounded messages and cached-history
+exclusion. Propagate owner abort through discovery and the native WebSocket
+handshake; replacing a failed capture retires its old startup. Extend the existing
+console smoke across both JS hosts and relocated installed runtimes. Native
+network/browser logs and OOP/worker sources remain explicit follow-up work.
+
+Implemented in BrowserConsoleLogs using Runtime.exceptionThrown and the shared
+native transport's owner signal. Error output uses existing level/message/ISO
+stamp/source URL fields, with Chromium descriptions/stack text and no page getter
+execution. Capture replay remains excluded. Reset cancels in-flight discovery and
+handshakes; replacing a failed observer retires its former startup.
+
+The prior runtime fails the native uncaught-error/rejection fixture. Current
+Chrome 158 macOS/Linux source and relocated-installed macOS/Linux both-host fixtures
+pass console formatting/filters/caps, uncaught Error and TypeError rejection,
+caught-error exclusion, navigation, fresh-buffer replay exclusion, owner isolation
+and reset/timeout/close cleanup. A native-free test holds actual HTTP discovery
+and WebSocket handshakes and verifies owner cleanup completes before their reply.
+Node: 223/223 macOS, 222/223 Linux with one platform skip. macOS generic browser
+and raw CDP regressions pass. OOP/worker exceptions, network/browser logs,
+physical/Windows and full harness parity remain open.
+
+
+Final frozen-code source-relocated Linux installation pipeline passed: both-host
+console/exception fixtures, tab claims, independent hosts, dialog/navigation/drop
+budgets, raw CDP, AX and native iframe input, standalone/managed MCP, isolated
+headful multi-window behavior, text/HTML/PNG clipboard with GTK interop, profile
+recovery, lazy launch and shutdown. Eight actual running installed Linux modules
+and both npm runtime copies matched current source byte-for-byte. No new runtime
+dependency or CI. The full harness parity goal remains active.

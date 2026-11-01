@@ -425,7 +425,7 @@ await tab.playwright.getByRole("button", {name:"Save"}).click();
 nodeRepl.write(await tab.dev.logs({levels:["warn", "error"], limit:20}));
 ```
 
-`dev.logs({filter?, levels?, limit?})` returns chronological console messages with
+`dev.logs({filter?, levels?, limit?})` returns chronological console messages and uncaught JavaScript exceptions with
 `level`, `message`, ISO `timestamp` and a source `url` when Chromium provides one.
 `filter` is a case-sensitive message substring. Levels are `debug`, `info`, `log`,
 `warn` and `error`; `warning` is accepted as an alias for `warn`. An omitted limit
@@ -433,11 +433,16 @@ returns the newest 100 matching entries; a non-negative integer selects the boun
 and zero returns an empty array. Reads do not consume entries. Unknown options,
 invalid levels and invalid bounds fail explicitly.
 
+Uncaught exceptions and unhandled Promise rejections have level `error`; messages
+combine Chromium’s exception text and description, including its supplied stack.
+Entries record what Chromium reports as uncaught at that time. A handler added
+later leaves the retained historical entry intact.
+
 Capture starts during tab binding after Runtime.enable has replayed its cached
-history. Older console history is excluded. The host holds the observer across JS
-calls and main-frame navigation, scoped to the Worker session and tab. Rebinding a
+history. Older console and exception history is excluded. The host holds the observer across JS
+calls and main-frame navigation, scoped to the owning JS session and tab. Rebinding a
 live tab in that session reuses capture. A fresh session starts a fresh buffer.
-Reset, timeout and close release listeners, including pending startup; tab close
+Reset, timeout and close release listeners, including in-flight discovery and WebSocket handshakes; tab close
 also ends capture. An unexpected disconnection makes reads fail explicitly;
 rebinding starts fresh capture. Observers execute no page getters or application
 code: object payloads use Chromium's shallow previews/descriptions and printf
@@ -445,8 +450,8 @@ placeholders are formatted from protocol values.
 
 Retention is bounded to 1,000 entries per session/tab and 16,384 UTF-16 code units per
 rendered message. DOM nodes, object graphs and tables are shallow descriptions. Console
-messages from workers and out-of-process frames, network logs and uncaught
-exception events are outside this implementation. Host process crash recovery
+messages and exceptions from workers and out-of-process frames, and network logs
+are outside this implementation. Host process crash recovery
 and headful/Linux/Windows coverage remain open.
 
 `OPEN_COMPUTER_USE_CDP_URL=http://127.0.0.1:9222 node scripts/run-console-smoke.mjs`
