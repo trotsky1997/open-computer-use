@@ -163,3 +163,24 @@ AX 传输等范围继续待补。
 
 索引点击与拖放的组合祖先检查均限定 ShadowRoot host 上溯，根文档同名表单
 属性下的遮挡拒绝与恢复已在两平台源码/安装版双宿主验证。
+
+
+Raw CDP sends now preserve protocol results while pausing command clocks across
+observed root/child Page dialogs. Stream disable/detach/origin bookkeeping retires
+paused sources; shared native transport cancellation closes pending handshakes
+and removes response waiters without accepting late replies. Chrome 158 source
+macOS/Linux and relocated-installed macOS/Linux both-host controllers pass sequential
+prompts, stream toggles, resumed expiry/context retention, unlimited reset and
+blocked-handshake/fresh-capture recovery. Existing macOS raw CDP and AX output
+regressions pass. Node: 222/222 and 221/222 (one Linux platform skip); eight modules
+match both packed runtime copies. Bootstrap, unobserved/predating dialogs, other
+developer clocks, arbitrary script effects, physical/Windows/remote coverage and
+full command-policy parity remain open.
+
+
+Final frozen-code Linux source-relocated installation pipeline passed, including
+both-host raw dialog clocks, AX output/initial-dialog guards, native iframe input,
+standalone/managed MCP, isolated headful multi-window behavior, text/HTML/PNG
+clipboard and GTK interop, profile recovery, lazy startup and shutdown. Eight
+modules in the actual running Linux installation also matched frozen source
+byte-for-byte. Full harness parity remains active.

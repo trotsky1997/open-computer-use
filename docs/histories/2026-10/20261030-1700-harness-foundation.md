@@ -3250,3 +3250,31 @@ assigned slots/DOM parents/ShadowRoot hosts. The root occlusion fixture now has 
 named host form; frozen-code source and relocated-installed both-host controllers
 pass on macOS/Linux after this final boundary check. Final Node counts remain
 218/218 and 217/218 with one platform-only skip; packed runtime bytes rechecked.
+
+
+### Raw CDP dialog clocks and cancellation
+
+Raw debugger sends retain their protocol Promise/result and count command time
+outside dialogs observed by active root/child Page streams. Successful stream
+disable, child detachment and origin rotation clear retired paused sources;
+late detached events cannot pause commands again. The shared native WebSocket
+transport now propagates capture cancellation through pending handshakes and
+responses, and individual command cancellation removes its waiter while ignoring
+late replies. Page execution effects still need explicit recovery.
+
+The prior debugger module fails the held-dialog fixture. Chrome 158 source
+macOS/Linux and relocated-installed macOS/Linux both-host checks cover root/OOP
+sequential prompts, stream toggles, exact protocol values, resumed expiry with
+retained bindings, unlimited reset, actual blocked-handshake socket closure and
+fresh captures. Existing macOS CDP timeout/termination/pause and AX delayed-output
+and initial-dialog checks pass. Node: 222/222 macOS, 221/222 Linux (one platform
+skip). Eight modules match both packed runtime copies. Documentation records
+background-Promise usage and bootstrap/unobserved-dialog/event-wait limits.
+
+
+Final frozen-code Linux source-relocated installation pipeline passed, including
+both-host raw dialog clocks, AX output/initial-dialog guards, native iframe input,
+standalone/managed MCP, isolated headful multi-window behavior, text/HTML/PNG
+clipboard and GTK interop, profile recovery, lazy startup and shutdown. Eight
+modules in the actual running Linux installation also matched frozen source
+byte-for-byte. Full harness parity remains active.

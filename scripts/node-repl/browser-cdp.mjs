@@ -142,60 +142,59 @@ function editText(operation, text, options) {
 
 const TIMEOUT = 10_000;
 
-export async function openConnection(url, onEvent = () => {}, onClose = () => {}) {
+export async function openConnection(url, onEvent = () => {}, onClose = () => {}, signal) {
+  signal?.throwIfAborted();
   if (typeof WebSocket !== "function") throw new Error("CDP browser support requires Node.js 22 or newer");
-  const socket = new WebSocket(url);
-  const pending = new Map();
-  let nextId = 0;
-  const fail = error => {
-    for (const request of pending.values()) request.reject(error);
-    pending.clear();
-  };
+  const socket = new WebSocket(url),pending = new Map();
+  let nextId = 0,closed=false,openingReject;
+  const fail = error => {for (const request of pending.values()) request.reject(error);pending.clear();};
+  const abort = () => {closed=true;const error=signal.reason;openingReject?.(error);fail(error);socket.close();};
+  const ended = error => {closed=true;signal?.removeEventListener('abort',abort);openingReject?.(error);fail(error);onClose();};
   socket.addEventListener("message", event => {
+    if(closed)return;
     let message;
     try {
       message = JSON.parse(event.data);
       if (!message || typeof message !== "object" || Array.isArray(message)) throw new Error("Invalid CDP message");
-    } catch { fail(new Error("Invalid CDP response")); socket.close(); return; }
+    } catch {closed=true;fail(new Error("Invalid CDP response"));socket.close();return;}
     if (message.method) {
-      try { onEvent(message); }
-      catch (error) { fail(error); socket.close(); onClose(); }
+      try {onEvent(message);}
+      catch (error) {closed=true;fail(error);socket.close();onClose();}
       return;
     }
     const request = pending.get(message.id);
     if (!request) return;
-    pending.delete(message.id);
     if (message.error) request.reject(Object.assign(new Error(message.error.message),{cdpError:true,cdpMethod:request.method}));
     else request.resolve(message.result);
   });
-  socket.addEventListener("close", () => { fail(new Error("Browser connection closed")); onClose(); });
-  socket.addEventListener("error", () => { fail(new Error("Browser connection failed")); onClose(); });
+  socket.addEventListener("close", () => ended(new Error("Browser connection closed")));
+  socket.addEventListener("error", () => ended(new Error("Browser connection failed")));
+  signal?.addEventListener('abort',abort,{once:true});
   let timer;
   try {
     await new Promise((resolve, reject) => {
+      openingReject=reject;
+      if(signal?.aborted){reject(signal.reason);return;}
       timer = setTimeout(() => reject(new Error("Browser connection timed out")), TIMEOUT);
       socket.addEventListener("open", resolve, { once: true });
-      socket.addEventListener("error", () => reject(new Error("Browser connection failed")), { once: true });
     });
-    clearTimeout(timer);
-    const send = (method, params = {}, timeoutMs = TIMEOUT, sessionId) => new Promise((resolve, reject) => {
-      if (socket.readyState !== WebSocket.OPEN) { reject(new Error("Browser connection closed")); return; }
-      const id = ++nextId;
-      const timeout = timeoutMs === 0 ? undefined : setTimeout(() => { pending.delete(id); reject(new Error(`CDP ${method} timed out`)); }, timeoutMs);
-      pending.set(id, {
-        method,
-        resolve: value => { clearTimeout(timeout); resolve(value); },
-        reject: error => { clearTimeout(timeout); reject(error); },
-      });
-      try { socket.send(JSON.stringify({ id, method, params, ...(sessionId ? {sessionId} : {}) })); }
-      catch (error) { pending.delete(id); clearTimeout(timeout); reject(error); }
+    openingReject=undefined;clearTimeout(timer);signal?.throwIfAborted();
+    const send = (method, params = {}, timeoutMs = TIMEOUT, sessionId, requestSignal) => new Promise((resolve, reject) => {
+      requestSignal?.throwIfAborted();
+      if (closed || socket.readyState !== WebSocket.OPEN) {reject(new Error("Browser connection closed"));return;}
+      const id = ++nextId;let timeout,settled=false;
+      const finish=(ok,value)=>{if(settled)return;settled=true;pending.delete(id);clearTimeout(timeout);requestSignal?.removeEventListener('abort',canceled);ok?resolve(value):reject(value);};
+      const canceled=()=>finish(false,requestSignal.reason);
+      pending.set(id,{method,resolve:value=>finish(true,value),reject:error=>finish(false,error)});
+      requestSignal?.addEventListener('abort',canceled,{once:true});
+      if(requestSignal?.aborted){canceled();return;}
+      if(timeoutMs!==0)timeout=setTimeout(()=>finish(false,new Error(`CDP ${method} timed out`)),timeoutMs);
+      try {socket.send(JSON.stringify({id,method,params,...(sessionId?{sessionId}:{})}));}
+      catch (error) {finish(false,error);}
     });
-    return {send, close() { fail(new Error("Browser operation ended")); socket.close(); }};
+    return {send,close(){closed=true;signal?.removeEventListener('abort',abort);fail(new Error("Browser operation ended"));socket.close();}};
   } catch (error) {
-    clearTimeout(timer);
-    fail(error);
-    socket.close();
-    throw error;
+    closed=true;openingReject=undefined;clearTimeout(timer);signal?.removeEventListener('abort',abort);fail(error);socket.close();throw error;
   }
 }
 

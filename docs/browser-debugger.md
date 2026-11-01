@@ -35,6 +35,25 @@ not imply cancellation of page execution. `Runtime.terminateExecution` can stop
 an explicitly started running script; arbitrary effects/promises/timers are not
 rolled back. CPU/renderer and host-crash recovery need broader work.
 
+Command deadlines count time outside JavaScript dialogs reported by active
+`Page` event streams in this capture. Multiple root/child sources share the pause;
+`Page.disable` and child detachment retire that source, while `Page.enable`
+restores future observation. Detached late events cannot pause commands again.
+Capture discovery/bootstrap, event-read waits and dialogs predating observation
+remain outside this clock. Other developer capabilities retain their own clocks.
+
+Keep a raw command Promise when its script can open a dialog, then respond in a
+later JS call and await the stored Promise for its protocol result:
+
+```javascript
+// First JS call; retain bindings across calls.
+var pending = cdp.send("Runtime.evaluate", {expression:'prompt("Continue?")'});
+// Later JS call, after the dialog opens.
+var dialog = await tab.getJsDialog();
+await dialog.accept("yes");
+var protocolResult = await pending;
+```
+
 `readEvents({afterSequence?,limit?,methods?,target?,timeoutMs?})` returns
 `{cursor,events,hasMore,truncated}`. Each event includes method, optional params,
 sequence and source targetId, plus sessionId for child sources. Omitting a cursor
@@ -60,6 +79,9 @@ timeout and close cancel discovery and close captures. Retained facades open fre
 captures next turn. Debugger pause release on disconnect has real Chrome evidence.
 Connection loss requires reset/reconnection instead of silently reusing old
 history. A discovery request canceled before dispatch cannot send a late command.
+Owner cancellation also aborts an unfinished WebSocket handshake. A command
+timeout removes its response waiter and ignores a late reply while leaving the
+capture usable; arbitrary page execution can continue until explicit recovery.
 
 Raw CDP is trusted developer access and can mutate DOM, change/intercept requests,
 pause execution or alter persistent browser/page state. It does not provide a
@@ -74,6 +96,7 @@ remain privileged.
 ```sh
 node --test scripts/node-repl/*.test.mjs
 OPEN_COMPUTER_USE_CDP_URL=http://127.0.0.1:9222 node scripts/run-cdp-smoke.mjs
+OCU_TEST_CHROME_EXECUTABLE=/path/to/chrome node scripts/run-cdp-dialog-smoke.mjs
 ```
 
 Use disposable Chrome with site isolation enabled. The live smoke covers source
@@ -83,3 +106,9 @@ origin changes, command-timeout recovery, paused-page release and turn/reset
 cleanup. Source/Worker turn and native-free CLI/MCP regression smokes also run.
 Headful/native desktop, other browser transports, full command-policy parity,
 shared/service worker edge cases and renderer/host-crash recovery remain open.
+
+The managed dialog controller uses a disposable private Chrome profile. An
+optional first argument selects an installed runtime. Both JS hosts cover root
+and out-of-process iframe sequential prompts, protocol return values, Page stream
+toggles, resumed expiry with retained REPL bindings, timeout-zero reset and an
+actual blocked-handshake socket closing before a fresh capture succeeds.

@@ -59,3 +59,35 @@ for(const Session of [PersistentJavaScriptSession,WorkerJavaScriptSession]) test
   const result=await session.run('nodeRepl.write(marker)');assert.equal(result.isError,false);assert.equal(result.content.at(-1).text,'7');
  }finally{await session.close();}
 });
+
+test('CDP command deadlines pause on observed dialogs, resume remaining time and cancel unlimited requests',async()=>{
+ const {manager,owner}=fixture(),entry=await manager.entry(owner,'tab');let entered;
+ entry.connection.send=(_method,_params,nativeTimeout,_session,signal)=>new Promise((resolve,reject)=>{assert.equal(nativeTimeout,0);signal.addEventListener('abort',()=>reject(signal.reason),{once:true});entered({resolve,signal});});
+ let started=new Promise(resolve=>entered=resolve);
+ const pending=manager.request(owner,{action:'send',targetId:'tab',method:'Runtime.evaluate',options:{timeoutMs:60}}),failed=assert.rejects(pending,/timed out/);
+ const wire=await started;manager.append(entry,{method:'Page.javascriptDialogOpening',params:{}});
+ await new Promise(resolve=>setTimeout(resolve,100));assert.equal(wire.signal.aborted,false);
+ manager.append(entry,{method:'Page.javascriptDialogClosed',params:{}});await failed;assert.equal(entry.commands.size,0);
+ started=new Promise(resolve=>entered=resolve);
+ const unlimited=manager.request(owner,{action:'send',targetId:'tab',method:'Runtime.evaluate',options:{timeoutMs:0}}),canceled=assert.rejects(unlimited,/abort|closed/i);
+ await started;manager.append(entry,{method:'Page.javascriptDialogOpening',params:{}});await manager.cleanup(owner);await canceled;assert.equal(entry.commands.size,0);assert.equal(manager.owners.size,0);
+});
+
+test('CDP owner cancellation aborts pending connection setup before dispatch',async()=>{
+ const {manager,owner,sends}=fixture();let enter;const started=new Promise(resolve=>enter=resolve);
+ manager.open=(_url,_event,_closed,signal)=>new Promise((_resolve,reject)=>{enter(signal);signal.addEventListener('abort',()=>reject(signal.reason),{once:true});});
+ const pending=manager.request(owner,{action:'send',targetId:'tab',method:'Runtime.evaluate'}),canceled=assert.rejects(pending,/abort|closed/i);
+ const signal=await started;await manager.cleanup(owner);await canceled;assert.equal(signal.aborted,true);assert.equal(sends.length,0);assert.equal(manager.owners.size,0);
+});
+
+test('CDP dialog clocks retain other sources and clear disabled/detached Page streams',async()=>{
+ const {manager,owner}=fixture(),entry=await manager.entry(owner,'tab');
+ manager.append(entry,{method:'Target.attachedToTarget',params:{sessionId:'child',targetInfo:{targetId:'frame',type:'iframe'}}});
+ manager.append(entry,{method:'Page.javascriptDialogOpening'});manager.append(entry,{method:'Page.javascriptDialogOpening',sessionId:'child'});
+ manager.append(entry,{method:'Page.javascriptDialogClosed'});assert.equal(entry.dialogs.size,1);
+ await manager.request(owner,{action:'send',targetId:'tab',method:'Page.disable',options:{target:{sessionId:'child'}}});assert.equal(entry.dialogs.size,0);
+ manager.append(entry,{method:'Page.javascriptDialogOpening',sessionId:'child'});assert.equal(entry.dialogs.size,0);
+ await manager.request(owner,{action:'send',targetId:'tab',method:'Page.enable',options:{target:{sessionId:'child'}}});manager.append(entry,{method:'Page.javascriptDialogOpening',sessionId:'child'});assert.equal(entry.dialogs.size,1);
+ manager.append(entry,{method:'Target.detachedFromTarget',params:{sessionId:'child'}});assert.equal(entry.dialogs.size,0);manager.append(entry,{method:'Page.javascriptDialogOpening',sessionId:'child'});assert.equal(entry.dialogs.size,0);
+ await manager.cleanup(owner);
+});

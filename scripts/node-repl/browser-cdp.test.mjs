@@ -180,3 +180,22 @@ test('Playwright readiness checks only block live pending dialog observers',asyn
   targets={};await assert.rejects(dialogs.request(owner,{action:'checkPlaywright',targetId:'own'}),/Invalid browser target list/);
  }finally{server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}
 });
+
+test('CDP abort owns handshake and lifetime while a canceled command leaves the capture usable',async()=>{
+ const {createServer}=await import('node:http'),{once}=await import('node:events'),{wsServer}=await import('playwright-core/lib/utilsBundle');
+ const server=createServer(),websockets=new wsServer({noServer:true}),sockets=new Set();let blocked,peer;
+ server.on('upgrade',(request,socket,head)=>{socket.on('error',()=>{});sockets.add(socket);socket.on('close',()=>sockets.delete(socket));socket.on('end',()=>socket.end());socket.resume();if(request.url==='/blocked'){blocked=socket;return;}websockets.handleUpgrade(request,socket,head,client=>peer=client);});
+ await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));const url=`ws://127.0.0.1:${server.address().port}`;
+ try{
+  const before=new AbortController();before.abort(Error('pre-aborted'));await assert.rejects(openConnection(url,undefined,undefined,before.signal),/pre-aborted/);assert.equal(sockets.size,0);
+  const opening=new AbortController(),pending=openConnection(url+'/blocked',undefined,undefined,opening.signal),failed=assert.rejects(pending,/opening canceled/);
+  const deadline=Date.now()+2000;while(!blocked){assert.ok(Date.now()<deadline,'Handshake not observed');await new Promise(resolve=>setTimeout(resolve,5));}
+  const disconnected=once(blocked,'close',{signal:AbortSignal.timeout(2000)});opening.abort(Error('opening canceled'));await failed;await disconnected;assert.equal(blocked.destroyed,true);
+  const owner=new AbortController(),connection=await openConnection(url,undefined,undefined,owner.signal),command=new AbortController();
+  let received=once(peer,'message');const canceled=connection.send('Runtime.evaluate',{},0,undefined,command.signal);let [payload]=await received;const first=JSON.parse(payload);command.abort(Error('command canceled'));await assert.rejects(canceled,/command canceled/);
+  peer.send(JSON.stringify({id:first.id,result:{late:true}}));assert.equal(peer.readyState,1);
+  received=once(peer,'message');const next=connection.send('Runtime.evaluate',{},0);[payload]=await received;peer.send(JSON.stringify({id:JSON.parse(payload).id,result:{value:7}}));assert.deepEqual(await next,{value:7});
+  received=once(peer,'message');const held=connection.send('Runtime.evaluate',{},0);await received;const closed=once(peer,'close',{signal:AbortSignal.timeout(2000)});owner.abort(Error('owner canceled'));await assert.rejects(held,/owner canceled/);await closed;
+  await assert.rejects(connection.send('Page.enable'),/closed/);
+ }finally{for(const socket of sockets)socket.destroy();websockets.close();await new Promise(resolve=>server.close(resolve));}
+});

@@ -2571,3 +2571,41 @@ parents and only ShadowRoot hosts. Named-document properties cannot extend this
 walk. Both-host source/installed controllers on both platforms pass the root
 named-form occlusion/refusal/recovery fixture with the final code. Node remains
 218/218 and 217/218 (one skip); seven modules in both packed runtimes rechecked.
+
+
+## Raw CDP cancellation and observed-dialog command deadlines
+
+Preserve raw protocol result semantics and explicit background promises for
+commands that can open dialogs. Add abortable connection setup/lifetime and
+per-request transport cancellation, then count command deadlines only outside
+dialogs captured by that debugger connection. Owner reset closes pending setup
+and requests without late dispatch; command abort removes its response waiter
+while keeping the capture usable. Native script effects still require explicit
+termination/recovery. Keep event-read wait semantics and bootstrap/predating-
+capture limitations explicit. Verify root/child dialogs, resumed expiry,
+timeout-zero reset and normal raw debugger recovery in both JS hosts.
+
+Implemented using the existing native WebSocket transport. Per-command abort
+settles and removes the waiter/timer/listener once; owner abort reaches connection
+setup and lifetime. Active Page dialog sources pause a monotonic remaining-time
+clock, with Page disable/enable, detach and origin-change bookkeeping. Detached
+late openings cannot re-pause commands. Raw sends still return protocol results;
+a background Promise lets later JS calls respond through the ordinary dialog API.
+
+The old debugger module fails the native held-dialog counterfactual. Current
+macOS/Linux Chrome 158 source hosts and source-relocated installed macOS/Linux hosts
+pass root/OOP repeated dialogs, stream toggles, resumed expiry/context retention,
+unlimited reset and actual blocked-handshake socket closure/fresh capture.
+Existing macOS raw CDP timeout/termination/pause and AX delayed-output/initial-
+dialog regressions pass. Node: 222/222 macOS, 221/222 Linux with one platform skip.
+Eight production modules match both npm runtime copies byte-for-byte. No new
+production dependency or CI. Bootstrap, pre-observation dialogs, other capability
+clocks, arbitrary page effects and broader physical/Windows/remote work stay open.
+
+
+Final frozen-code Linux source-relocated installation pipeline passed, including
+both-host raw dialog clocks, AX output/initial-dialog guards, native iframe input,
+standalone/managed MCP, isolated headful multi-window behavior, text/HTML/PNG
+clipboard and GTK interop, profile recovery, lazy startup and shutdown. Eight
+modules in the actual running Linux installation also matched frozen source
+byte-for-byte. Full harness parity remains active.

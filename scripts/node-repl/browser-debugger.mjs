@@ -31,13 +31,19 @@ export function cdpCommand(method,params={},options={}) {
  if(method==='Page.navigate' && !/^https?:$/u.test(new URL(params.url).protocol))throw Error('Raw CDP navigation requires HTTP(S)');
 }
 export const CDP_DOCUMENTATION=`Tab capability cdp exposes send(method,params?,{target?,timeoutMs?}) and readEvents({afterSequence?,limit?,methods?,target?,timeoutMs?}). Navigate to HTTP(S) first. target selects an attached child by {sessionId} or {targetId}; omit it for the tab. Read without a cursor to capture the current position, perform an action, then read afterSequence. Continue with each returned cursor while hasMore; truncated reports eviction or a changed page origin. limits are 1...1000. Events carry method, params, sequence and source. Child selectors come from Target.attachedToTarget events, including cross-origin descendants. Buffering is bounded and private to this session/turn. Reset/turn-end/close closes debugger connections and pending reads. A retained facade opens a fresh capture in a later turn. send invalidates higher-level AX/pixel captures; observe again before normal input.
+Command deadlines default to 10s of time outside JavaScript dialogs reported by active Page streams in this capture. Zero leaves only the surrounding execution budget. Store a background send Promise before handling a dialog with tab.getJsDialog(), then await that Promise to obtain its protocol result. Page.disable and child detachment retire that source's paused state; Page.enable restores future observation. Capture bootstrap, event-read waits and dialogs predating observation are outside this command clock. Reset/turn end abort connection setup and pending response waits; timed-out late responses are ignored while the capture remains usable.
 Permitted domains: ${[...domains].join(', ')}. Browser/Target/Input and global cookie/cache commands are unavailable. Target attachment is host-owned. Security only exposes enable/disable. Network cookie-write methods and cookie URL/domain overrides and non-HTTP navigation are unavailable. Other CDP methods return browser protocol errors normally. Raw commands may mutate content, pause execution, intercept requests or change browser state; debugger disconnection does not roll back arbitrary script effects, timers, promises or persistent state. Use higher-level APIs for ordinary interaction. Broader command-policy parity and renderer/crash recovery remain open.`;
 
 export class BrowserDebugger {
  constructor(endpoint,open) {this.endpoint=endpoint;this.open=open;this.owners=new Map();this.closedOwners=new WeakSet();this.sequence=0;}
+ dialog(entry,sessionId,opened){
+  const source=sessionId??'';
+  if(opened&&!entry.disabledPages.has(source))entry.dialogs.add(source);else if(!opened)entry.dialogs.delete(source);
+  for(const command of entry.commands)command.update();
+ }
  epoch(entry,url) {
   let origin;try {const parsed=new URL(url);if(['http:','https:'].includes(parsed.protocol))origin=parsed.origin;}catch {}
-  if(entry.origin!==origin) {entry.epoch=(entry.epoch ?? 0)+1;
+  if(entry.origin!==origin) {entry.dialogs.clear();for(const source of entry.disabledPages)if(source)entry.disabledPages.delete(source);for(const command of entry.commands)command.update();entry.epoch=(entry.epoch ?? 0)+1;
    for(const [sessionId,child] of entry.children) if(child.attached) {
     child.attached=false;
     void entry.connection?.send('Target.detachFromTarget',{sessionId}).catch(error=>{if(!entry.closed && !error.cdpError)entry.error=error;});
@@ -53,11 +59,12 @@ export class BrowserDebugger {
    entry.children.set(params.sessionId,{targetId:params.targetInfo.targetId,attached:true,parent,epoch:entry.epoch});
    void entry.connection.send('Target.setAutoAttach',{autoAttach:true,waitForDebuggerOnStart:false,flatten:true},10000,params.sessionId).catch(error=>{if(!entry.closed && entry.children.get(params.sessionId)?.attached)entry.error=error;});
   } else if(event.method==='Target.detachedFromTarget') {
-   const child=entry.children.get(params.sessionId);if(child)child.attached=false;
+   const child=entry.children.get(params.sessionId);if(child)child.attached=false;entry.disabledPages.delete(params.sessionId);this.dialog(entry,params.sessionId,false);
   } else if(event.method==='Page.frameNavigated' && !event.sessionId && !params.frame?.parentId) this.epoch(entry,params.frame?.url);
   if(!entry.origin)return;
   const child=event.sessionId && entry.children.get(event.sessionId);
   if(event.sessionId && (!child || child.epoch!==entry.epoch))return;
+  if(['Page.javascriptDialogOpening','Page.javascriptDialogClosed'].includes(event.method)&&(!event.sessionId||child.attached))this.dialog(entry,event.sessionId,event.method==='Page.javascriptDialogOpening');
   const item={method:event.method,...(event.params?{params:event.params}:{}),sequence:++this.sequence,source:{targetId:child?.targetId ?? entry.targetId,...(event.sessionId?{sessionId:event.sessionId}:{})}};
   const size=Buffer.byteLength(JSON.stringify(item));entry.cursor=item.sequence;
   if(size>8*1024*1024) {entry.events=[];entry.bytes=0;entry.floor=item.sequence;}
@@ -83,11 +90,11 @@ export class BrowserDebugger {
   let entries=this.owners.get(owner);if(!entries){entries=new Map();this.owners.set(owner,entries);}
   const key=`${endpoint}|${targetId}`;let entry=entries.get(key);
   if(!entry) {
-   entry={endpoint,targetId,events:[],bytes:0,floor:this.sequence,cursor:this.sequence,children:new Map(),waiters:new Set(),abort:new AbortController()};entries.set(key,entry);
+   entry={endpoint,targetId,events:[],bytes:0,floor:this.sequence,cursor:this.sequence,children:new Map(),waiters:new Set(),commands:new Set(),dialogs:new Set(),disabledPages:new Set(),abort:new AbortController()};entries.set(key,entry);
    entry.ready=(async()=>{
     const page=await this.current(endpoint,targetId,entry.abort.signal);if(entry.closed)throw Error('CDP session closed');
     this.epoch(entry,page.url);
-    entry.connection=await this.open(page.webSocketDebuggerUrl,event=>this.append(entry,event),()=>{if(!entry.closed){entry.error=Error('Debugger connection closed; reset the session to reconnect');for(const notify of entry.waiters)notify();}});
+    entry.connection=await this.open(page.webSocketDebuggerUrl,event=>this.append(entry,event),()=>{if(!entry.closed){entry.error=Error('Debugger connection closed; reset the session to reconnect');for(const notify of entry.waiters)notify();}},entry.abort.signal);
     if(entry.closed){entry.connection.close();throw Error('CDP session closed');}
     await entry.connection.send('Page.enable');
     await entry.connection.send('Target.setAutoAttach',{autoAttach:true,waitForDebuggerOnStart:false,flatten:true});
@@ -106,12 +113,28 @@ export class BrowserDebugger {
   if(!match)throw Error('Unknown or detached CDP child target');
   return match[0];
  }
+ async command(entry,args){
+  const limit=timeout(args.options?.timeoutMs,10000),control=new AbortController(),signal=AbortSignal.any([control.signal,entry.abort.signal]);
+  let remaining=limit,started,timer;
+  const command={update:()=>{
+   clearTimeout(timer);if(started!==undefined)remaining-=performance.now()-started;started=undefined;
+   if(limit&&!entry.dialogs.size&&!signal.aborted){started=performance.now();timer=setTimeout(()=>control.abort(Error(`CDP ${args.method} timed out`)),Math.max(0,remaining));}
+  }};
+  entry.commands.add(command);command.update();
+  try{
+   const sessionId=this.session(entry,args.options?.target),result=await entry.connection.send(args.method,args.params??{},0,sessionId,signal);
+   if(args.method==='Page.disable'){entry.disabledPages.add(sessionId??'');this.dialog(entry,sessionId,false);}
+   if(args.method==='Page.enable')entry.disabledPages.delete(sessionId??'');
+   return result;
+  }
+  finally{clearTimeout(timer);entry.commands.delete(command);}
+ }
  async request(owner,args) {
   if(args?.action==='send')cdpCommand(args.method,args.params,args.options);
   else if(args?.action==='events')cdpOptions(args.options,true);
   else throw Error('Unknown CDP capability action');
   const entry=await this.entry(owner,args.targetId);
-  if(args.action==='send')return entry.connection.send(args.method,args.params ?? {},timeout(args.options?.timeoutMs,10000),this.session(entry,args.options?.target));
+  if(args.action==='send')return this.command(entry,args);
   const options=args.options ?? {},after=options.afterSequence ?? entry.cursor,limit=options.limit ?? 1000,deadline=Date.now()+timeout(options.timeoutMs,0);
   const read=()=>{
    if(entry.closed)throw Error('CDP session closed');if(entry.error)throw entry.error;

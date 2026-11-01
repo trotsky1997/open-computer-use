@@ -522,7 +522,13 @@ selectors and rotates capture history at main-page origin changes. Discovery is
 abortable and checked again before dispatch. Cancellation closes pending readers
 and debugger agents. Source and Worker hosts share this controller. Inner command
 deadlines preserve REPL bindings; only the actual JS execution-budget timer
-requests a reset. See [tab CDP capability](browser-debugger.md) for policy/limits.
+requests a reset. Raw sends retain their protocol Promise/result semantics.
+Command clocks pause across dialogs observed by active Page streams on root or
+attached child sessions; disable/detach/origin rotation retire their source state.
+Bootstrap and event-read waits retain separate limits. Owner abort reaches the
+WebSocket handshake and pending sends; individual deadline abort removes only
+that response waiter, with late replies ignored. Page script effects require
+explicit recovery. See [tab CDP capability](browser-debugger.md) for policy/limits.
 
 
 ## Page asset inventories and export

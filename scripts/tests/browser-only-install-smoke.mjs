@@ -130,6 +130,11 @@ if(process.argv[2]==='codex-plugin-config') { (await import('node:fs')).chmodSyn
   await new Promise((resolve,reject)=>{waits.once('error',reject);waits.once('exit',code=>code===0?resolve():reject(Error(waitOutput)));});
   for(const line of waitOutput.split('\n').filter(line=>line.includes('PASS')))console.log(line);
   console.log('PASS installed dialog-aware navigation waits after source checkout removal');
+  const cdpDialogs=spawn(process.execPath,[path.join(source,'scripts/run-cdp-dialog-smoke.mjs'),installed],{env:{...env,OCU_TEST_CHROME_EXECUTABLE:path.resolve(chrome)},stdio:['ignore','pipe','pipe']});let cdpDialogOutput='';
+  cdpDialogs.stdout.on('data',chunk=>{cdpDialogOutput+=chunk;});cdpDialogs.stderr.on('data',chunk=>{cdpDialogOutput+=chunk;});
+  await new Promise((resolve,reject)=>{cdpDialogs.once('error',reject);cdpDialogs.once('exit',code=>code===0?resolve():reject(Error(cdpDialogOutput)));});
+  for(const line of cdpDialogOutput.split('\n').filter(line=>line.includes('PASS')))console.log(line);
+  console.log('PASS installed raw CDP dialog clocks and capture cancellation after source checkout removal');
   const ax=spawn(process.execPath,[path.join(source,'scripts/run-browser-ax-state-smoke.mjs'),installed],{env:{...env,OCU_TEST_CHROME_EXECUTABLE:path.resolve(chrome)},stdio:['ignore','pipe','pipe']});let axOutput='';
   ax.stdout.on('data',chunk=>{axOutput+=chunk;});ax.stderr.on('data',chunk=>{axOutput+=chunk;});
   await new Promise((resolve,reject)=>{ax.once('error',reject);ax.once('exit',code=>code===0?resolve():reject(Error(axOutput)));});
