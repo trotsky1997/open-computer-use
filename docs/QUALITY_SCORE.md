@@ -549,3 +549,34 @@ headful/MCP, console/service-worker and Windows suites were not repeated for thi
 policy change. OS sandboxing, dynamic raw authority, Document-response mediation
 and the intermittent macOS console issue remain open; full harness parity stays
 active. No dependency or CI added.
+
+
+### Explicit cookie URLs and dynamic parameter shapes
+
+Reference contract checks and parameter-policy inspection establish explicit
+non-empty getCookies URLs and URL-based set/batch/delete operations. Replaced the
+blanket cookie-write ban and implicit read behavior with shared facade/host
+validation: explicit URL strings, no domain/sourcePort/sourceScheme overrides,
+partition-key object/topLevelSite types and whole-batch scope checks before native
+dispatch. Legacy Page.deleteCookie requires url and retains native version errors.
+Fetch.continueRequest url and structured response header name/value types are also
+validated before capture. Fields and native protocol results are not clamped or
+rewritten. No vendor implementation was copied.
+
+The native workflow uses only synthetic cookies in disposable profiles. Both
+engines verify single and batch writes, HttpOnly metadata, explicit single/multi-
+URL reads across separate hosts, deletion, empty batches and refusal of a bad-URL
+batch without mutating its valid first entry. Cookie rules follow native host/
+domain/path semantics, including sharing across ports. Explicit other-origin
+URLs remain privileged developer access. Parameter-shape validation adds no user-
+consent or URL authority mediation service; that parity item remains open.
+
+Node: 232/232 macOS, 231/232 Linux (one platform skip). Both engines pass source
+and source-relocated installed Network/Fetch/cookie workflows on both platforms.
+The focused boundary test verifies malformed scopes create no capture or native
+transport traffic. Existing raw CDP regressions pass on both platforms. Ten
+installed production modules and both npm runtime copies match source. Full
+headful/MCP, ordinary browser/dialog/download, console/service-worker and Windows
+suites were not repeated for this parameter-policy change. Consent/URL authority,
+Document-response mediation, OS sandboxing and the intermittent macOS console
+issue remain open; full harness parity stays active. No dependency or CI added.

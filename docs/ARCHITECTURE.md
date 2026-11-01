@@ -551,7 +551,11 @@ event cursors. It attaches related targets privately, routes explicit child
 selectors and rotates capture history at main-page origin changes. Network
 persistent-payload enabling is rejected before capture creation; its disable form
 remains available. Extra HTTP headers, device-bound session controls, cookie
-controls and legacy interception/body-stream commands are also refused. Regular
+controls and legacy interception/body-stream commands are also refused. Cookie
+reads require explicit URL arrays; URL-based set/batch/delete calls validate all
+entries before dispatch and reject domain/source overrides. Partition-key and
+redirect/header parameter shapes are validated. Explicit cross-origin URLs remain
+privileged developer access; consent/URL authority mediation is still open. Regular
 request/response/post-body reads retain normal browser buffer behavior. Shared
 parameter validation also refuses binary Fetch response headers, reload script
 injection, persistent Page script-registration hooks and universal-access isolated worlds, while preserving structured

@@ -9,9 +9,9 @@ function fixture() {
  return {manager,owner:{},sends,setUrl(value){url=value;},get closed(){return closed;}};
 }
 test('CDP validates command, event, child and timeout boundaries before connecting',async()=>{
- for(const method of ['Browser.close','Target.setAutoAttach','Input.dispatchKeyEvent','Network.getAllCookies','Network.setCookies','Security.setIgnoreCertificateErrors','invalid'])assert.throws(()=>cdpCommand(method));
+ for(const method of ['Browser.close','Target.setAutoAttach','Input.dispatchKeyEvent','Network.getAllCookies','Security.setIgnoreCertificateErrors','invalid'])assert.throws(()=>cdpCommand(method));
  for(const options of [{limit:0},{limit:1001},{methods:[]},{methods:['invalid']},{afterSequence:-1},{afterSequence:1.1},{target:{sessionId:'x',targetId:'y'}},{target:{}},{timeoutMs:Infinity},{unknown:true}])assert.throws(()=>cdpOptions(options,true));
- assert.throws(()=>cdpCommand('Runtime.evaluate',[]));assert.throws(()=>cdpCommand('Network.getCookies',{urls:['http://elsewhere.test/']}));
+ assert.throws(()=>cdpCommand('Runtime.evaluate',[]));assert.throws(()=>cdpCommand('Network.getCookies',{}));
  assert.throws(()=>cdpCommand('Page.navigate',{url:'file:///tmp/fixture'}));
  cdpCommand('Runtime.evaluate',{expression:'document.title'});
  assert.throws(()=>cdpCommand('Network.enable',{enableDurableMessages:true}));
@@ -35,6 +35,27 @@ test('CDP validates command, event, child and timeout boundaries before connecti
  cdpCommand('Fetch.disable',{}, {target:{sessionId:'child'}});cdpCommand('Fetch.enable',{}, {target:{targetId:'frame'}});
  for(const method of ['DOM.getFileInfo', 'DOM.setFileInputFiles', 'Network.continueInterceptedRequest', 'Network.getCertificate', 'Network.replayXHR', 'Page.crash', 'Page.disable', 'Page.getNavigationHistory', 'Page.resetNavigationHistory', 'Page.navigate', 'Page.navigateToHistoryEntry', 'Page.setAdBlockingEnabled', 'Page.setBypassCSP', 'Page.setDownloadBehavior', 'Page.setInterceptFileChooserDialog', 'Page.setRPHRegistrationMode', 'Page.setSPCTransactionMode']){assert.throws(()=>cdpCommand(method));await assert.rejects(manager.request(owner,{action:'send',targetId:'tab',method}),/not supported/);await assert.rejects(manager.request(owner,{action:'send',targetId:'tab',method,options:{target:{sessionId:'child'}}}),/not supported/);}
  assert.equal(manager.owners.size,0);assert.deepEqual(sends,[]);
+});
+test('CDP explicit cookie URLs and dynamic parameter shapes validate before dispatch',async()=>{
+ const valid={name:'owned',value:'value',url:'http://fixture.test/'};
+ const {manager,owner,sends}=fixture();
+ for(const [method,params] of [
+  ['Network.getCookies',{}],['Network.getCookies',{urls:[]}],['Network.getCookies',{urls:[123]}],
+  ['Network.setCookie',{name:'owned',value:'value'}],
+  ...['domain','sourcePort','sourceScheme'].map(key=>['Network.setCookie',{...valid,[key]:undefined}]),
+  ['Network.setCookie',{...valid,partitionKey:'invalid'}],['Network.setCookie',{...valid,partitionKey:{topLevelSite:123}}],
+  ['Network.setCookies',{cookies:'invalid'}],['Network.setCookies',{cookies:[valid,{...valid,domain:'fixture.test'}]}],
+  ['Network.deleteCookies',{name:'owned'}],['Page.deleteCookie',{}],
+  ['Fetch.continueRequest',{url:123}],['Fetch.fulfillRequest',{responseHeaders:'invalid'}],
+  ['Fetch.continueResponse',{responseHeaders:[{name:'Location',value:123}]}]
+ ])await assert.rejects(manager.request(owner,{action:'send',targetId:'tab',method,params}),/url|cookie|header/i);
+ assert.equal(manager.owners.size,0);assert.deepEqual(sends,[]);
+ for(const [method,params] of [
+  ['Network.getCookies',{urls:['http://fixture.test/','https://other.test/']}],
+  ['Network.setCookie',valid],['Network.setCookies',{cookies:[]}],['Network.setCookies',{cookies:[valid]}],
+  ['Network.deleteCookies',{name:'owned',url:valid.url}],['Page.deleteCookie',{cookieName:'owned',url:valid.url}],
+  ['Fetch.continueRequest',{url:'https://other.test/data'}],['Fetch.fulfillRequest',{responseHeaders:[{name:'Location',value:'/next'}]}]
+ ])cdpCommand(method,params);
 });
 test('CDP cursors paginate filters, report eviction and rotate on origin change',async()=>{
  const {manager,owner,setUrl}=fixture();const entry=await manager.entry(owner,'tab');

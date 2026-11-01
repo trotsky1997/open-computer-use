@@ -68,8 +68,8 @@ monotonic cursor. Navigate with the normal tab API before debugging a new origin
 The current policy supports Accessibility, CSS, DOM, DOMDebugger, DOMSnapshot,
 Debugger, Emulation, Fetch, Log, Network, Overlay, Page, Performance, Profiler,
 Runtime, Security and WebAudio domains. Security is limited to enable/disable.
-Browser/Target/Input, global cookie/cache commands, Network cookie-write methods, cookie URL or
-domain overrides and Network.loadNetworkResource are refused. The remaining
+Browser/Target/Input, global cookie/cache commands and Network.loadNetworkResource
+are refused. The remaining
 static method exclusions are:
 
 - DOM.getFileInfo and DOM.setFileInputFiles; use the file-chooser API for uploads.
@@ -92,6 +92,23 @@ cross-site origin changes with ordinary Chromium buffering.
 This explicit provider policy still needs a broader reference-command matrix;
 matching the method signatures establishes only this implemented surface.
 
+Cookie lookup uses Network.getCookies with a non-empty urls array of strings.
+The implicit current-page lookup is refused. Network.setCookie and
+Network.deleteCookies require an explicit url; Network.setCookies validates every
+cookie before dispatching the batch, including each url. Cookie domain,
+sourcePort and sourceScheme overrides are refused so the browser derives them
+from the URL. A non-null partitionKey must be an object; topLevelSite, when present,
+must be a string. Empty cookie batches remain available. Legacy Page.deleteCookie
+requires url and retains native protocol/version errors.
+
+Explicit cookie URLs may address other origins in this trusted developer API.
+Cookies follow native host/domain/path rules, including sharing across ports.
+These checks validate parameter shapes; consent and URL authority mediation remain
+open. URL strings and unhandled native fields retain normal browser validation.
+The native fixture uses synthetic cookies in disposable profiles, verifies reads
+for separate hosts and multiple URLs, write/batch/delete behavior, and refusal of
+a malformed batch before its valid first entry can mutate state.
+
 On the tab root, Fetch.enable requires an explicit patterns array and every
 pattern must specify a string resourceType other than Document. An omitted
 pattern array, patterns without a resource type and Document patterns are refused before
@@ -102,7 +119,9 @@ root document navigation outside raw interception. The provider currently relies
 on normal browser navigation; a browser-managed Document-response mediator and
 broader raw URL/header authority remain open.
 
-Fetch.fulfillRequest and Fetch.continueResponse accept structured responseHeaders;
+Fetch.continueRequest accepts url only as a string when supplied. Fetch.fulfillRequest
+and Fetch.continueResponse accept responseHeaders only as an array of objects with
+string name and value fields;
 non-null binaryResponseHeaders is refused, including an empty binary string.
 Persistent script registration via Page.addScriptToEvaluateOnLoad and
 Page.addScriptToEvaluateOnNewDocument is refused before capture creation. Such
