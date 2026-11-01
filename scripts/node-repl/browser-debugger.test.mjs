@@ -29,6 +29,7 @@ test('CDP validates command, event, child and timeout boundaries before connecti
   ['Fetch.continueResponse',{responseHeaders:[]}],['Fetch.fulfillRequest',{responseHeaders:[]}],
   ['Page.reload',{}],['Page.createIsolatedWorld',{grantUniveralAccess:false}]
  ])cdpCommand(method,params);
+ for(const method of ['Page.addScriptToEvaluateOnLoad','Page.addScriptToEvaluateOnNewDocument'])await assert.rejects(manager.request(owner,{action:'send',targetId:'tab',method,params:{source:'self.__ownedPersistentHook=true'}}),/not supported/);
  for(const [method,params] of [['Fetch.disable',{}],['Fetch.enable',{}],['Fetch.enable',{patterns:null}],['Fetch.enable',{patterns:[{}]}],['Fetch.enable',{patterns:[{resourceType:'Document'}]}],['Fetch.enable',{patterns:[{resourceType:'Fetch'},null]}]])await assert.rejects(manager.request(owner,{action:'send',targetId:'tab',method,params}),/not supported/);
  cdpCommand('Fetch.enable',{patterns:[]});cdpCommand('Fetch.enable',{patterns:[{resourceType:'Fetch',requestStage:'Response'}]});
  cdpCommand('Fetch.disable',{}, {target:{sessionId:'child'}});cdpCommand('Fetch.enable',{}, {target:{targetId:'frame'}});

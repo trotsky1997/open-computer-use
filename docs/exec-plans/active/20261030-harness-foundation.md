@@ -3008,3 +3008,47 @@ Preserve this open reliability issue despite the
 passing repeat. Full headful/MCP and Windows checks were not repeated. Broader
 raw authority policy, Document-response mediation and OS sandboxing remain open;
 full harness parity stays active.
+
+## Console reliability audit and persistent Page scripts
+
+Two complete macOS console workflows (both engines), 30 batches/360 short workers,
+a delayed Runtime-enable probe and ten forced-GC batches/120 workers passed.
+These bounded probes do not establish a fix for the earlier intermittent failure;
+retain it as open. No evidence supports speculative logging-lifecycle changes.
+
+A separate owned reference denies both Page script-registration commands. The
+current provider accepts addScriptToEvaluateOnNewDocument and the injected marker
+runs after navigation to another fixture origin. Scope: shared raw validator,
+existing unit/native Network fixture, runtime docs and installed/npm copies.
+Reject both persistent script-registration methods before capture; preserve
+ordinary per-document evaluation, reload, isolated worlds and normal navigation.
+
+
+### Console audit and persistent Page script refusal
+
+The earlier intermittent macOS console failure remains open. Two consecutive
+complete source console workflows pass in both engines. Focused Persistent-host
+probes pass 30 batches/360 short workers and ten forced-GC batches/120 workers;
+a delayed child Runtime-enable probe retains both startup console and uncaught
+exception records. These bounded probes narrow the investigation without proving
+a logging fix. Production logging lifecycle code was left unchanged.
+
+Separately, an owned reference rejects both Page script-registration methods.
+A disposable native counterexample accepted addScriptToEvaluateOnNewDocument and
+executed its marker after a cross-origin navigation. The shared model/host raw
+validator now rejects Page.addScriptToEvaluateOnLoad and
+Page.addScriptToEvaluateOnNewDocument before capture creation. Existing boundary
+checks fail before this change and pass after it; the native Network fixture
+checks refusal and absence of the marker after same-site port and cross-site
+navigation. Ordinary per-document evaluation, reload, isolated-world reads,
+structured Fetch responses, child scope and turn cleanup remain functional.
+
+Node: 231/231 macOS, 230/231 Linux (one platform skip). Both engines pass source
+and source-relocated installed Network/Fetch/script-policy workflows on both
+platforms. Raw CDP regressions pass on both platforms. Ten installed runtime
+modules and both npm runtime copies match source. The earlier console audit
+preceded the Page-policy change; the full installed console/service-worker and
+ordinary-browser/headful/MCP suites were not repeated for these two raw-method
+restrictions. Windows, broader raw authority and Document-response mediation,
+OS sandboxing and the intermittent macOS console issue remain open. No dependency
+or CI added; full harness parity stays active.

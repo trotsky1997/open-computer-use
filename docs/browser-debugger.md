@@ -91,6 +91,10 @@ broader raw URL/header authority remain open.
 
 Fetch.fulfillRequest and Fetch.continueResponse accept structured responseHeaders;
 non-null binaryResponseHeaders is refused, including an empty binary string.
+Persistent script registration via Page.addScriptToEvaluateOnLoad and
+Page.addScriptToEvaluateOnNewDocument is refused before capture creation. Such
+hooks can execute after navigation to another origin. Ordinary per-document
+Runtime evaluation remains available under the raw developer capability.
 Page.reload accepts ordinary reload options and refuses non-null
 scriptToEvaluateOnLoad (including an empty script). Page.createIsolatedWorld
 accepts normal worlds and refuses grantUniveralAccess:true; that spelling comes
