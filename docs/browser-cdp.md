@@ -463,8 +463,12 @@ Attachment stays passive: a short-lived target can exit before observation start
 calls and main-frame navigation, scoped to the owning JS session and tab. Rebinding a
 live tab in that session reuses capture. A fresh session starts a fresh buffer.
 Reset, timeout and close release listeners, including in-flight discovery and WebSocket handshakes; tab close
-also ends capture. An unexpected disconnection makes reads fail explicitly;
-rebinding starts fresh capture. Observers execute no page getters or application
+also ends capture. An unexpected root connection loss makes reads fail explicitly;
+rebinding starts fresh capture. Child setup failures stay on the failed target: an
+active failed child makes reads fail with its type/id and requires session reset
+to retry. Target or ancestor retirement removes that failure automatically,
+leaving healthy root capture and retained history readable without reconnecting.
+This applies to children present during initial binding and later attachments. Observers execute no page getters or application
 code: object payloads use Chromium's shallow previews/descriptions and printf
 placeholders are formatted from protocol values.
 

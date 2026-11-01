@@ -13,6 +13,7 @@ const server = createServer((request,response) => {
     response.setHeader('Content-Type','text/html');response.setHeader('Permissions-Policy','diagnostic-unknown-feature=()');response.setHeader('Content-Security-Policy',"default-src 'none';img-src 'self';script-src 'none'");
     response.end('<!doctype html><title>Diagnostic child</title><script>self.blocked=true;</script><img src="/missing-image-diag">');return;
   }
+  if(request.url==='/short-lived.js'){response.setHeader('Content-Type','text/javascript');response.end("postMessage('done');close();");return;}
   if(request.url==='/diagnostic-worker.js'){
     response.setHeader('Content-Type','text/javascript');response.setHeader('Content-Security-Policy',"connect-src 'none'");
     response.end("fetch('/blocked-worker-diag').catch(()=>{});");return;
@@ -34,6 +35,7 @@ const server = createServer((request,response) => {
     <button onclick="worker.postMessage('log')">Worker later</button>
     <button onclick="worker.terminate();frame.remove()">Detach sources</button>
     <button onclick="fetch('/missing-diag').catch(()=>{});self.diagnosticWorker=new Worker('/diagnostic-worker.js');self.diagnosticFrame=document.createElement('iframe');diagnosticFrame.src='http://localhost:${server.address().port}/diagnostic-child';document.body.append(diagnosticFrame)">Diagnostics</button>
+    <button onclick="Promise.all(Array.from({length:12},()=>new Promise(resolve=>{const w=new Worker('/short-lived.js');w.onmessage=resolve}))).then(()=>console.log('short workers complete'))">Short workers</button>
     <a href="/next">Next</a><script>if(location.pathname === "/next")console.log("navigation loaded")</script>`);
 });
 await new Promise(resolve => server.listen(0,"127.0.0.1",resolve));
@@ -94,6 +96,11 @@ try {
   const childDiagnostics=diagnostics.filter(log=>['security','network'].includes(log.category)&&log.url?.includes('localhost'));
   assert.ok(childDiagnostics.every(log=>log.source.type==='iframe'&&log.source.targetId!==targetId));
   assert.ok(diagnostics.filter(log=>log.category==='exception'&&log.source.targetId===targetId).length===2);
+  const logOwner=session.resourceOwners?.get(session.worker)??session.resourceOwner,capture=session.browserLogs.owners.get(logOwner).get(targetId);
+  await run('await tab.playwright.getByRole("button",{name:"Short workers",exact:true}).click();nodeRepl.write(JSON.stringify(true));');
+  let shortResult;const shortDeadline=Date.now()+10000;
+  do{shortResult=await run('try{nodeRepl.write(JSON.stringify({logs:await tab.dev.logs({filter:"short workers complete"})}));}catch(e){nodeRepl.write(JSON.stringify({error:e.message}));}');if(shortResult.logs?.length===1)break;assert.ok(Date.now()<shortDeadline,'Root log capture lost after worker exits: '+JSON.stringify(shortResult));await new Promise(resolve=>setTimeout(resolve,10));}while(true);
+  assert.equal(session.browserLogs.owners.get(logOwner).get(targetId),capture);assert.equal(capture.error,undefined);
   const afterNavigation = await run('await tab.playwright.expectNavigation(()=>tab.playwright.getByRole("link",{name:"Next"}).click()); nodeRepl.write(JSON.stringify(await tab.dev.logs()));');
   assert.equal(afterNavigation.at(-1).message,"navigation loaded");
   assert.equal(afterNavigation.at(-1).url,`${url}next`);
@@ -143,7 +150,7 @@ try {
     await rejected;
     assert.equal(manager.owners.size,0);
   } finally {proxy.closeAllConnections();await new Promise(resolve=>proxy.close(resolve));}
-  console.log(`${Session.name} PASS real Chrome root/OOP/worker/nested-worker console, exceptions and root/OOP network and page/worker CSP diagnostics plus policy warnings, categories/source attribution, child replay exclusion/rebinding/detachment, filtering, bounds, navigation, session isolation and reset/timeout/close/startup cleanup`);
+  console.log(`${Session.name} PASS real Chrome root/OOP/worker/nested-worker console, exceptions and root/OOP network and page/worker CSP diagnostics plus policy warnings, categories/source attribution, child replay exclusion/rebinding/detachment, filtering, bounds, navigation, session isolation, short-worker exits with retained root capture and reset/timeout/close/startup cleanup`);
 } finally {
   if (targetId) await fetch(new URL(`/json/close/${targetId}`,endpoint)).catch(()=>{});
   await session.close();

@@ -278,3 +278,22 @@ modules and both npm runtime copies matched final source byte-for-byte. macOS
 source/installed both-host diagnostics and general browser/CDP regressions passed;
 Node remained 224/224 macOS and 223/224 Linux (one platform skip). Full harness
 parity remains active.
+
+
+### Target-local log setup failures
+
+Child setup errors now remain on the active child record. Reads explicitly name
+that failed target and guide reset while it remains active; detach/ancestor
+retirement clears its failure without replacing healthy root capture or losing
+retained logs. Root connection/reconnect behavior stays unchanged. The same rule
+covers children present at initial binding and later attachments.
+
+A real-WebSocket error-before-detach counterfactual fails on the prior code and
+passes with the fix. Native 12-short-worker bursts preserve root capture identity
+and completion output in macOS/Linux source and relocated-installed both-host
+fixtures; these bursts validate recovery without claiming the old race reproduced
+in native Chrome. Existing logs/diagnostics/replay/isolation/reset/navigation
+checks pass. Node: 224/224 macOS, 223/224 Linux (one platform skip); macOS general
+browser and both-platform CDP regressions pass. Full headful/MCP regression was
+not repeated for this local error-state change. Short-lived startup observation,
+worker Network completeness and physical/Windows/remote coverage remain open.

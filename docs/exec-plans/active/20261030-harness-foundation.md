@@ -2739,3 +2739,32 @@ modules and both npm runtime copies matched final source byte-for-byte. macOS
 source/installed both-host diagnostics and general browser/CDP regressions passed;
 Node remained 224/224 macOS and 223/224 Linux (one platform skip). Full harness
 parity remains active.
+
+
+## Detached child setup failure isolation in developer logs
+
+Keep child setup failures on their owned child record. Active failed children
+remain explicit read failures with target identity; retirement removes their
+failure so healthy root capture and retained history continue without reset.
+Root transport failures keep their existing reconnect policy. Verify protocol
+error-before-detach ordering through the real WebSocket fixture and native
+short-lived worker bursts, including stable capture identity and continued
+root output, in source and relocated installed both-host runtimes.
+
+Implemented by recording setup errors on their child and checking only currently
+owned failed children at read time. Active failures include type/id, native cause
+and reset guidance. Detach/ancestor retirement removes the child and its failure;
+root transport state and retained records stay intact. Initial root binding can
+settle with a failed child, while reads explicitly report that active failure.
+
+The real-WebSocket error-before-detach counterfactual fails before this fix and
+passes after it, covering both initial binding and later attachment plus retained
+history/capture identity. Native Chrome 12-worker exit bursts pass both hosts on
+macOS/Linux source and source-relocated installed runtimes, with all prior log,
+diagnostic, replay, navigation/reset and source-isolation checks. These native
+bursts did not themselves reproduce the old wire-order failure; the deterministic
+counterfactual is the protocol fixture. Node: 224/224 macOS, 223/224 Linux with one
+platform skip; macOS ordinary browser and both-platform raw CDP regressions pass.
+This log-error state change uses focused installation regression; the full
+headful/MCP pipeline was not rerun. Short-lived pre-attachment startup-log loss,
+complete worker Network diagnostics and broader platform/provider work stay open.

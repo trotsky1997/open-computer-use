@@ -217,14 +217,16 @@ test('log owner cleanup aborts actual stalled discovery and WebSocket handshake'
 });
 
 test('log capture owns diagnostics, metadata and descendant cancellation',async()=>{
- const {createServer}=await import('node:http'),{wsServer}=await import('playwright-core/lib/utilsBundle');let peer,blocked,detach=true;const released=[];
+ const {createServer}=await import('node:http'),{wsServer}=await import('playwright-core/lib/utilsBundle');let peer,blocked,detach=true,startupFailure=false;const released=[];
  const server=createServer((_request,response)=>{response.setHeader('Content-Type','application/json');response.end(JSON.stringify([{id:'tab',type:'page',webSocketDebuggerUrl:`ws://127.0.0.1:${server.address().port}/socket`}]));}),sockets=new Set(),websockets=new wsServer({noServer:true});
  server.on('connection',socket=>{sockets.add(socket);socket.on('close',()=>sockets.delete(socket));socket.on('error',()=>{});});
  server.on('upgrade',(request,socket,head)=>websockets.handleUpgrade(request,socket,head,client=>{
   peer=client;client.on('message',data=>{const command=JSON.parse(data),emit=value=>client.send(JSON.stringify(value));
    if(command.method==='Runtime.releaseObject')released.push(command.params.objectId);
+   if(command.sessionId==='failed'){emit({id:command.id,error:{message:'Inspected target navigated or closed'}});return;}
    if(command.method==='Target.setAutoAttach'&&!command.sessionId)emit({method:'Target.attachedToTarget',params:{sessionId:'parent',targetInfo:{targetId:'frame',type:'iframe'}}});
    if(command.method==='Runtime.enable'&&command.sessionId==='parent'){
+    if(startupFailure){emit({id:command.id,error:{message:'Inspected target navigated or closed'}});return;}
     if(!detach){blocked();return;}
     emit({sessionId:'parent',method:'Target.attachedToTarget',params:{sessionId:'nested',targetInfo:{targetId:'worker',type:'worker'}}});
     emit({method:'Target.detachedFromTarget',params:{sessionId:'parent'}});return;
@@ -247,7 +249,19 @@ test('log capture owns diagnostics, metadata and descendant cancellation',async(
   const result=await logs.read(owner,'tab');assert.deepEqual(result.map(item=>item.message),['older root','diagnostic','retained root']);
   assert.equal(result[1].category,'network');assert.equal(result[1].level,'debug');assert.equal(result[1].networkRequestId,'request-owned');assert.deepEqual(result[0].source,{targetId:'tab',type:'page'});
   result[0].source.targetId='changed';assert.equal((await logs.read(owner,'tab'))[0].source.targetId,'tab');assert.deepEqual(released.sort(),['diagnostic-object','forwarded-worker-object']);
-  await logs.cleanup(owner);detach=false;const otherOwner={},observed=new Promise(resolve=>blocked=resolve);
+  peer.send(JSON.stringify({method:'Target.attachedToTarget',params:{sessionId:'failed',targetInfo:{targetId:'closing-worker',type:'worker'}}}));
+  const failureDeadline=Date.now()+1000;while(!entry.children.get('failed')){assert.ok(Date.now()<failureDeadline);await new Promise(setImmediate);}
+  await entry.children.get('failed').ready;await assert.rejects(logs.read(owner,'tab'),/capture failed for worker closing-worker/);
+  peer.send(JSON.stringify({method:'Target.detachedFromTarget',params:{sessionId:'failed'}}));
+  while(entry.children.has('failed')){assert.ok(Date.now()<failureDeadline);await new Promise(setImmediate);}
+  assert.equal((await logs.read(owner,'tab')).length,3);assert.equal(logs.owners.get(owner).get('tab'),entry);
+  await logs.cleanup(owner);startupFailure=true;const startupOwner={};await logs.start(startupOwner,'tab');
+  const initial=logs.owners.get(startupOwner).get('tab');await assert.rejects(logs.read(startupOwner,'tab'),/capture failed for iframe frame/);
+  peer.send(JSON.stringify({method:'Target.detachedFromTarget',params:{sessionId:'parent'}}));
+  const initialDeadline=Date.now()+1000;while(initial.children.size){assert.ok(Date.now()<initialDeadline);await new Promise(setImmediate);}
+  assert.deepEqual(await logs.read(startupOwner,'tab'),[]);await logs.cleanup(startupOwner);
+  startupFailure=false;detach=false;const otherOwner={},observed=new Promise(resolve=>blocked=resolve);
+
   const starting=logs.start(otherOwner,'tab'),rejected=assert.rejects(starting,/session closed/);
   await observed;await logs.cleanup(otherOwner);await rejected;
 

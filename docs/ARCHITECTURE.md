@@ -523,7 +523,10 @@ cancellation reaches HTTP discovery, the WebSocket handshake and pending sends.
 Navigation keeps the observer, while reset/close retires it. Related iframe/dedicated-worker descendants attach recursively without pausing
 execution; initial-target replay stays excluded and new-target startup replay is
 retained. Ancestor detachment cancels child initialization and retires descendants;
-late events are ignored. Stored source identities survive detachment, and reads
+late events are ignored. Child setup failures remain target-local: active failed
+children fail reads explicitly, while retirement clears their error and preserves
+healthy root capture/history. Root transport failures keep their reconnect policy.
+Stored source identities survive detachment, and reads
 order retained entries by timestamp. Shared/service workers, short-lived targets
 that exit before attachment, complete network traces and wider diagnostic-provider
 coverage remain open. Categories preserve console/exception/native diagnostic
