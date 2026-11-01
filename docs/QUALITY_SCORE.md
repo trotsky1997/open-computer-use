@@ -422,3 +422,29 @@ macOS. Ten installed modules and both npm runtime copies match source. Full
 headful/MCP and Windows checks were not repeated. Broader raw-command/parameter
 policy and OS sandboxing remain open; full harness parity stays active. No new
 dependency or CI was added.
+
+
+### Page/Fetch parameter policy
+
+The shared raw-CDP facade/host validator now refuses non-null binary response
+headers in Fetch.fulfillRequest/continueResponse, non-null reload scripts and
+universal-access isolated worlds. An owned in-app reference confirms all four
+restrictions and permits ordinary reload and isolated worlds with universal
+access false. A failing pre-change boundary check reproduced the missing policy.
+Empty script/header strings are explicitly covered. Ordinary structured headers,
+reload and isolated-world reads remain usable. The existing native Network
+fixture now pauses actual requests/responses, rejects binary headers, then
+successfully fulfills/continues with structured headers and verifies what the
+page receives. It also checks normal traffic after clearing interception. Raw
+reload uses the existing navigation observer before subsequent interaction.
+No vendor implementation was copied.
+
+Node: 231/231 macOS, 230/231 Linux (one platform skip). Both engines pass source
+and source-relocated installed Page/Fetch plus Network workflows on macOS/Linux.
+Host unit checks verify denied calls create no capture or transport traffic.
+Installed service-worker/console regressions pass on both platforms; raw CDP
+regressions pass on both platforms and ordinary browser regression on macOS.
+Ten installed modules and both npm runtime copies match source. Full headful/MCP
+and Windows validation were not repeated. Broader Page/Fetch method and
+URL/header authority rules, complete raw-command parity and OS sandboxing remain
+open. No dependency or CI added; full harness parity stays active.

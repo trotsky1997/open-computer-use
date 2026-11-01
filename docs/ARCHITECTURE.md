@@ -552,7 +552,10 @@ selectors and rotates capture history at main-page origin changes. Network
 persistent-payload enabling is rejected before capture creation; its disable form
 remains available. Extra HTTP headers, device-bound session controls, cookie
 controls and legacy interception/body-stream commands are also refused. Regular
-request/response/post-body reads retain normal browser buffer behavior.
+request/response/post-body reads retain normal browser buffer behavior. Shared
+parameter validation also refuses binary Fetch response headers, reload script
+injection and universal-access isolated worlds, while preserving structured
+response fulfillment/continuation and ordinary reload/world creation.
 Discovery is
 abortable and checked again before dispatch. Cancellation closes pending readers
 and debugger agents. Source and Worker hosts share this controller. Inner command

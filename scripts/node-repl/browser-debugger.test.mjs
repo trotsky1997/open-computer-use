@@ -21,6 +21,14 @@ test('CDP validates command, event, child and timeout boundaries before connecti
  const {manager,owner,sends}=fixture();
  for(const method of ['Network.deleteDeviceBoundSession','Network.enableDeviceBoundSessions','Network.getResponseBodyForInterception','Network.setCookieControls','Network.setExtraHTTPHeaders','Network.setRequestInterception','Network.takeResponseBodyForInterceptionAsStream'])await assert.rejects(manager.request(owner,{action:'send',targetId:'tab',method}),/not supported/);
  for(const [method,params] of [['Network.enable',{enableDurableMessages:true}],['Network.configureDurableMessages',{maxTotalBufferSize:10485760}],['Network.configureDurableMessages',{maxTotalBufferSize:0}]])await assert.rejects(manager.request(owner,{action:'send',targetId:'tab',method,params}),/not supported/);
+ for(const [method,params] of [
+  ['Fetch.continueResponse',{binaryResponseHeaders:''}],['Fetch.fulfillRequest',{binaryResponseHeaders:''}],
+  ['Page.reload',{scriptToEvaluateOnLoad:''}],['Page.createIsolatedWorld',{grantUniveralAccess:true}]
+ ])await assert.rejects(manager.request(owner,{action:'send',targetId:'tab',method,params}),/not supported/);
+ for(const [method,params] of [
+  ['Fetch.continueResponse',{responseHeaders:[]}],['Fetch.fulfillRequest',{responseHeaders:[]}],
+  ['Page.reload',{}],['Page.createIsolatedWorld',{grantUniveralAccess:false}]
+ ])cdpCommand(method,params);
  assert.equal(manager.owners.size,0);assert.deepEqual(sends,[]);
 });
 test('CDP cursors paginate filters, report eviction and rotate on origin change',async()=>{

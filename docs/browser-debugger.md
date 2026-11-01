@@ -79,6 +79,18 @@ cross-site origin changes with ordinary Chromium buffering.
 This explicit provider policy still needs a broader reference-command matrix;
 matching the method signatures establishes only this implemented surface.
 
+Fetch.fulfillRequest and Fetch.continueResponse accept structured responseHeaders;
+non-null binaryResponseHeaders is refused, including an empty binary string.
+Page.reload accepts ordinary reload options and refuses non-null
+scriptToEvaluateOnLoad (including an empty script). Page.createIsolatedWorld
+accepts normal worlds and refuses grantUniveralAccess:true; that spelling comes
+from the protocol. These parameter checks run before capture creation in both the
+model facade and host. Use tab.reload() for normal interaction. Raw reload is
+asynchronous; wrap it in tab.playwright.expectNavigation when subsequent work
+requires the loaded page. The native fixture covers real response fulfillment and
+continuation with structured headers, plus ordinary reload and isolated-world
+reads. Broader method and URL/header authority policy remains open.
+
 Connections, event buffers, attached sessions and pending reads belong to the
 execution-turn resource owner in both session implementations. Reset, endTurn,
 timeout and close cancel discovery and close captures. Retained facades open fresh
@@ -123,8 +135,15 @@ actual blocked-handshake socket closing before a fresh capture succeeds.
 The network fixture verifies refusal of both durable-payload paths before capture
 creation, ordinary request/response metadata, POST and response bodies, same-site
 port changes and cross-site origin invalidation, fresh requests and turn rebind in
-both engines. An optional first argument selects an installed runtime.
+both engines. It also verifies Page/Fetch parameter refusal before capture,
+ordinary reload/isolated-world reads, and actual structured-header fulfillment
+and continuation after a rejected binary-header attempt. An optional first
+argument selects an installed runtime.
 
 Raw Network policy also denies extra HTTP headers, device-bound session controls,
 cookie controls and legacy interception/body-stream commands. The disable form
 `Network.configureDurableMessages({})` remains available.
+
+Protocol field semantics are documented by Chromium's
+[Page protocol](https://github.com/ChromeDevTools/devtools-protocol/blob/master/pdl/domains/Page.pdl)
+and [Fetch protocol](https://github.com/ChromeDevTools/devtools-protocol/blob/master/pdl/domains/Fetch.pdl).

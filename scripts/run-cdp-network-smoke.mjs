@@ -10,7 +10,7 @@ const servers=['A','B'].map(name=>createServer((request,response)=>{
  if(request.url==='/data'){
   const chunks=[];request.on('data',chunk=>chunks.push(chunk));request.on('end',()=>{response.setHeader('Content-Type','text/plain; charset=utf-8');response.setHeader('x-fixture-origin',name);response.end(name+':'+Buffer.concat(chunks).toString());});return;
  }
- response.setHeader('Content-Type','text/html');response.end(`<title>Network ${name}</title><button onclick="document.querySelector('output').textContent='loading';fetch('/data',{method:'POST',headers:{'Content-Type':'text/plain'},body:'owned post'}).then(r=>r.text()).then(t=>document.querySelector('output').textContent=t)">Load</button><output></output>`);
+ response.setHeader('Content-Type','text/html');response.end(`<title>Network ${name}</title><button onclick="document.querySelector('output').textContent='loading';fetch('/data',{method:'POST',headers:{'Content-Type':'text/plain'},body:'owned post'}).then(r=>{document.querySelector('output').dataset.header=r.headers.get('x-structured')||'';return r.text()}).then(t=>document.querySelector('output').textContent=t)">Load</button><output></output>`);
 }));await Promise.all(servers.map(server=>new Promise(resolve=>server.listen(0,'127.0.0.1',resolve))));
 const origins=servers.map(server=>`http://127.0.0.1:${server.address().port}`);
 async function until(check,label){const deadline=Date.now()+8000;for(;;){if(await check())return;assert.ok(Date.now()<deadline,label);await new Promise(resolve=>setTimeout(resolve,20));}}
@@ -31,6 +31,7 @@ try{
    for(const options of ['{enableDurableMessages:true}','{enableDurableMessages:true,maxTotalBufferSize:10485760}'])await denied(`await cdp.send('Network.enable',${options});`,/not supported/);
    await denied("await cdp.send('Network.configureDurableMessages',{maxTotalBufferSize:10485760});",/not supported/);
    for(const method of ['Network.deleteDeviceBoundSession','Network.enableDeviceBoundSessions','Network.getResponseBodyForInterception','Network.setCookieControls','Network.setExtraHTTPHeaders','Network.setRequestInterception','Network.takeResponseBodyForInterceptionAsStream'])await denied(`await cdp.send(${JSON.stringify(method)},{headers:{'X-Owned-Probe':'owned-A'}});`,/not supported/);
+   for(const [method,params] of [['Fetch.continueResponse',{requestId:'absent',binaryResponseHeaders:''}],['Fetch.fulfillRequest',{requestId:'absent',responseCode:200,binaryResponseHeaders:''}],['Page.reload',{scriptToEvaluateOnLoad:''}],['Page.createIsolatedWorld',{frameId:'absent',grantUniveralAccess:true}]])await denied(`await cdp.send(${JSON.stringify(method)},${JSON.stringify(params)});`,/not supported/);
    assert.equal(session.browserCdp.owners.has(session.resourceOwners.get(session.worker)),false,'Rejected commands opened a debugger capture');
    assert.deepEqual(await run('nodeRepl.write(JSON.stringify(await cdp.send("Network.configureDurableMessages",{})));'),{});
    await run('await cdp.send("Network.enable",{maxTotalBufferSize:10485760,maxPostDataSize:1024,enableDurableMessages:false});nodeRepl.write(JSON.stringify(true));');await load('A');
@@ -42,8 +43,20 @@ try{
    }
    await session.endTurn();assert.equal(session.browserCdp.owners.size,0);
    await run(`await cdp.send('Network.enable',{maxPostDataSize:1024});nodeRepl.write(JSON.stringify(true));`);await load('A');
+   const isolated=await run('var frameId=(await cdp.send("Page.getFrameTree")).frameTree.frame.id;var world=(await cdp.send("Page.createIsolatedWorld",{frameId,worldName:"owned-policy-fixture",grantUniveralAccess:false})).executionContextId;nodeRepl.write(JSON.stringify((await cdp.send("Runtime.evaluate",{contextId:world,expression:"document.title",returnByValue:true})).result.value));');assert.equal(isolated,'Network A');
+   await run('await tab.playwright.expectNavigation(()=>cdp.send("Page.reload",{ignoreCache:true}),{waitUntil:"load"});nodeRepl.write(JSON.stringify(true));');
+   for(const [stage,method,expected] of [['Request','Fetch.fulfillRequest','structured replacement'],['Response','Fetch.continueResponse','A:owned post']]){
+    await run(`await cdp.send('Fetch.enable',{patterns:[{urlPattern:'*/data',resourceType:'Fetch',requestStage:${JSON.stringify(stage)}}]});var fetchCursor=(await cdp.readEvents()).cursor;await tab.playwright.getByRole('button',{name:'Load',exact:true}).click();nodeRepl.write(JSON.stringify(true));`);
+    await until(()=>run('var paused=(await cdp.readEvents({afterSequence:fetchCursor,methods:["Fetch.requestPaused"]})).events.find(e=>e.params.request.url.endsWith("/data"));nodeRepl.write(JSON.stringify(Boolean(paused)));'),'Fetch interception did not pause');
+    await denied(`await cdp.send(${JSON.stringify(method)},{requestId:paused.params.requestId,responseCode:200,binaryResponseHeaders:''});`,/not supported/);
+    const params={responseCode:200,responseHeaders:[{name:'Content-Type',value:'text/plain'},{name:'x-structured',value:stage}],...(stage==='Request'?{body:Buffer.from(expected).toString('base64')}:{})};
+    await run(`await cdp.send(${JSON.stringify(method)},{...${JSON.stringify(params)},requestId:paused.params.requestId});nodeRepl.write(JSON.stringify(true));`);
+    await until(async()=>await run('nodeRepl.write(JSON.stringify(await tab.playwright.locator("output").innerText()));')===expected,'Structured response did not arrive');
+    assert.equal(await run('nodeRepl.write(JSON.stringify(await tab.playwright.locator("output").getAttribute("data-header")));'),stage);
+   }
+   await run('await cdp.send("Fetch.enable",{patterns:[]});nodeRepl.write(JSON.stringify(true));');await load('A');
    await run('await tab.close();nodeRepl.write(JSON.stringify(true));');
-   console.log(Session.name+' PASS ordinary Network request/response/post bodies, header/interception/session and persistent-mode refusal before attachment, durable disable, same-site/cross-site origin invalidation and turn rebind');
+   console.log(Session.name+' PASS ordinary Network request/response/post bodies, header/interception/session and persistent-mode refusal before attachment, durable disable, same-site/cross-site origin invalidation and turn rebind; Page/Fetch parameter refusal, ordinary reload/isolated worlds and structured response fulfillment/continuation');
   }finally{await session.close();}
  }
 }finally{for(const server of servers)server.closeAllConnections();await Promise.all(servers.map(server=>new Promise(resolve=>server.close(resolve))));}
