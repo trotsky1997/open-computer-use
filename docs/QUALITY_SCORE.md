@@ -372,3 +372,28 @@ copies match source. The full headful/MCP suite was not repeated; the installati
 smoke now invokes the new service-worker fixture. Shared-worker capture,
 pre-attachment service-worker output, full network tracing and broader physical/
 Windows/crash coverage remain open. No dependency or CI added; parity stays active.
+
+
+### Origin-scoped Network persistence policy
+
+A native counterexample enables durable Network messages, navigates to another
+origin and still reads the old synthetic response. An owned in-app reference
+probe accepts ordinary Network buffers and the disabled flag, rejects both
+persistent-payload configuration paths, and loses old response access after a
+normal cross-origin navigation. The facade and host now reject enabling durable
+messages and Network.configureDurableMessages before opening raw capture. Normal
+tracking and response/POST reads remain available; no persistence mode is silently
+clamped. Unit checks confirm denied calls never reach the transport.
+
+Node: 231/231 macOS, 230/231 Linux (one platform skip). Both engines pass source
+and relocated-installed native request/response/POST metadata and body checks,
+same-site port and cross-site origin invalidation, fresh requests and turn rebind.
+Service-worker fixtures also establish Chromium's same-origin association outside
+registration scope, old-origin detachment, new-origin output, return reattachment
+and absent-period replay exclusion. Existing console/diagnostic and raw CDP
+regressions pass on both platforms; macOS ordinary browser regression passes.
+Ten installed modules and both npm runtime copies match source. The installation
+smoke includes the new Network workflow. Full headful/MCP regression was not
+repeated for this command-policy change. Broader raw-command policy, complete
+network tracing and platform/crash coverage remain open; parity stays active.
+No dependency or CI added.

@@ -2862,3 +2862,31 @@ open. Full harness parity stays active.
 
 The implementation follows the related-target graph described by Chromium's
 [Target protocol](https://github.com/ChromeDevTools/devtools-protocol/blob/master/pdl/domains/Target.pdl).
+
+
+## Origin-scoped Network persistence policy
+
+A native counterexample enables durable Network messages, navigates to another
+origin and still reads the old synthetic response. An owned in-app reference
+probe accepts ordinary Network buffers and the disabled flag, rejects both
+persistent-payload configuration paths, and loses old response access after a
+normal cross-origin navigation. The facade and host now reject enabling durable
+messages and Network.configureDurableMessages before opening raw capture. Normal
+tracking and response/POST reads remain available; no persistence mode is silently
+clamped. Unit checks confirm denied calls never reach the transport.
+
+Node: 231/231 macOS, 230/231 Linux (one platform skip). Both engines pass source
+and relocated-installed native request/response/POST metadata and body checks,
+same-site port and cross-site origin invalidation, fresh requests and turn rebind.
+Service-worker fixtures also establish Chromium's same-origin association outside
+registration scope, old-origin detachment, new-origin output, return reattachment
+and absent-period replay exclusion. Existing console/diagnostic and raw CDP
+regressions pass on both platforms; macOS ordinary browser regression passes.
+Ten installed modules and both npm runtime copies match source. The installation
+smoke includes the new Network workflow. Full headful/MCP regression was not
+repeated for this command-policy change. Broader raw-command policy, complete
+network tracing and platform/crash coverage remain open; parity stays active.
+No dependency or CI added.
+
+Chromium describes renderer-independent durable bodies in the
+[Network protocol](https://github.com/ChromeDevTools/devtools-protocol/blob/master/pdl/domains/Network.pdl).

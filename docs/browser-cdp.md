@@ -465,6 +465,10 @@ their startup messages. Service workers can predate their association with this
 page: every service-worker attachment excludes Runtime/Log cached history, so
 messages emitted before setup can be unavailable. Capture uses only the page
 auto-attachment graph; no browser-wide worker discovery or attachment is added.
+Chromium can associate same-origin service workers outside their registration
+scope, including pages without a current service-worker controller. Cross-origin
+navigation retires the previous association; returning attaches again without
+replaying output from the absence. Already retained history remains readable.
 Service workers can serve multiple clients. Their entries identify the worker
 component, without claiming a particular client emitted the message.
 Attachment stays passive: a short-lived target can exit before observation starts. The host holds the observer across JS
@@ -497,7 +501,8 @@ using a disposable Chrome and local page.
 `OPEN_COMPUTER_USE_CDP_URL=http://127.0.0.1:9222 node scripts/run-service-worker-logs-smoke.mjs`
 checks related service-worker console and exception output, old-history refusal,
 worker version replacement, shared-client identity, foreign-origin non-attachment
-and new-output exclusion, turn/reset cleanup and fresh capture. Use a disposable
+and new-output exclusion, same-origin scope/cross-origin return behavior, turn/
+reset cleanup and fresh capture. Use a disposable
 browser. An optional first argument selects an installed runtime.
 
 ## JavaScript dialogs

@@ -55,6 +55,20 @@ try{
    await until(()=>evaluate(tabId,"document.querySelector('output').textContent==='activated v2'"),'Updated service worker not active');
    await logs();await run('await tab.playwright.getByRole("button",{name:"Later",exact:true}).click();nodeRepl.write(JSON.stringify(true));');
    const updated=await until(async()=>(await logs()).find(entry=>entry.message==='service v2 later'),'Updated worker output missing');assert.notEqual(updated.source.targetId,first.source.targetId);
+
+   const post=async(id,token)=>evaluate(id,`new Promise(resolve=>{const done=e=>{if(e.data===${JSON.stringify(token)}){navigator.serviceWorker.removeEventListener('message',done);resolve(true);}};navigator.serviceWorker.addEventListener('message',done);navigator.serviceWorker.getRegistration('/controlled/').then(r=>r.active.postMessage(${JSON.stringify(token)}));})`);
+   await run(`await tab.goto(${JSON.stringify(origin+'/uncontrolled')});nodeRepl.write(JSON.stringify(true));`);await logs();await post(setup,'same-origin-away');
+   await until(async()=>(await logs()).some(entry=>entry.message==='service v2 same-origin-away'),'Same-origin worker association missing');
+   await run(`await tab.goto(${JSON.stringify(foreignOrigin+'/uncontrolled')});nodeRepl.write(JSON.stringify(true));`);await logs();
+   const crossCapture=session.browserLogs.owners.get(session.resourceOwners.get(session.worker)).get(tabId);
+   assert.equal([...crossCapture.children.values()].some(child=>child.targetId===updated.source.targetId),false,'Old-origin worker stayed attached');
+   await post(setup,'origin-away');await post(foreign,'cross-current');
+   await until(async()=>(await logs()).some(entry=>entry.message.endsWith(' cross-current')&&entry.url===foreignOrigin+'/service.js'),'New-origin worker output missing');
+   assert.equal((await logs()).some(entry=>entry.message.endsWith(' origin-away')||entry.message.includes('foreign-client')||entry.message.includes('foreign-later')),false,'Origin transition leaked inactive output or replayed history');
+   await run(`await tab.goto(${JSON.stringify(origin+'/controlled/app')});nodeRepl.write(JSON.stringify(true));`);await logs();await post(setup,'returned');
+   await until(async()=>(await logs()).some(entry=>entry.message==='service v2 returned'),'Returning origin did not reattach its worker');
+   assert.equal((await logs()).some(entry=>entry.message.endsWith(' origin-away')),false,'Returning origin replayed output from its absence');
+   assert.equal((await logs()).filter(entry=>entry.message==='service v2 same-origin-away').length,1,'Returning origin duplicated prior history');
    await session.endTurn();
    const fresh=await run(`nodeRepl.write(JSON.stringify(await tab.dev.logs()));`);assert.deepEqual(fresh,[],'A new turn replayed old service output');
    await run('await tab.markHandoff();await tab.playwright.getByRole("button",{name:"Later",exact:true}).click();nodeRepl.write(JSON.stringify(true));');
@@ -62,7 +76,7 @@ try{
    await session.reset();await run(`var tab=await cua.getTab(${JSON.stringify(tabId)});await tab.markHandoff();nodeRepl.write(JSON.stringify(true));`);assert.deepEqual(await logs(),[],'Reset replayed worker output');
    await run('await tab.playwright.getByRole("button",{name:"Unregister",exact:true}).click();nodeRepl.write(JSON.stringify(true));');
    await until(()=>evaluate(tabId,"document.querySelector('output').textContent==='unregistered'"),'Registration cleanup failed');
-   console.log(Session.name+' PASS related service-worker console/errors, cached history exclusion, shared-client identity/foreign-origin isolation, version replacement, turn/reset and fresh capture');
+   console.log(Session.name+' PASS related service-worker console/errors, cached history exclusion, shared-client identity/foreign-origin isolation, version replacement, same-origin scope/cross-origin return behavior, turn/reset and fresh capture');
   }finally{
    for(const id of [setup,foreign].filter(Boolean)){await evaluate(id,"navigator.serviceWorker.getRegistration('/controlled/').then(r=>r?.unregister())").catch(()=>{});await browser('Target.closeTarget',{targetId:id}).catch(()=>{});}
    await session.close();if(tabId)await browser('Target.closeTarget',{targetId:tabId}).catch(()=>{});

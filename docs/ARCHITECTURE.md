@@ -532,7 +532,10 @@ without pausing execution. Initial-target replay stays excluded; new iframe/
 dedicated-worker startup replay is retained. Every service-worker attachment
 excludes cached Runtime/Log history because that worker can predate the page
 association. Capture follows only the page-related graph. A service worker can
-serve other clients; source identifies its component rather than a client. Ancestor detachment cancels child initialization and retires descendants;
+serve other clients; source identifies its component rather than a client. Same-
+origin association can extend beyond registration scope. Origin navigation
+retires/rebinds the worker while retained records keep their original source.
+Ancestor detachment cancels child initialization and retires descendants;
 late events are ignored. Child setup failures remain target-local: active failed
 children fail reads explicitly, while retirement clears their error and preserves
 healthy root capture/history. Root transport failures keep their reconnect policy.
@@ -545,7 +548,10 @@ worker-forwarded Log duplicates are excluded.
 
 BrowserDebugger owns per-turn raw CDP connections, child-session graphs and bounded
 event cursors. It attaches related targets privately, routes explicit child
-selectors and rotates capture history at main-page origin changes. Discovery is
+selectors and rotates capture history at main-page origin changes. Network
+persistent-payload configuration is rejected before capture creation; regular
+request/response/post-body reads retain normal browser buffer behavior.
+Discovery is
 abortable and checked again before dispatch. Cancellation closes pending readers
 and debugger agents. Source and Worker hosts share this controller. Inner command
 deadlines preserve REPL bindings; only the actual JS execution-budget timer

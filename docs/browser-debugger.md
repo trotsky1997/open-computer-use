@@ -70,6 +70,12 @@ Debugger, Emulation, Fetch, Log, Network, Overlay, Page, Performance, Profiler,
 Runtime, Security and WebAudio domains. Security is limited to enable/disable.
 Browser/Target/Input, global cookie/cache commands, Network cookie-write methods, cookie URL or
 domain overrides, Network.loadNetworkResource and non-HTTP navigation are refused.
+Ordinary Network.enable buffer settings and enableDurableMessages:false remain
+available. Enabling durable messages and Network.configureDurableMessages are
+refused before connecting: renderer-independent response storage can retain old
+origin data after navigation. Read response/post bodies before navigating; the
+native fixture confirms old IDs are unavailable after same-site port and
+cross-site origin changes with ordinary Chromium buffering.
 This explicit provider policy still needs a broader reference-command matrix;
 matching the method signatures establishes only this implemented surface.
 
@@ -96,6 +102,7 @@ remain privileged.
 ```sh
 node --test scripts/node-repl/*.test.mjs
 OPEN_COMPUTER_USE_CDP_URL=http://127.0.0.1:9222 node scripts/run-cdp-smoke.mjs
+OPEN_COMPUTER_USE_CDP_URL=http://127.0.0.1:9222 node scripts/run-cdp-network-smoke.mjs
 OCU_TEST_CHROME_EXECUTABLE=/path/to/chrome node scripts/run-cdp-dialog-smoke.mjs
 ```
 
@@ -112,3 +119,8 @@ optional first argument selects an installed runtime. Both JS hosts cover root
 and out-of-process iframe sequential prompts, protocol return values, Page stream
 toggles, resumed expiry with retained REPL bindings, timeout-zero reset and an
 actual blocked-handshake socket closing before a fresh capture succeeds.
+
+The network fixture verifies refusal of both durable-payload paths before capture
+creation, ordinary request/response metadata, POST and response bodies, same-site
+port changes and cross-site origin invalidation, fresh requests and turn rebind in
+both engines. An optional first argument selects an installed runtime.
