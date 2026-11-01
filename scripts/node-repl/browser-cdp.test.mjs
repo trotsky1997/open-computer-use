@@ -217,13 +217,19 @@ test('log owner cleanup aborts actual stalled discovery and WebSocket handshake'
 });
 
 test('log capture owns diagnostics, metadata and descendant cancellation',async()=>{
- const {createServer}=await import('node:http'),{wsServer}=await import('playwright-core/lib/utilsBundle');let peer,blocked,detach=true,startupFailure=false;const released=[];
+ const {createServer}=await import('node:http'),{wsServer}=await import('playwright-core/lib/utilsBundle');let peer,blocked,serviceOwner,serviceEnabled=false,detach=true,startupFailure=false;const released=[];
  const server=createServer((_request,response)=>{response.setHeader('Content-Type','application/json');response.end(JSON.stringify([{id:'tab',type:'page',webSocketDebuggerUrl:`ws://127.0.0.1:${server.address().port}/socket`}]));}),sockets=new Set(),websockets=new wsServer({noServer:true});
  server.on('connection',socket=>{sockets.add(socket);socket.on('close',()=>sockets.delete(socket));socket.on('error',()=>{});});
  server.on('upgrade',(request,socket,head)=>websockets.handleUpgrade(request,socket,head,client=>{
   peer=client;client.on('message',data=>{const command=JSON.parse(data),emit=value=>client.send(JSON.stringify(value));
    if(command.method==='Runtime.releaseObject')released.push(command.params.objectId);
    if(command.sessionId==='failed'){emit({id:command.id,error:{message:'Inspected target navigated or closed'}});return;}
+   if(command.method==='Target.setAutoAttach'&&!command.sessionId)serviceEnabled=command.params.filter.some(item=>item.type==='service_worker'&&!item.exclude);
+   if(command.sessionId==='service'){
+    if(command.method==='Runtime.enable')emit({sessionId:'service',method:'Runtime.consoleAPICalled',params:{type:'log',timestamp:Date.now(),args:[{type:'object',description:'cached service console',objectId:'cached-service-console'}]}});
+    if(command.method==='Log.enable')emit({sessionId:'service',method:'Log.entryAdded',params:{entry:{source:'network',level:'warning',text:'cached service diagnostic',timestamp:Date.now(),args:[{objectId:'cached-service-diagnostic'}]}}});
+    emit({id:command.id,result:{}});return;
+   }
    if(command.method==='Target.setAutoAttach'&&!command.sessionId)emit({method:'Target.attachedToTarget',params:{sessionId:'parent',targetInfo:{targetId:'frame',type:'iframe'}}});
    if(command.method==='Runtime.enable'&&command.sessionId==='parent'){
     if(startupFailure){emit({id:command.id,error:{message:'Inspected target navigated or closed'}});return;}
@@ -265,5 +271,18 @@ test('log capture owns diagnostics, metadata and descendant cancellation',async(
   const starting=logs.start(otherOwner,'tab'),rejected=assert.rejects(starting,/session closed/);
   await observed;await logs.cleanup(otherOwner);await rejected;
 
- }finally{clearTimeout(timer);await logs.cleanup(owner);for(const socket of sockets)socket.destroy();websockets.close();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}
+  detach=true;serviceOwner={};await logs.start(serviceOwner,'tab');assert.equal(serviceEnabled,true);
+  const serviceEntry=logs.owners.get(serviceOwner).get('tab');
+  peer.send(JSON.stringify({method:'Target.attachedToTarget',params:{sessionId:'service',targetInfo:{targetId:'owned-service',type:'service_worker'}}}));
+  const serviceDeadline=Date.now()+1000;while(!serviceEntry.children.has('service')){assert.ok(Date.now()<serviceDeadline);await new Promise(setImmediate);}
+  await serviceEntry.children.get('service').ready;assert.deepEqual(await logs.read(serviceOwner,'tab'),[]);
+  peer.send(JSON.stringify({...diagnostic,params:{entry:{...diagnostic.params.entry,workerId:'owned-service',args:[]}}}));
+  peer.send(JSON.stringify({...diagnostic,sessionId:'service',params:{entry:{...diagnostic.params.entry,workerId:'owned-service',args:[{objectId:'service-diagnostic'}]}}}));
+  peer.send(JSON.stringify({...diagnostic,params:{entry:{...diagnostic.params.entry,workerId:'foreign-service',args:[]}}}));
+  const serviceLogs=await logs.read(serviceOwner,'tab');assert.equal(serviceLogs.length,2);
+  assert.ok(serviceLogs.every(item=>item.source.type==='service_worker'&&item.source.targetId==='owned-service'&&item.category==='network'&&item.networkRequestId==='request-owned'));
+  assert.ok(['cached-service-console','cached-service-diagnostic','service-diagnostic'].every(id=>released.includes(id)));
+  await logs.cleanup(serviceOwner);
+
+ }finally{clearTimeout(timer);if(serviceOwner)await logs.cleanup(serviceOwner);await logs.cleanup(owner);for(const socket of sockets)socket.destroy();websockets.close();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}
 });

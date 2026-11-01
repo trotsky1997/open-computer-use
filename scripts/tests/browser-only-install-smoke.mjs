@@ -96,6 +96,11 @@ if(process.argv[2]==='codex-plugin-config') { (await import('node:fs')).chmodSyn
   await new Promise((resolve,reject)=>{kernelBudget.once('error',reject);kernelBudget.once('exit',code=>code===0?resolve():reject(Error(kernelOutput)));});
   for(const line of kernelOutput.split('\n').filter(line=>line.includes('PASS')))console.log(line);
   console.log('PASS installed CPU-budget native input release and media recovery after source checkout removal');
+  const serviceLogs=spawn(process.execPath,[path.join(source,'scripts/run-service-worker-logs-smoke.mjs'),installed],{env,stdio:['ignore','pipe','pipe']});let serviceOutput='';
+  serviceLogs.stdout.on('data',chunk=>{serviceOutput+=chunk;});serviceLogs.stderr.on('data',chunk=>{serviceOutput+=chunk;});
+  await new Promise((resolve,reject)=>{serviceLogs.once('error',reject);serviceLogs.once('exit',code=>code===0?resolve():reject(Error(serviceOutput)));});
+  for(const line of serviceOutput.split('\n').filter(line=>line.includes('PASS')))console.log(line);
+  console.log('PASS installed related service-worker logs after source checkout removal');
   const consoleLogs=spawn(process.execPath,[path.join(source,'scripts/run-console-smoke.mjs'),installed],{env,stdio:['ignore','pipe','pipe']});let consoleOutput='';
   consoleLogs.stdout.on('data',chunk=>{consoleOutput+=chunk;});consoleLogs.stderr.on('data',chunk=>{consoleOutput+=chunk;});
   await new Promise((resolve,reject)=>{consoleLogs.once('error',reject);consoleLogs.once('exit',code=>code===0?resolve():reject(Error(consoleOutput)));});

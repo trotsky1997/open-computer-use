@@ -2830,3 +2830,35 @@ pass. Ten modules match both npm copies; macOS browser/raw CDP regressions pass.
 The full headful suite was not repeated for this local state transition change.
 Windows, OS sandboxing and broader host-crash recovery remain open; parity stays
 active. No dependency or CI added.
+
+
+## Related service-worker developer logs
+
+The live reference tab CDP documentation was checked on an owned blank in-app
+page; its send/readEvents surface matches the existing API. An owned Chromium
+probe reports a page-related service_worker but no shared_worker. Existing
+logging omits that service worker. The capture filter now includes page-related
+service workers and preserves their source type, including worker-ID diagnostics.
+No browser-wide worker attachment or new model-facing capability is added.
+
+Every service-worker attachment starts with cached Runtime/Log replay excluded:
+the worker can predate this page association. A native counterexample confirmed
+that enabling only the target filter leaked pre-capture output on navigation to
+an existing registration's scope. The completed fixture verifies cached-history
+exclusion, fresh console and uncaught/rejected errors, same-worker output from
+another client, foreign-origin non-attachment and fresh-output exclusion, worker
+version replacement, turn/reset cleanup and fresh capture. A protocol fixture
+covers worker-ID routing, cached replay and remote-handle release.
+
+Node: 231/231 macOS, 230/231 Linux (one platform skip). Both engines pass native
+source and source-relocated installed fixtures on both platforms, with existing
+console/exception/diagnostic regressions. Ten installed modules and both npm
+runtime copies match source. macOS ordinary browser and both-platform raw CDP
+regressions pass. The full headful/MCP suite was not repeated for this local
+passive-capture extension; its installation smoke now includes the service-worker
+fixture. Shared-worker capture, pre-attachment service-worker output, complete
+network traces, physical/Windows providers and broader crash recovery remain
+open. Full harness parity stays active.
+
+The implementation follows the related-target graph described by Chromium's
+[Target protocol](https://github.com/ChromeDevTools/devtools-protocol/blob/master/pdl/domains/Target.pdl).

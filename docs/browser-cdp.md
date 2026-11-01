@@ -428,7 +428,8 @@ nodeRepl.write(await tab.dev.logs({levels:["warn", "error"], limit:20}));
 `dev.logs({filter?, levels?, limit?})` returns retained console messages, uncaught JavaScript exceptions and native browser diagnostics with
 `level`, `message`, ISO `timestamp`, `category`, `source:{type,targetId}` and a source `url`
 when Chromium provides one. Root pages, related out-of-process iframes and
-dedicated workers (including nested workers) share the buffer. Reads order
+dedicated workers (including nested workers), and page-related service workers
+share the buffer. Reads order
 retained entries by timestamp; equal timestamps keep delivery order.
 `category` is `console`, `exception`, or Chromium's native Log source, such as
 `network`, `security`, `javascript`, `deprecation` or `other`. Native levels
@@ -438,7 +439,8 @@ target to correlate raw CDP Network events. Network entries are browser-emitted
 diagnostics. Use raw CDP Network for complete request/response traces and bodies;
 Chromium's Log stream can omit ordinary worker fetch HTTP failures.
 
-Root, related iframe and dedicated-worker agents enable Log beside Runtime.
+Root, related iframe, dedicated-worker and page-related service-worker agents
+enable Log beside Runtime.
 Worker-forwarded Log messages are omitted to keep Runtime console/error capture
 from being duplicated. Owned-worker diagnostic identities are checked against
 the captured graph. Unused protocol object handles are released; retained logs
@@ -458,7 +460,13 @@ later leaves the retained historical entry intact.
 Initial tab binding enables Runtime on the root and existing related targets,
 excludes their cached replay and waits for setup before starting active capture.
 Older console and exception history from targets present at binding is
-excluded. New targets attached during capture can replay their startup messages.
+excluded. New iframe/dedicated-worker targets attached during capture can replay
+their startup messages. Service workers can predate their association with this
+page: every service-worker attachment excludes Runtime/Log cached history, so
+messages emitted before setup can be unavailable. Capture uses only the page
+auto-attachment graph; no browser-wide worker discovery or attachment is added.
+Service workers can serve multiple clients. Their entries identify the worker
+component, without claiming a particular client emitted the message.
 Attachment stays passive: a short-lived target can exit before observation starts. The host holds the observer across JS
 calls and main-frame navigation, scoped to the owning JS session and tab. Rebinding a
 live tab in that session reuses capture. A fresh session starts a fresh buffer.
@@ -473,7 +481,7 @@ code: object payloads use Chromium's shallow previews/descriptions and printf
 placeholders are formatted from protocol values.
 
 Retention is bounded to 1,000 entries per session/tab and 16,384 UTF-16 code units per
-rendered message. DOM nodes, object graphs and tables are shallow descriptions. Shared/service-worker
+rendered message. DOM nodes, object graphs and tables are shallow descriptions. Shared-worker
 messages, complete network tracing and broader browser diagnostic-provider
 coverage remain outside this implementation. Related child sessions are recursively attached and removed
 with their detached ancestor; pending child setup is canceled and late events
@@ -485,6 +493,12 @@ checks root/OOP failed resources, CSP and policy warnings, worker CSP refusal,
 console/exception categories, source URLs, filtering, retention, cross-call
 and navigation capture, session isolation and reset/timeout/close/startup cleanup
 using a disposable Chrome and local page.
+
+`OPEN_COMPUTER_USE_CDP_URL=http://127.0.0.1:9222 node scripts/run-service-worker-logs-smoke.mjs`
+checks related service-worker console and exception output, old-history refusal,
+worker version replacement, shared-client identity, foreign-origin non-attachment
+and new-output exclusion, turn/reset cleanup and fresh capture. Use a disposable
+browser. An optional first argument selects an installed runtime.
 
 ## JavaScript dialogs
 

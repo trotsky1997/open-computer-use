@@ -349,3 +349,26 @@ pass. Ten modules match both npm copies; macOS browser/raw CDP regressions pass.
 The full headful suite was not repeated for this local state transition change.
 Windows, OS sandboxing and broader host-crash recovery remain open; parity stays
 active. No dependency or CI added.
+
+
+### Related service-worker logs
+
+Passive log capture now includes page-related service workers, retains their
+source identity and routes native worker-ID diagnostics to that source. Every
+service-worker attachment excludes cached Runtime/Log replay, including workers
+that become related after binding. A native counterexample reproduced old output
+leaking when only the attachment filter was expanded. The observer continues to
+follow the page graph; it adds no browser-wide worker attachment. Shared clients
+can emit through one service worker, so entries identify the worker component.
+
+Node: 231/231 macOS, 230/231 Linux (one platform skip). Both engines pass source
+and source-relocated installed macOS/Linux console/exception/replay/version-update/
+turn/reset fixtures, including same-worker client sharing and foreign-origin
+non-attachment plus new-output isolation. The real-WebSocket fixture verifies
+worker-ID metadata, initial replay exclusion and remote-handle release. Existing
+console/diagnostic capture and both-platform raw CDP regressions pass; macOS
+ordinary browser regression passes. Ten installed modules and both npm runtime
+copies match source. The full headful/MCP suite was not repeated; the installation
+smoke now invokes the new service-worker fixture. Shared-worker capture,
+pre-attachment service-worker output, full network tracing and broader physical/
+Windows/crash coverage remain open. No dependency or CI added; parity stays active.
