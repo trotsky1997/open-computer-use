@@ -1,10 +1,15 @@
 import assert from 'node:assert/strict';
 import {createServer} from 'node:http';
-import {WorkerJavaScriptSession,PersistentJavaScriptSession,JsonLinePeer} from './node-repl/open-computer-use-repl.mjs';
-import {withConnection} from './node-repl/browser-cdp.mjs';
+import path from 'node:path';
+import {fileURLToPath,pathToFileURL} from 'node:url';
+const installed=process.argv.slice(2).find(arg=>!arg.startsWith('--'));
+const runtimeURL=name=>installed?pathToFileURL(path.resolve(installed,'scripts',name)):new URL('./node-repl/'+name,import.meta.url);
+const {WorkerJavaScriptSession,PersistentJavaScriptSession,JsonLinePeer}=await import(runtimeURL('open-computer-use-repl.mjs'));
+const {withConnection}=await import(runtimeURL('browser-cdp.mjs'));
 const endpoint=process.env.OPEN_COMPUTER_USE_CDP_URL;
 if(!endpoint) throw Error('Set OPEN_COMPUTER_USE_CDP_URL to disposable Chrome');
-const server=createServer((req,res)=>{res.setHeader('Content-Type','text/html');res.end(`<!doctype html><title>Turn ${req.url}</title><button onclick="window.open('/child')">Popup</button><button onclick="window.open('/grandchild')">Grandchild</button><input aria-label="Typing"><output>[]</output><script>const events=[];for(const type of ['keydown','keyup'])document.addEventListener(type,e=>{events.push({type,key:e.key,shift:e.shiftKey,trusted:e.isTrusted});document.querySelector('output').textContent=JSON.stringify(events)});</script>`);});
+let allowKernelExit;
+const server=createServer((req,res)=>{if(req.url==='/kernel-exit'){allowKernelExit=()=>res.end('exit');return;}res.setHeader('Content-Type','text/html');res.end(`<!doctype html><title>Turn ${req.url}</title><button onclick="window.open('/child')">Popup</button><button onclick="window.open('/grandchild')">Grandchild</button><input aria-label="Typing"><output>[]</output><script>const events=[];for(const type of ['keydown','keyup'])document.addEventListener(type,e=>{events.push({type,key:e.key,shift:e.shiftKey,trusted:e.isTrusted});document.querySelector('output').textContent=JSON.stringify(events)});</script>`);});
 await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
 const url=`http://127.0.0.1:${server.address().port}/`;
 const version=await(await fetch(new URL('/json/version',endpoint))).json();
@@ -37,6 +42,31 @@ try {
  assert.equal(await run(`await new Promise(resolve=>setTimeout(resolve,300));await handoff.getAXState({emit:false});await delivered.markDeliverable();nodeRepl.write(JSON.stringify(sentinel));`),42);
  assert.equal((await events(handoff)).length,0,'A prior-turn timer emitted input');
  await session.endTurn();assert.equal((await ids()).has(handoff),false);assert.equal((await ids()).has(delivered),true);assert.equal((await ids()).has(user),true);
+ for(const phase of ['during','after']){
+  const retained=await run(`var retained=await cua.createBrowserTab('cdp',${JSON.stringify(url)},{visible:false});await retained.markHandoff();var lostMarker=17;nodeRepl.write(JSON.stringify(retained.id));`);
+  const kernel=session.worker,exited=new Promise(resolve=>kernel.once('exit',resolve));let release,notify;
+  const entered=new Promise(resolve=>notify=resolve),holdCleanup=()=>{notify();return new Promise(resolve=>release=resolve);};
+  allowKernelExit=undefined;
+  try{
+   await run(`void fetch(${JSON.stringify(url+'kernel-exit')}).then(()=>process.exit(23));nodeRepl.write(JSON.stringify(true));`);
+   await waitFor(()=>allowKernelExit);
+   if(phase==='during')native.endSession=holdCleanup;
+   const ending=session.endTurn();if(phase==='after'){await ending;native.endSession=holdCleanup;}
+   allowKernelExit();await exited;await entered;
+   let next,settled=false;
+   if(phase==='after'){
+    next=run('nodeRepl.write(JSON.stringify(typeof lostMarker));').then(result=>{settled=true;return result;});
+    await new Promise(setImmediate);await new Promise(setImmediate);assert.equal(settled,false,'Next turn bypassed cleanup');
+   }
+   assert.equal(session.worker===kernel,true,'A kernel restarted before cleanup settled');
+   release();await ending;native.endSession=undefined;
+   assert.equal(await(next??run('nodeRepl.write(JSON.stringify(typeof lostMarker));')),'undefined');
+  }finally{allowKernelExit?.();allowKernelExit=undefined;release?.();native.endSession=undefined;}
+  assert.equal(await run(`var recovered=await cua.getTab(${JSON.stringify(retained)});await recovered.playwright.getByLabel('Typing').fill('recovered');await recovered.pressKey(null,'a');nodeRepl.write(JSON.stringify(await recovered.playwright.getByLabel('Typing').inputValue()));`),'recovereda');
+  assert.ok((await events(retained)).some(event=>event.key==='a'&&event.trusted));
+  await run('await recovered.close();nodeRepl.write(JSON.stringify(true));');
+  console.log(Session.name+' PASS kernel loss '+phase+' idle turn cleanup, first-call fresh namespace and retained-tab trusted input recovery');
+ }
  const background=await run(`var background=await cua.createBrowserTab('cdp',${JSON.stringify(url)},{visible:false});await background.markHandoff();void background.pressKey(null,'shift',{durationMs:30000}).catch(()=>{});nodeRepl.write(JSON.stringify(background.id));`);
  await waitFor(async()=> (await events(background)).some(event=>event.type==='keydown'));
  await session.endTurn();assert.equal((await events(background)).at(-1).shift,false);
@@ -66,7 +96,7 @@ try {
    await source.reset();assert.equal((await ids()).has(sourceId),true);
  } finally {await source.close();}
  assert.equal((await ids()).has(sourceId),false);
- peer=new JsonLinePeer({command:process.execPath,args:[new URL('./node-repl/open-computer-use-repl.mjs',import.meta.url).pathname,'--','/missing-turn-native','mcp']});await peer.initialize();
+ peer=new JsonLinePeer({command:process.execPath,args:[fileURLToPath(runtimeURL('open-computer-use-repl.mjs')),'--','/missing-turn-native','mcp']});await peer.initialize();
  let response=await peer.request('tools/call',{name:'js',arguments:{code:`var tab=await cua.createBrowserTab('cdp',${JSON.stringify(url)},{visible:false});await tab.markHandoff();var sentinel=9;nodeRepl.write(JSON.stringify(tab.id));`}});assert.equal(response.isError,false);const mcpId=JSON.parse(response.content.at(-1).text);
  peer.notify('notifications/turn-ended');
  response=await peer.request('tools/call',{name:'js',arguments:{code:'nodeRepl.write(JSON.stringify(sentinel));'}});assert.equal(response.isError,false,JSON.stringify(response));assert.equal(JSON.parse(response.content.at(-1).text),9);

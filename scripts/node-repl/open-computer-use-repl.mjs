@@ -987,6 +987,7 @@ export class WorkerJavaScriptSession {
     this.browserCdp=HOST_BROWSER_CDP;
     this.browserViewport = HOST_BROWSER_VIEWPORT;
     this.stoppingWorkers = new WeakMap();
+    this.stoppedKernels = new WeakMap();
     this.#start();
   }
 
@@ -1008,11 +1009,18 @@ export class WorkerJavaScriptSession {
     BROWSER_FAILURE_HANDLERS.set(owner,error=>void this.#workerFailed(worker,error));
   }
 
-  #stop(worker) {
-    if(!this.stoppingWorkers.has(worker)) {
+  #terminate(worker) {
+    if(!this.stoppedKernels.has(worker)) {
       this.invalidatedWorkers.add(worker);
       for(const pending of this.pending.values()) if(pending.worker===worker) clearTimeout(pending.timer);
-      this.stoppingWorkers.set(worker,releaseResources(this,this.resourceOwners.get(worker),worker.terminate()).catch(error=>{this.stoppingWorkers.delete(worker);throw error;}));
+      const stopped=Promise.resolve().then(()=>worker.terminate());stopped.catch(()=>{});
+      this.stoppedKernels.set(worker,stopped);
+    }
+    return this.stoppedKernels.get(worker);
+  }
+  #stop(worker) {
+    if(!this.stoppingWorkers.has(worker)) {
+      this.stoppingWorkers.set(worker,releaseResources(this,this.resourceOwners.get(worker),this.#terminate(worker)).catch(error=>{this.stoppingWorkers.delete(worker);throw error;}));
     }
     return this.stoppingWorkers.get(worker);
   }
@@ -1023,17 +1031,20 @@ export class WorkerJavaScriptSession {
     this.turnGeneration++;this.turnEnding=true;
     const active=[...this.pending.values()].some(pending=>pending.worker===worker) || [...this.browserDialogs.waiters.values()].some(watch=>watch.owner===owner);
     const released=active || final || this.invalidatedWorkers.has(worker) ? this.#stop(worker) : releaseResources(this,owner);
-    this.endingTurn=released.then(()=>this.browserTabs.end(this,{final})).then(()=>{
+    this.endingTurn=released.then(()=>this.browserTabs.end(this,{final})).then(async()=>{
+      await this.stoppedKernels.get(worker);
       this.turnEnded=true;this.turnEnding=false;
     }).finally(()=>{this.#failWorker(worker,new Error('Execution turn ended'));this.endingTurn=undefined;});
     this.turnBarrier=this.endingTurn;this.turnBarrier.catch(()=>{});return this.turnBarrier;
   }
 
   async #workerFailed(worker, error) {
-    if (this.invalidatedWorkers.has(worker) || this.turnEnding) return;
+    if (this.invalidatedWorkers.has(worker)) return;
     this.turnGeneration++;
+    if(this.turnEnding){this.#terminate(worker);return;}
     try {
-      await this.#stop(worker);
+      const cleanup=this.#stop(worker);this.turnBarrier=cleanup;
+      await cleanup;
       if (this.worker === worker && !this.closed && !this.turnEnding && !this.turnEnded) this.#start();
     } catch (cleanupError) { error = new Error(`${asError(error).message}; browser cleanup failed: ${asError(cleanupError).message}`); }
     this.#failWorker(worker, error);

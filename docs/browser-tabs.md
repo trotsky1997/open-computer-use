@@ -53,6 +53,11 @@ async evaluations reject and discard their REPL context. Timeouts wait for reset
 cleanup before returning; failed cleanup blocks reuse and can be retried with
 `reset()` or `endTurn()`. Source-session reset keeps logical tab ownership.
 
+A kernel lost during idle turn cleanup is invalidated immediately; the turn joins
+its termination before completing. Loss between turns also puts the next call
+behind resource cleanup. Successful cleanup permits a fresh evaluator on that
+first call while retaining marked tabs; failed cleanup continues to block reuse.
+
 Both public session types enforce active-call budgets outside the evaluator.
 The thread or process kernel can be terminated even during a synchronous or
 post-await CPU loop. Managed input is canceled and its releases acknowledged
@@ -74,7 +79,10 @@ OPEN_COMPUTER_USE_CDP_URL=http://127.0.0.1:9222 node scripts/run-turn-smoke.mjs 
 Use disposable Chrome. The live smoke checks user preservation, popup ancestry,
 latest marks, resuming/re-marking, stale callback denial, held-key and viewport
 cleanup, retained close failures and retry, direct source reset/close/turns and timeout release barriers, and the real MCP
-notification path. Other feature fixtures explicitly retain pages that
+notification path, plus kernel loss during/after idle cleanup with fresh-context
+and retained-tab trusted input recovery. Pass an installed runtime directory as
+an optional positional argument to exercise its JS and MCP entry points. Other
+feature fixtures explicitly retain pages that
 they inspect after session close, and close those disposable pages afterward.
 
 

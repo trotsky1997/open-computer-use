@@ -708,3 +708,36 @@ for(const Session of [PersistentJavaScriptSession,WorkerJavaScriptSession])test(
  const kill=process.kill;process.kill=function(pid,...args){if(kernel.pid&&pid===-kernel.pid)throw Error('Repeated termination signaled a retired process group');return Reflect.apply(kill,process,[pid,...args]);};
  try{await kernel.terminate();}finally{process.kill=kill;}
 });
+
+for(const Session of [PersistentJavaScriptSession,WorkerJavaScriptSession])test(`${Session.name}: kernel loss during idle turn cleanup recovers before the next call`,async()=>{
+ const native=mockNative(),session=trackedSession(Session,{native});
+ await session.run('var sentinel=17;setTimeout(()=>process.exit(23),80);',5000);
+ let release,releaseStop,notifyStop,cleanups=0;
+ const cleanup=new Promise(resolve=>release=resolve),stopped=new Promise(resolve=>releaseStop=resolve),terminating=new Promise(resolve=>notifyStop=resolve);
+ native.endSession=()=>{cleanups++;return cleanup;};const kernel=session.worker,terminate=kernel.terminate.bind(kernel);
+ kernel.terminate=async()=>{notifyStop();await terminate();await stopped;};
+ const exited=new Promise(resolve=>kernel.once('exit',resolve));let settled=false;
+ const ending=session.endTurn().then(()=>{settled=true;}),queued=session.run('nodeRepl.write("old")',5000);
+ try{
+  await exited;await terminating;release();await new Promise(setImmediate);await new Promise(setImmediate);
+  assert.equal(settled,false,'Turn ended before kernel termination settled');assert.equal(cleanups,1);
+  releaseStop();await ending;native.endSession=undefined;assert.equal((await queued).isError,true);
+  const result=await session.run('nodeRepl.write(typeof sentinel)',5000);
+  assert.equal(result.isError,false,result.content.at(-1)?.text);assert.equal(result.content.at(-1).text,'undefined');
+ }finally{release();releaseStop();native.endSession=undefined;await ending;}
+});
+
+for(const Session of [PersistentJavaScriptSession,WorkerJavaScriptSession])test(`${Session.name}: idle kernel failure keeps new calls behind cleanup`,async()=>{
+ const native=mockNative(),session=trackedSession(Session,{native});
+ await session.run('var sentinel=17;setTimeout(()=>process.exit(23),120);',5000);await session.endTurn();
+ let release,notify;const entered=new Promise(resolve=>notify=resolve),cleanup=new Promise(resolve=>release=resolve);
+ native.endSession=()=>{notify();return cleanup;};
+ try{
+  await entered;const kernel=session.worker;let settled=false;
+  const next=session.run('nodeRepl.write(typeof sentinel)',5000).then(result=>{settled=true;return result;});
+  await new Promise(setImmediate);await new Promise(setImmediate);
+  assert.equal(session.worker===kernel,true,'New kernel started before cleanup settled');assert.equal(settled,false);
+  release();native.endSession=undefined;const result=await next;
+  assert.equal(result.isError,false,result.content.at(-1)?.text);assert.equal(result.content.at(-1).text,'undefined');
+ }finally{release();native.endSession=undefined;}
+});

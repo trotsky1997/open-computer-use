@@ -2809,3 +2809,24 @@ Node code retains host-user privileges. OS sandboxing, Windows process-tree,
 joint host/supervisor crashes, browser/clipboard host-crash recovery and broader
 physical/native work remain open. No new dependency, CI or release is planned for
 this change; full harness parity remains active.
+
+
+## Kernel loss during and after idle turn cleanup
+
+Real-kernel counterexamples reproduce two failures: an exit during idle turn
+cleanup is ignored, so the next call reports Channel closed or times out; an exit
+after the turn lets a new evaluator run before failed-kernel cleanup settles.
+Termination is now memoized separately from retryable resource cleanup. Lost
+kernels invalidate immediately, ongoing turn completion joins termination, and
+new calls await the failure-cleanup barrier. Healthy idle bindings remain live.
+
+Node checks: 231/231 macOS, 230/231 Linux (one platform skip). Both engines verify
+queued-call fencing, no early turn completion/restart and first-call fresh state.
+Source and source-relocated installed macOS/Linux native fixtures use an owned
+HTTP gate to cause actual kernel exits during/after idle cleanup, then verify
+first-call fresh state, retained tab rebinding and trusted native input. Real MCP
+turn-ended, existing ownership/retry, CPU held-key release and PNG recovery checks
+pass. Ten modules match both npm copies; macOS browser/raw CDP regressions pass.
+The full headful suite was not repeated for this local state transition change.
+Windows, OS sandboxing and broader host-crash recovery remain open; parity stays
+active. No dependency or CI added.

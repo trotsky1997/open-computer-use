@@ -516,7 +516,10 @@ a source-session child process. A source supervisor relays IPC without evaluatin
 model code, so host IPC loss can kill a busy evaluator. Host budgets terminate
 synchronous and post-await CPU loops. Reset, timeout, kernel loss and turn
 boundaries fence queued calls; later close/endTurn prevents automatic restart.
-Idle turns retain bindings while interrupted contexts are discarded. Node code
+Idle turns retain live bindings while interrupted contexts are discarded. Kernel
+loss during idle cleanup invalidates the evaluator immediately; turn completion
+joins termination separately from resource cleanup. Loss between turns makes new
+calls await resource cleanup before a replacement evaluator can run. Node code
 keeps the host user’s privileges; this execution boundary adds no OS sandbox.
 
 BrowserConsoleLogs owns per-session/tab Runtime and Log observers. Console,
